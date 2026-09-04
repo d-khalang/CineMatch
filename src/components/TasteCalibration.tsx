@@ -382,10 +382,15 @@ export const TasteCalibration: React.FC = () => {
                 onClick={() => setSelectedMovieForModal(movie)}
                 className={`group relative flex flex-col rounded-2xl overflow-hidden glass-panel glass-panel-hover cursor-pointer border transition-all duration-300 ${
                   isPendingRemoval
-                    ? 'ring-2 ring-indigo-400 border-indigo-400 shadow-xl shadow-indigo-950/80 scale-[1.01] bg-slate-900/90'
+                    ? 'animate-pulse-glow bg-slate-900/95'
                     : 'border-slate-800/80'
                 }`}
               >
+                {/* Active Pending Grace Indicator Strip */}
+                {isPendingRemoval && (
+                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-400 via-indigo-400 to-purple-400 animate-shimmer z-30 shadow-md shadow-indigo-500/50" />
+                )}
+
                 {/* Poster Box */}
                 <div className="relative aspect-[2/3] w-full bg-slate-900 overflow-hidden">
                   {posterUrl ? (
@@ -409,13 +414,13 @@ export const TasteCalibration: React.FC = () => {
                     <div
                       className={`absolute top-2 left-2 z-10 px-2.5 py-1 rounded-md text-[11px] font-bold shadow-lg shadow-indigo-950 border transition-all ${
                         isPendingRemoval
-                          ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 text-white border-emerald-400/50 animate-pulse flex items-center gap-1'
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-black border-emerald-300 shadow-emerald-950/80 flex items-center gap-1'
                           : 'bg-indigo-600 text-white border-indigo-400/40'
                       }`}
                     >
                       {isPendingRemoval ? (
                         <>
-                          <CheckCircle2 className="w-3 h-3 text-emerald-300" />
+                          <CheckCircle2 className="w-3 h-3 text-slate-950 stroke-[2.5]" />
                           <span>Rated: {userRating}/10</span>
                         </>
                       ) : (
@@ -474,8 +479,10 @@ export const TasteCalibration: React.FC = () => {
                   {/* 1-10 Rating Control */}
                   <div className="pt-1 border-t border-slate-800/60 space-y-1">
                     {isPendingRemoval && (
-                      <div className="flex items-center justify-between text-[10px] text-indigo-200 bg-indigo-950/70 px-2 py-0.5 rounded border border-indigo-500/30 animate-pulse">
-                        <span className="font-semibold">✓ Grade saved! Hiding soon...</span>
+                      <div className="flex items-center justify-between text-[11px] text-white bg-gradient-to-r from-indigo-900 via-purple-900 to-indigo-900 px-2.5 py-1.5 rounded-lg border border-indigo-400 shadow-lg shadow-indigo-950">
+                        <span className="font-bold flex items-center gap-1.5 text-emerald-300">
+                          ✓ Grade saved! Hiding soon...
+                        </span>
                       </div>
                     )}
 

@@ -264,12 +264,17 @@ export const RankedFeed: React.FC = () => {
                 key={movie.id}
                 className={`group relative flex flex-col md:flex-row gap-4 sm:gap-6 rounded-2xl sm:rounded-3xl p-4 sm:p-5 glass-panel glass-panel-hover border transition-all duration-300 overflow-hidden ${
                   isPendingRemoval
-                    ? 'ring-2 ring-indigo-400 border-indigo-400 shadow-xl shadow-indigo-950/80 bg-slate-900/95 scale-[1.01]'
+                    ? 'animate-pulse-glow bg-slate-900/95'
                     : serendipityType === 'ai_cinephile_discovery'
                     ? 'border-purple-500/40 shadow-lg shadow-purple-950/20 ring-1 ring-purple-500/30 bg-slate-950/90'
                     : 'border-slate-800'
                 }`}
               >
+                {/* Active Pending Grace Indicator Strip */}
+                {isPendingRemoval && (
+                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-400 via-indigo-400 to-purple-400 animate-shimmer z-30 shadow-md shadow-indigo-500/50" />
+                )}
+
                 {/* Rank Number Badge */}
                 <div
                   className={`absolute top-4 left-4 z-10 w-9 h-9 rounded-xl flex items-center justify-center text-sm border shadow-lg ${getRankBadgeStyle(
@@ -428,10 +433,9 @@ export const RankedFeed: React.FC = () => {
                   <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="w-full sm:max-w-md space-y-1">
                       {isPendingRemoval && (
-                        <div className="flex items-center justify-between text-[10px] text-indigo-200 bg-indigo-950/70 px-2.5 py-0.5 rounded border border-indigo-500/30 animate-pulse">
-                          <span className="font-semibold flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                            Grade saved! Hiding soon...
+                        <div className="flex items-center justify-between text-[11px] text-white bg-gradient-to-r from-indigo-900 via-purple-900 to-indigo-900 px-2.5 py-1.5 rounded-lg border border-indigo-400 shadow-lg shadow-indigo-950">
+                          <span className="font-bold flex items-center gap-1.5 text-emerald-300">
+                            ✓ Grade saved! Hiding soon...
                           </span>
                         </div>
                       )}
