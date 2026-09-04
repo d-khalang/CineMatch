@@ -68,7 +68,7 @@ export const RankedFeed: React.FC = () => {
         return next;
       });
       delete pendingTimersRef.current[movie.id];
-    }, 2500);
+    }, 4000);
   };
 
   const handleClearRecommendedMovie = (movieId: number) => {
@@ -428,10 +428,10 @@ export const RankedFeed: React.FC = () => {
                   <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="w-full sm:max-w-md space-y-1">
                       {isPendingRemoval && (
-                        <div className="flex items-center justify-between text-[10px] text-indigo-200 bg-indigo-950/70 px-2 py-0.5 rounded border border-indigo-500/30 animate-pulse">
+                        <div className="flex items-center justify-between text-[10px] text-indigo-200 bg-indigo-950/70 px-2.5 py-0.5 rounded border border-indigo-500/30 animate-pulse">
                           <span className="font-semibold flex items-center gap-1">
                             <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                            Grade saved! Adjust or leaves queue in 2s...
+                            Grade saved! Hiding soon...
                           </span>
                         </div>
                       )}

@@ -105,7 +105,7 @@ export const TasteCalibration: React.FC = () => {
           return next;
         });
         delete pendingTimersRef.current[movie.id];
-      }, 2500);
+      }, 4000);
     }
   };
 
@@ -475,7 +475,7 @@ export const TasteCalibration: React.FC = () => {
                   <div className="pt-1 border-t border-slate-800/60 space-y-1">
                     {isPendingRemoval && (
                       <div className="flex items-center justify-between text-[10px] text-indigo-200 bg-indigo-950/70 px-2 py-0.5 rounded border border-indigo-500/30 animate-pulse">
-                        <span className="font-semibold">✓ Grade saved! Adjust or hiding soon...</span>
+                        <span className="font-semibold">✓ Grade saved! Hiding soon...</span>
                       </div>
                     )}
 
