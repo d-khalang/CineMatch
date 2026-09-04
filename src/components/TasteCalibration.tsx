@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Sparkles, Search, Loader2, ArrowRight, CheckCircle2, SlidersHorizontal, Flame, Award, Brain, Clapperboard, Compass, Smile, Bookmark, BookmarkCheck, Shuffle, Eye, EyeOff } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useMovieStore } from '../store/useMovieStore';
@@ -20,6 +20,17 @@ export const TasteCalibration: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResults, setSearchResults] = useState<Movie[] | null>(null);
   const [isSearching, setIsSearching] = useState<boolean>(false);
+
+  // Grace-period for rated movies: keeps card visible & fully interactive with a pulse before auto-hiding
+  const [pendingRemovalIds, setPendingRemovalIds] = useState<Record<number, boolean>>({});
+  const pendingTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+
+  // Clean up all pending removal timers on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(pendingTimersRef.current).forEach((timer) => clearTimeout(timer));
+    };
+  }, []);
 
   const ratedCount = Object.keys(ratings).length;
   const isProfileReady = ratedCount >= 3;
@@ -75,6 +86,38 @@ export const TasteCalibration: React.FC = () => {
         origin: { y: 0.8 },
       });
     }
+
+    // If hideRated is active, give the user a 2.5s grace window with a pulsing confirmation
+    // so they can verify their click, feel confident, or adjust the grade before it leaves the grid.
+    if (hideRated) {
+      if (pendingTimersRef.current[movie.id]) {
+        clearTimeout(pendingTimersRef.current[movie.id]);
+      }
+      setPendingRemovalIds((prev) => ({ ...prev, [movie.id]: true }));
+
+      pendingTimersRef.current[movie.id] = setTimeout(() => {
+        setPendingRemovalIds((prev) => {
+          const next = { ...prev };
+          delete next[movie.id];
+          return next;
+        });
+        delete pendingTimersRef.current[movie.id];
+      }, 2500);
+    }
+  };
+
+  const handleClearRating = (movieId: number) => {
+    // If the movie was in its grace period, cancel the removal timer
+    if (pendingTimersRef.current[movieId]) {
+      clearTimeout(pendingTimersRef.current[movieId]);
+      delete pendingTimersRef.current[movieId];
+    }
+    setPendingRemovalIds((prev) => {
+      const next = { ...prev };
+      delete next[movieId];
+      return next;
+    });
+    removeRating(movieId);
   };
 
   const handleShuffle = () => {
@@ -97,10 +140,12 @@ export const TasteCalibration: React.FC = () => {
     }
   }, [ratings, hideRated, searchResults, isLoading, isShuffling, hasMore, movies, activeCategory, page, fetchCategoryMovies]);
 
-  // Search results are 100% uncapped; browse grid applies hideRated filter
+  // Search results are 100% uncapped; browse grid applies hideRated filter but retains pending removal items during grace window
   const displayedMovies = searchResults !== null
     ? searchResults
-    : (hideRated ? movies.filter((m) => !ratings[m.id]) : movies);
+    : (hideRated
+        ? movies.filter((m) => !ratings[m.id] || Boolean(pendingRemovalIds[m.id]))
+        : movies);
 
   const getCategoryIcon = (iconName: string) => {
     switch (iconName) {
@@ -324,12 +369,17 @@ export const TasteCalibration: React.FC = () => {
             const inWatchlist = watchlist.includes(movie.id);
             const posterUrl = movie.poster_path ? `${IMAGE_BASE_URL}${movie.poster_path}` : null;
             const year = movie.release_date ? movie.release_date.slice(0, 4) : '';
+            const isPendingRemoval = Boolean(pendingRemovalIds[movie.id]);
 
             return (
               <div
                 key={movie.id}
                 onClick={() => setSelectedMovieForModal(movie)}
-                className="group relative flex flex-col rounded-2xl overflow-hidden glass-panel glass-panel-hover cursor-pointer border border-slate-800/80"
+                className={`group relative flex flex-col rounded-2xl overflow-hidden glass-panel glass-panel-hover cursor-pointer border transition-all duration-300 ${
+                  isPendingRemoval
+                    ? 'ring-2 ring-indigo-400 border-indigo-400 shadow-xl shadow-indigo-950/80 scale-[1.01] bg-slate-900/90'
+                    : 'border-slate-800/80'
+                }`}
               >
                 {/* Poster Box */}
                 <div className="relative aspect-[2/3] w-full bg-slate-900 overflow-hidden">
@@ -351,8 +401,21 @@ export const TasteCalibration: React.FC = () => {
 
                   {/* User Rating Indicator Badge */}
                   {userRating && (
-                    <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-indigo-600 text-white text-[11px] font-bold shadow-lg shadow-indigo-950 border border-indigo-400/40">
-                      Rated: {userRating}/10
+                    <div
+                      className={`absolute top-2 left-2 z-10 px-2.5 py-1 rounded-md text-[11px] font-bold shadow-lg shadow-indigo-950 border transition-all ${
+                        isPendingRemoval
+                          ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 text-white border-emerald-400/50 animate-pulse flex items-center gap-1'
+                          : 'bg-indigo-600 text-white border-indigo-400/40'
+                      }`}
+                    >
+                      {isPendingRemoval ? (
+                        <>
+                          <CheckCircle2 className="w-3 h-3 text-emerald-300" />
+                          <span>Rated: {userRating}/10</span>
+                        </>
+                      ) : (
+                        <span>Rated: {userRating}/10</span>
+                      )}
                     </div>
                   )}
 
@@ -404,11 +467,17 @@ export const TasteCalibration: React.FC = () => {
                   </div>
 
                   {/* 1-10 Rating Control */}
-                  <div className="pt-1 border-t border-slate-800/60">
+                  <div className="pt-1 border-t border-slate-800/60 space-y-1">
+                    {isPendingRemoval && (
+                      <div className="flex items-center justify-between text-[10px] text-indigo-200 bg-indigo-950/70 px-2 py-0.5 rounded border border-indigo-500/30 animate-pulse">
+                        <span className="font-semibold">✓ Grade saved! Adjust or hiding soon...</span>
+                      </div>
+                    )}
+
                     <RatingControl
                       currentRating={userRating}
                       onRate={(score) => handleRateMovie(movie, score)}
-                      onClear={() => removeRating(movie.id)}
+                      onClear={() => handleClearRating(movie.id)}
                       compact={true}
                     />
                   </div>
