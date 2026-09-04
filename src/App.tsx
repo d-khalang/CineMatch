@@ -5,9 +5,11 @@ import { MobileBottomNav } from './components/MobileBottomNav';
 import { TasteCalibration } from './components/TasteCalibration';
 import { RankedFeed } from './components/RankedFeed';
 import { MyRatings } from './components/MyRatings';
+import { Watchlist } from './components/Watchlist';
 import { MovieDetailsModal } from './components/MovieDetailsModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CsvImportModal } from './components/CsvImportModal';
+import { Toast } from './components/Toast';
 
 const MainAppContent: React.FC = () => {
   const { activeTab } = useMovieStore();
@@ -23,6 +25,7 @@ const MainAppContent: React.FC = () => {
       <main className="flex-grow pt-6 sm:pt-8">
         {activeTab === 'calibration' && <TasteCalibration />}
         {activeTab === 'rankings' && <RankedFeed />}
+        {activeTab === 'watchlist' && <Watchlist />}
         {activeTab === 'library' && (
           <MyRatings onOpenCsvModal={() => setIsCsvModalOpen(true)} />
         )}
@@ -32,6 +35,7 @@ const MainAppContent: React.FC = () => {
       <MovieDetailsModal />
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       <CsvImportModal isOpen={isCsvModalOpen} onClose={() => setIsCsvModalOpen(false)} />
+      <Toast />
 
       {/* Mobile Bottom Tab Bar */}
       <MobileBottomNav onOpenSettings={() => setIsSettingsOpen(true)} />

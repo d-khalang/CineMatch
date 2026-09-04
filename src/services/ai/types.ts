@@ -10,11 +10,25 @@ export interface RecommendationRequest {
   model?: string;
 }
 
+export interface UnconstrainedDiscovery {
+  title: string;
+  year?: string;
+  score: number;
+  reason: string;
+  highlightTags: string[];
+}
+
+export interface AIRecommendationResult {
+  recommendations: Recommendation[];
+  unconstrainedDiscoveries?: UnconstrainedDiscovery[];
+  tasteAnalysis?: string;
+}
+
 export interface IAIProvider {
   readonly id: string;
   readonly name: string;
   readonly description: string;
   
-  generateRecommendations(request: RecommendationRequest): Promise<Recommendation[]>;
+  generateRecommendations(request: RecommendationRequest): Promise<AIRecommendationResult>;
   testConnection(apiKey: string, model?: string): Promise<{ success: boolean; message: string }>;
 }

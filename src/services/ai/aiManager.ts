@@ -1,8 +1,16 @@
-import { IAIProvider, RecommendationRequest } from './types';
+import { IAIProvider, RecommendationRequest, UnconstrainedDiscovery } from './types';
 import { LocalProvider } from './localProvider';
 import { GeminiProvider } from './geminiProvider';
 import { OpenRouterProvider } from './openRouterProvider';
 import { AIProviderId, Recommendation } from '../../types';
+
+export interface AIGenerationResponse {
+  recommendations: Recommendation[];
+  unconstrainedDiscoveries?: UnconstrainedDiscovery[];
+  tasteAnalysis?: string;
+  usedProvider: string;
+  error?: string;
+}
 
 class AIServiceManager {
   private providers: Map<AIProviderId, IAIProvider> = new Map();
@@ -28,41 +36,43 @@ class AIServiceManager {
   async generateRecommendations(
     providerId: AIProviderId,
     request: RecommendationRequest
-  ): Promise<{ recommendations: Recommendation[]; usedProvider: string; error?: string }> {
+  ): Promise<AIGenerationResponse> {
     const provider = this.getProvider(providerId);
 
     // If Gemini or OpenRouter selected without key, fall back gracefully to Local
     if (providerId === 'gemini' && !request.apiKey?.trim()) {
       const local = this.getProvider('local');
-      const recs = await local.generateRecommendations(request);
+      const res = await local.generateRecommendations(request);
       return {
-        recommendations: recs,
+        recommendations: res.recommendations,
         usedProvider: 'Local Smart Engine (Configure Gemini API Key in Settings for AI synthesis)',
       };
     }
 
     if (providerId === 'openrouter' && !request.apiKey?.trim()) {
       const local = this.getProvider('local');
-      const recs = await local.generateRecommendations(request);
+      const res = await local.generateRecommendations(request);
       return {
-        recommendations: recs,
+        recommendations: res.recommendations,
         usedProvider: 'Local Smart Engine (Configure OpenRouter Key in Settings)',
       };
     }
 
     try {
-      const recommendations = await provider.generateRecommendations(request);
+      const result = await provider.generateRecommendations(request);
       return {
-        recommendations,
+        recommendations: result.recommendations,
+        unconstrainedDiscoveries: result.unconstrainedDiscoveries,
+        tasteAnalysis: result.tasteAnalysis,
         usedProvider: provider.name,
       };
     } catch (err: any) {
       console.warn(`Provider ${provider.name} failed:`, err);
       // Fallback to local heuristic engine
       const local = this.getProvider('local');
-      const fallbackRecs = await local.generateRecommendations(request);
+      const fallbackRes = await local.generateRecommendations(request);
       return {
-        recommendations: fallbackRecs,
+        recommendations: fallbackRes.recommendations,
         usedProvider: `Local Engine (Fallback: ${err.message || 'AI request failed'})`,
         error: err.message,
       };

@@ -1,4 +1,4 @@
-import { IAIProvider, RecommendationRequest } from './types';
+import { IAIProvider, RecommendationRequest, AIRecommendationResult, UnconstrainedDiscovery } from './types';
 import { Recommendation, Movie } from '../../types';
 
 export const OPENROUTER_AVAILABLE_MODELS = [
@@ -44,7 +44,7 @@ export class OpenRouterProvider implements IAIProvider {
     }
   }
 
-  async generateRecommendations(request: RecommendationRequest): Promise<Recommendation[]> {
+  async generateRecommendations(request: RecommendationRequest): Promise<AIRecommendationResult> {
     const {
       userRatings,
       candidatePool,
@@ -78,18 +78,39 @@ export class OpenRouterProvider implements IAIProvider {
       overview: (m.overview || '').slice(0, 150),
     }));
 
-    const prompt = `You are a film curator. Recommend and rank the best 15 movies for this user.
-Ratings: ${JSON.stringify(userRatingsSummary)}
-Serendipity: ${serendipityLevel}%
-Vibes: ${selectedVibes.join(', ') || 'Any'}
-Candidates: ${JSON.stringify(candidatesSummary)}
+    const prompt = `You are Cinephile AI, an expert cinematic curator and film theorist.
+Analyze the user's movie ratings to deduce their underlying psychological and structural taste DNA (e.g. narrative pacing, claustrophobic tension, moral ambiguity).
 
-Return ONLY valid JSON matching this schema:
+Deliver:
+1. "unconstrained_discoveries": 5 to 8 films freely chosen from ANY era or genre in cinema history that transcend the user's explicit genres (e.g. recommending 12 Angry Men to an Inception fan due to ticking-clock psychological intensity).
+2. "pool_rankings": The top 8 to 12 selections from the provided TMDB candidate pool.
+
+User Ratings Profile:
+${JSON.stringify(userRatingsSummary)}
+
+Serendipity Setting: ${serendipityLevel}%
+User Vibe Filters: ${selectedVibes.join(', ') || 'Any'}
+User Era Preferences: ${preferredEras.join(', ') || 'Any'}
+
+TMDB Candidate Pool:
+${JSON.stringify(candidatesSummary)}
+
+Respond strictly in valid JSON with this exact schema:
 {
-  "rankings": [
+  "taste_analysis": "Summary of underlying psychological & structural preferences...",
+  "unconstrained_discoveries": [
+    {
+      "title": "Movie Title",
+      "year": "1995",
+      "score": 96,
+      "reason": "Vivid 1-2 sentence cinephile explanation linking to their psychological DNA...",
+      "highlightTags": ["Claustrophobic Tension", "Psychological Stakes"]
+    }
+  ],
+  "pool_rankings": [
     {
       "id": 123,
-      "score": 95,
+      "score": 94,
       "reason": "Why this movie fits",
       "serendipityType": "thematic_gem",
       "highlightTags": ["Atmospheric", "Sci-Fi"]
@@ -127,12 +148,13 @@ Return ONLY valid JSON matching this schema:
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
-    const recommendations: Recommendation[] = [];
+    const poolRecommendations: Recommendation[] = [];
+    const poolItems = parsed.pool_rankings || parsed.rankings || [];
 
-    (parsed.rankings || []).forEach((item: any, idx: number) => {
+    poolItems.forEach((item: any, idx: number) => {
       const movie = candidateMap.get(Number(item.id));
       if (movie) {
-        recommendations.push({
+        poolRecommendations.push({
           movie,
           score: Math.min(99, Math.max(50, Number(item.score) || 85)),
           rank: idx + 1,
@@ -143,6 +165,27 @@ Return ONLY valid JSON matching this schema:
       }
     });
 
-    return recommendations;
+    const unconstrainedDiscoveries: UnconstrainedDiscovery[] = (
+      parsed.unconstrained_discoveries || []
+    )
+      .map((item: any) => ({
+        title: String(item.title || '').trim(),
+        year: item.year ? String(item.year).trim() : undefined,
+        score: Math.min(99, Math.max(50, Number(item.score) || 92)),
+        reason:
+          item.reason ||
+          'A cross-genre cinephile discovery matching your psychological and structural taste DNA.',
+        highlightTags:
+          Array.isArray(item.highlightTags) && item.highlightTags.length > 0
+            ? item.highlightTags
+            : ['AI Discovery', 'Cross-Genre'],
+      }))
+      .filter((d: UnconstrainedDiscovery) => Boolean(d.title));
+
+    return {
+      recommendations: poolRecommendations,
+      unconstrainedDiscoveries,
+      tasteAnalysis: parsed.taste_analysis,
+    };
   }
 }

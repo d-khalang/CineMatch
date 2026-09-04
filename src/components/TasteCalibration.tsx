@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Sparkles, Search, Loader2, ArrowRight, CheckCircle2, SlidersHorizontal, Flame, Award, Brain, Clapperboard, Compass, Smile } from 'lucide-react';
+import { Sparkles, Search, Loader2, ArrowRight, CheckCircle2, SlidersHorizontal, Flame, Award, Brain, Clapperboard, Compass, Smile, Bookmark, BookmarkCheck } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useMovieStore } from '../store/useMovieStore';
 import { getCalibrationMovies, searchMovies, CALIBRATION_CATEGORIES, IMAGE_BASE_URL } from '../services/tmdb';
 import { Movie } from '../types';
 import { RatingControl } from './RatingControl';
+import { ShareButton } from './ShareButton';
 
 export const TasteCalibration: React.FC = () => {
-  const { ratings, setRating, removeRating, setSelectedMovieForModal, setActiveTab, generateRankings } = useMovieStore();
+  const { ratings, watchlist, toggleWatchlist, setRating, removeRating, setSelectedMovieForModal, setActiveTab, generateRankings } = useMovieStore();
   
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [movies, setMovies] = useState<Movie[]>([]);
@@ -218,6 +219,7 @@ export const TasteCalibration: React.FC = () => {
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6">
           {displayedMovies.map((movie) => {
             const userRating = ratings[movie.id]?.rating;
+            const inWatchlist = watchlist.includes(movie.id);
             const posterUrl = movie.poster_path ? `${IMAGE_BASE_URL}${movie.poster_path}` : null;
             const year = movie.release_date ? movie.release_date.slice(0, 4) : '';
 
@@ -245,17 +247,41 @@ export const TasteCalibration: React.FC = () => {
                   {/* Gradient Overlay */}
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
 
-                  {/* TMDB Score Badge */}
-                  <div className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-slate-950/80 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-amber-500/20 shadow-md">
-                    ★ {movie.vote_average.toFixed(1)}
-                  </div>
-
                   {/* User Rating Indicator Badge */}
                   {userRating && (
-                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-indigo-600 text-white text-[11px] font-bold shadow-lg shadow-indigo-950 border border-indigo-400/40">
+                    <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-indigo-600 text-white text-[11px] font-bold shadow-lg shadow-indigo-950 border border-indigo-400/40">
                       Rated: {userRating}/10
                     </div>
                   )}
+
+                  {/* Top Right: TMDB Score Badge & Bookmark Button */}
+                  <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
+                    <div className="px-2 py-0.5 rounded-md bg-slate-950/80 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-amber-500/20 shadow-md">
+                      ★ {movie.vote_average.toFixed(1)}
+                    </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleWatchlist(movie);
+                      }}
+                      className={`p-1.5 rounded-md backdrop-blur-md border transition-all cursor-pointer ${
+                        inWatchlist
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-md'
+                          : 'bg-slate-950/80 text-slate-400 border-slate-700/60 hover:text-white opacity-90 sm:opacity-0 sm:group-hover:opacity-100'
+                      }`}
+                      title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                    >
+                      {inWatchlist ? <BookmarkCheck className="w-3.5 h-3.5 text-amber-400" /> : <Bookmark className="w-3.5 h-3.5" />}
+                    </button>
+
+                    <ShareButton
+                      movie={movie}
+                      variant="icon"
+                      iconSize="w-3.5 h-3.5"
+                      className="p-1.5 rounded-md opacity-90 sm:opacity-0 sm:group-hover:opacity-100"
+                    />
+                  </div>
                 </div>
 
                 {/* Content Box */}

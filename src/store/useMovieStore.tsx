@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { Movie, UserRating, Recommendation, AISettings, TasteStats } from '../types';
 import { aiManager } from '../services/ai/aiManager';
-import { getCandidateRecommendationPool, getMovieDetails } from '../services/tmdb';
+import { getCandidateRecommendationPool, getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
 
 const STORAGE_KEY_RATINGS = 'cinematch_user_ratings_v1';
 const STORAGE_KEY_SETTINGS = 'cinematch_ai_settings_v1';
 const STORAGE_KEY_WATCHLIST = 'cinematch_watchlist_v1';
+const STORAGE_KEY_WATCHLIST_MOVIES = 'cinematch_watchlist_movies_v1';
 
 const DEFAULT_SETTINGS: AISettings = {
   activeProvider: 'gemini',
@@ -21,25 +22,31 @@ const DEFAULT_SETTINGS: AISettings = {
 interface MovieStoreContextType {
   ratings: Record<number, UserRating>;
   watchlist: number[];
+  watchlistMovies: Record<number, Movie>;
   aiSettings: AISettings;
   recommendations: Recommendation[];
   isGeneratingRecs: boolean;
   lastProviderUsed: string;
   recommendationError: string | null;
-  activeTab: 'rankings' | 'calibration' | 'search' | 'library';
-  setActiveTab: (tab: 'rankings' | 'calibration' | 'search' | 'library') => void;
+  aiTasteAnalysis: string | null;
+  activeTab: 'rankings' | 'calibration' | 'search' | 'library' | 'watchlist';
+  setActiveTab: (tab: 'rankings' | 'calibration' | 'search' | 'library' | 'watchlist') => void;
   selectedMovieForModal: Movie | null;
   setSelectedMovieForModal: (movie: Movie | null) => void;
   
   // Actions
   setRating: (movie: Movie, rating: number) => Promise<void>;
   removeRating: (movieId: number) => void;
-  toggleWatchlist: (movieId: number) => void;
+  toggleWatchlist: (movieOrId: Movie | number) => void;
+  clearWatchlist: () => void;
   updateAISettings: (settings: Partial<AISettings>) => void;
   generateRankings: () => Promise<void>;
   importRatingsList: (newRatings: UserRating[]) => void;
   clearAllData: () => void;
   tasteStats: TasteStats;
+  toastMessage: string | null;
+  showToast: (msg: string) => void;
+  clearToast: () => void;
 }
 
 const MovieStoreContext = createContext<MovieStoreContextType | null>(null);
@@ -65,6 +72,15 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   });
 
+  const [watchlistMovies, setWatchlistMovies] = useState<Record<number, Movie>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_WATCHLIST_MOVIES);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
   // 3. AI Settings State
   const [aiSettings, setAiSettings] = useState<AISettings>(() => {
     try {
@@ -76,12 +92,30 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   });
 
   // UI State
-  const [activeTab, setActiveTab] = useState<'rankings' | 'calibration' | 'search' | 'library'>('calibration');
+  const [activeTab, setActiveTab] = useState<'rankings' | 'calibration' | 'search' | 'library' | 'watchlist'>('calibration');
   const [selectedMovieForModal, setSelectedMovieForModal] = useState<Movie | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [isGeneratingRecs, setIsGeneratingRecs] = useState<boolean>(false);
   const [lastProviderUsed, setLastProviderUsed] = useState<string>('');
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
+  const [aiTasteAnalysis, setAiTasteAnalysis] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+  }, []);
+
+  const clearToast = useCallback(() => {
+    setToastMessage(null);
+  }, []);
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = setTimeout(() => {
+      setToastMessage(null);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [toastMessage]);
 
   // Persistence Effects
   useEffect(() => {
@@ -91,6 +125,58 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_WATCHLIST, JSON.stringify(watchlist));
   }, [watchlist]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_WATCHLIST_MOVIES, JSON.stringify(watchlistMovies));
+  }, [watchlistMovies]);
+
+  // Automatically fetch missing movie details for watchlist items if not cached
+  useEffect(() => {
+    const missingIds = watchlist.filter((id) => !watchlistMovies[id]);
+    if (missingIds.length === 0) return;
+
+    let isMounted = true;
+    Promise.all(
+      missingIds.map(async (id) => {
+        try {
+          const rated = ratings[id];
+          if (rated) {
+            return {
+              id: rated.movieId,
+              title: rated.title,
+              overview: '',
+              poster_path: rated.posterPath,
+              backdrop_path: null,
+              release_date: rated.year ? `${rated.year}-01-01` : '',
+              vote_average: rated.rating,
+              vote_count: 0,
+              director: rated.director,
+              genres: (rated.genres || []).map((name, idx) => ({ id: idx, name })),
+            } as Movie;
+          }
+          return await getMovieDetails(id);
+        } catch {
+          return null;
+        }
+      })
+    ).then((fetched) => {
+      if (!isMounted) return;
+      const valid = fetched.filter((m): m is Movie => m !== null);
+      if (valid.length > 0) {
+        setWatchlistMovies((prev) => {
+          const next = { ...prev };
+          valid.forEach((m) => {
+            next[m.id] = m;
+          });
+          return next;
+        });
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [watchlist, watchlistMovies, ratings]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(aiSettings));
@@ -148,10 +234,30 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   }, []);
 
-  const toggleWatchlist = useCallback((movieId: number) => {
+  const toggleWatchlist = useCallback((movieOrId: Movie | number) => {
+    const movieId = typeof movieOrId === 'number' ? movieOrId : movieOrId.id;
+    const movieObj = typeof movieOrId === 'object' ? movieOrId : null;
+
     setWatchlist((prev) =>
-      prev.includes(movieId) ? prev.filter((id) => id !== movieId) : [...prev, movieId]
+      prev.includes(movieId) ? prev.filter((id) => id !== movieId) : [movieId, ...prev]
     );
+
+    setWatchlistMovies((prev) => {
+      const next = { ...prev };
+      if (next[movieId]) {
+        delete next[movieId];
+      } else if (movieObj) {
+        next[movieId] = movieObj;
+      }
+      return next;
+    });
+  }, []);
+
+  const clearWatchlist = useCallback(() => {
+    setWatchlist([]);
+    setWatchlistMovies({});
+    localStorage.removeItem(STORAGE_KEY_WATCHLIST);
+    localStorage.removeItem(STORAGE_KEY_WATCHLIST_MOVIES);
   }, []);
 
   const updateAISettings = useCallback((newPartial: Partial<AISettings>) => {
@@ -171,9 +277,12 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const clearAllData = useCallback(() => {
     setRatings({});
     setWatchlist([]);
+    setWatchlistMovies({});
     setRecommendations([]);
+    setAiTasteAnalysis(null);
     localStorage.removeItem(STORAGE_KEY_RATINGS);
     localStorage.removeItem(STORAGE_KEY_WATCHLIST);
+    localStorage.removeItem(STORAGE_KEY_WATCHLIST_MOVIES);
   }, []);
 
   // Compute Taste Profile Stats
@@ -265,6 +374,8 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const candidatePool = await getCandidateRecommendationPool({
         seedMovieIds: topSeeds,
         excludeIds: ratedIds,
+        preferredEras: aiSettings.preferredEras,
+        selectedVibes: aiSettings.selectedVibes,
       });
 
       const providerId = aiSettings.activeProvider;
@@ -281,8 +392,57 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         model,
       });
 
-      setRecommendations(result.recommendations);
+      let finalRecommendations: Recommendation[] = [];
+
+      // If AI returned unconstrained discoveries, hydrate them via TMDB
+      if (result.unconstrainedDiscoveries && result.unconstrainedDiscoveries.length > 0) {
+        const paired = await hydrateBatchWithDiscoveries(result.unconstrainedDiscoveries);
+
+        const discoveryRecs: Recommendation[] = [];
+        const seenIds = new Set<number>();
+
+        for (const { item: discovery, movie } of paired) {
+          if (!ratedIds.has(movie.id) && !seenIds.has(movie.id)) {
+            seenIds.add(movie.id);
+            discoveryRecs.push({
+              movie,
+              score: discovery.score,
+              rank: 0,
+              reason: discovery.reason,
+              serendipityType: 'ai_cinephile_discovery',
+              highlightTags: discovery.highlightTags,
+              isAiCurated: true,
+            });
+          }
+        }
+
+        // Filter candidate pool recommendations to remove any overlap with discoveries or rated movies
+        const poolRecs = (result.recommendations || []).filter(
+          (rec) => !seenIds.has(rec.movie.id) && !ratedIds.has(rec.movie.id)
+        );
+
+        // Merge both streams and sort by score descending so genuine AI cinephile discoveries appear proudly near the top (#1, #2, #4)
+        const merged = [...discoveryRecs, ...poolRecs].sort((a, b) => b.score - a.score);
+
+        // Assign rank numbers 1, 2, 3...
+        finalRecommendations = merged.map((rec, idx) => ({
+          ...rec,
+          rank: idx + 1,
+        }));
+      } else {
+        finalRecommendations = (result.recommendations || [])
+          .filter((rec) => !ratedIds.has(rec.movie.id))
+          .map((rec, idx) => ({
+            ...rec,
+            rank: idx + 1,
+          }));
+      }
+
+      setRecommendations(finalRecommendations);
       setLastProviderUsed(result.usedProvider);
+      if (result.tasteAnalysis) {
+        setAiTasteAnalysis(result.tasteAnalysis);
+      }
       if (result.error) {
         setRecommendationError(result.error);
       }
@@ -299,11 +459,13 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       value={{
         ratings,
         watchlist,
+        watchlistMovies,
         aiSettings,
         recommendations,
         isGeneratingRecs,
         lastProviderUsed,
         recommendationError,
+        aiTasteAnalysis,
         activeTab,
         setActiveTab,
         selectedMovieForModal,
@@ -311,11 +473,15 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setRating,
         removeRating,
         toggleWatchlist,
+        clearWatchlist,
         updateAISettings,
         generateRankings,
         importRatingsList,
         clearAllData,
         tasteStats,
+        toastMessage,
+        showToast,
+        clearToast,
       }}
     >
       {children}

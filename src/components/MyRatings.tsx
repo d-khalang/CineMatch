@@ -11,17 +11,20 @@ import {
   User,
   Sparkles,
   Trash2,
+  Bookmark,
 } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
 import { IMAGE_BASE_URL } from '../services/tmdb';
 import { RatingControl } from './RatingControl';
+import { ShareButton } from './ShareButton';
+import { Movie } from '../types';
 
 interface MyRatingsProps {
   onOpenCsvModal: () => void;
 }
 
 export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
-  const { ratings, setRating, removeRating, tasteStats, setSelectedMovieForModal, setActiveTab, clearAllData } = useMovieStore();
+  const { ratings, watchlist, setRating, removeRating, tasteStats, setSelectedMovieForModal, setActiveTab, clearAllData } = useMovieStore();
   const [filterTier, setFilterTier] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'recent' | 'rating-desc' | 'rating-asc'>('recent');
@@ -91,6 +94,13 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setActiveTab('watchlist')}
+            className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <Bookmark className="w-3.5 h-3.5" />
+            Watchlist ({watchlist.length})
+          </button>
           <button
             onClick={onOpenCsvModal}
             className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 border border-slate-700 text-slate-200 hover:text-white hover:border-slate-500 flex items-center gap-1.5 transition-all cursor-pointer"
@@ -193,6 +203,14 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
               {tier.label}
             </button>
           ))}
+
+          <button
+            onClick={() => setActiveTab('watchlist')}
+            className="text-xs px-3 py-1.5 rounded-xl whitespace-nowrap transition-all border cursor-pointer bg-slate-900 text-amber-300 border-amber-500/30 hover:bg-amber-500/20 hover:text-amber-200 flex items-center gap-1.5 ml-1"
+          >
+            <Bookmark className="w-3.5 h-3.5" />
+            Watchlist ({watchlist.length})
+          </button>
         </div>
 
         {/* Search & Sort */}
@@ -274,9 +292,27 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
                     </div>
                   )}
 
-                  {/* Rating Badge */}
-                  <div className="absolute top-2 right-2 px-2.5 py-1 rounded-lg bg-slate-950/90 backdrop-blur-md text-xs font-bold text-amber-400 border border-amber-500/30 shadow-lg">
-                    ★ {item.rating}/10
+                  {/* Rating Badge & Share Button */}
+                  <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10">
+                    <div className="px-2.5 py-1 rounded-lg bg-slate-950/90 backdrop-blur-md text-xs font-bold text-amber-400 border border-amber-500/30 shadow-lg">
+                      ★ {item.rating}/10
+                    </div>
+                    <ShareButton
+                      movie={{
+                        id: item.movieId,
+                        title: item.title,
+                        overview: '',
+                        poster_path: item.posterPath,
+                        backdrop_path: null,
+                        release_date: item.year ? `${item.year}-01-01` : '',
+                        vote_average: item.rating,
+                        vote_count: 0,
+                        director: item.director,
+                      }}
+                      variant="icon"
+                      iconSize="w-3.5 h-3.5"
+                      className="opacity-90 sm:opacity-0 sm:group-hover:opacity-100"
+                    />
                   </div>
                 </div>
 

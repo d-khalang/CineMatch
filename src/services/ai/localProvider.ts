@@ -1,4 +1,4 @@
-import { IAIProvider, RecommendationRequest } from './types';
+import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './types';
 import { Recommendation, Movie } from '../../types';
 
 export class LocalProvider implements IAIProvider {
@@ -10,12 +10,12 @@ export class LocalProvider implements IAIProvider {
     return { success: true, message: 'Local Heuristic Engine is always ready.' };
   }
 
-  async generateRecommendations(request: RecommendationRequest): Promise<Recommendation[]> {
+  async generateRecommendations(request: RecommendationRequest): Promise<AIRecommendationResult> {
     const { userRatings, candidatePool, serendipityLevel = 30, selectedVibes = [], preferredEras = [] } = request;
 
     if (!userRatings || userRatings.length === 0) {
       // Return top candidate movies as initial baseline
-      return candidatePool.slice(0, 15).map((movie, idx) => ({
+      const starterRecs: Recommendation[] = candidatePool.slice(0, 15).map((movie, idx) => ({
         movie,
         score: Math.max(60, 95 - idx * 2),
         rank: idx + 1,
@@ -23,6 +23,7 @@ export class LocalProvider implements IAIProvider {
         serendipityType: 'safe_bet',
         highlightTags: (movie.genres || []).map((g) => g.name).slice(0, 2),
       }));
+      return { recommendations: starterRecs };
     }
 
     // 1. Build Taste Affinity Vector
@@ -163,9 +164,11 @@ export class LocalProvider implements IAIProvider {
     // 3. Sort by score descending and assign ranks
     scoredCandidates.sort((a, b) => b.score - a.score);
 
-    return scoredCandidates.slice(0, 20).map((item, index) => ({
+    const recommendations: Recommendation[] = scoredCandidates.slice(0, 20).map((item, index) => ({
       ...item,
       rank: index + 1,
     }));
+
+    return { recommendations };
   }
 }

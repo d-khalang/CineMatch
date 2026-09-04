@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, SlidersHorizontal, Film, Settings, Sparkles } from 'lucide-react';
+import { Trophy, SlidersHorizontal, Film, Settings, Sparkles, Bookmark } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
 
 interface NavbarProps {
@@ -7,12 +7,14 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings }) => {
-  const { activeTab, setActiveTab, ratings, aiSettings } = useMovieStore();
+  const { activeTab, setActiveTab, ratings, watchlist, aiSettings } = useMovieStore();
   const ratedCount = Object.keys(ratings).length;
+  const watchlistCount = watchlist.length;
 
   const navItems = [
     { id: 'rankings', label: 'Top Ranked', icon: Trophy, badge: null },
     { id: 'calibration', label: 'Taste Calibration', icon: SlidersHorizontal, badge: ratedCount > 0 ? `${ratedCount}` : null },
+    { id: 'watchlist', label: 'Watchlist', icon: Bookmark, badge: watchlistCount > 0 ? `${watchlistCount}` : null },
     { id: 'library', label: 'My Ratings', icon: Film, badge: null },
   ];
 

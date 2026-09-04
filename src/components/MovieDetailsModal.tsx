@@ -4,6 +4,7 @@ import { Movie } from '../types';
 import { getMovieDetails, BACKDROP_BASE_URL, IMAGE_BASE_URL } from '../services/tmdb';
 import { useMovieStore } from '../store/useMovieStore';
 import { RatingControl } from './RatingControl';
+import { ShareButton } from './ShareButton';
 
 export const MovieDetailsModal: React.FC = () => {
   const { selectedMovieForModal, setSelectedMovieForModal, ratings, setRating, removeRating, watchlist, toggleWatchlist } = useMovieStore();
@@ -131,7 +132,7 @@ export const MovieDetailsModal: React.FC = () => {
             {/* Quick Actions */}
             <div className="flex items-center gap-2">
               <button
-                onClick={() => toggleWatchlist(movie.id)}
+                onClick={() => toggleWatchlist(movie)}
                 className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 border transition-all cursor-pointer ${
                   inWatchlist
                     ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
@@ -152,6 +153,8 @@ export const MovieDetailsModal: React.FC = () => {
                   IMDb <ExternalLink className="w-3 h-3" />
                 </a>
               )}
+
+              <ShareButton movie={movie} variant="pill" />
             </div>
           </div>
 

@@ -1,4 +1,4 @@
-import { IAIProvider, RecommendationRequest } from './types';
+import { IAIProvider, RecommendationRequest, AIRecommendationResult, UnconstrainedDiscovery } from './types';
 import { Recommendation, Movie } from '../../types';
 
 export const GEMINI_AVAILABLE_MODELS = [
@@ -43,7 +43,7 @@ export class GeminiProvider implements IAIProvider {
     }
   }
 
-  async generateRecommendations(request: RecommendationRequest): Promise<Recommendation[]> {
+  async generateRecommendations(request: RecommendationRequest): Promise<AIRecommendationResult> {
     const {
       userRatings,
       candidatePool,
@@ -86,8 +86,22 @@ export class GeminiProvider implements IAIProvider {
         ? 'Balanced Discovery: Mix trusted thematic continuations with 2-3 creative crossover suggestions.'
         : 'Safe Bets: Stick closely to the highest affinity styles, directors, and genres the user explicitly praised.';
 
-    const systemPrompt = `You are Cinephile AI, an expert cinematic curator and recommendation engine.
-Analyze the user's movie ratings (1-10 scale), identify their psychological, stylistic, and structural taste patterns (e.g. pacing, tone, dialogue, complexity), and rank the candidate films.
+    const systemPrompt = `You are Cinephile AI, a world-class film critic, narrative theorist, and master cinematic curator.
+Your mission is to escape the mechanical "genre echo-chamber" and deliver both unconstrained cross-genre film discoveries and top selections from the candidate pool based on the user's deep psychological taste DNA.
+
+STEP 1: DEDUCE PSYCHOLOGICAL TASTE DNA
+Analyze the user's movie ratings (1-10 scale). Do NOT merely look at surface genres. Instead, deduce their underlying psychological, structural, and tonal preferences:
+- Narrative structure & pacing (e.g. escalating ticking-clock tension, slow-burn psychological dread, non-linear puzzles, character study)
+- Emotional & tonal resonance (e.g. moral ambiguity, cynical neo-noir, existential wonder, warm humanism)
+- Directorial craft & aesthetic (e.g. claustrophobic staging, grand scale, dialogue-driven chamber pieces)
+
+STEP 2: CURATE UNCONSTRAINED CINEPHILE DISCOVERIES (5-8 FILMS)
+Brainstorm 5 to 8 films freely chosen from anywhere in cinema history (any era, country, or genre).
+- CRITICAL: These films should transcend the user's explicit genres (e.g. recommending '12 Angry Men' or 'Uncut Gems' to an 'Inception' fan because of high-stakes ticking-clock tension, rather than just more Sci-Fi).
+- Specifically explain why this cross-genre choice fits their psychological profile.
+
+STEP 3: RANK CANDIDATE POOL (8-12 FILMS)
+Select and rank the top 8-12 films from the provided TMDB candidate pool that best align with their profile.
 
 User Profile:
 ${JSON.stringify(userRatingsSummary, null, 2)}
@@ -99,24 +113,25 @@ User Era Preferences: ${preferredEras.join(', ') || 'Any'}
 Candidate Pool:
 ${JSON.stringify(candidatesSummary, null, 2)}
 
-Instructions:
-1. Select and rank the best 15-20 films from the candidate pool in order of personalized recommendation.
-2. For each recommended film, assign:
-   - "id": number (matching candidate ID)
-   - "score": number between 60 and 99 (personalized match percentage)
-   - "reason": A vivid, insightful 1-2 sentence cinephile explanation of why this film is ranked here, connecting it to specific traits they loved or disliked in their rating history. Avoid generic fluff.
-   - "serendipityType": One of "safe_bet", "thematic_gem", "director_match", or "wildcard_discovery"
-   - "highlightTags": Array of 2-3 short descriptors (e.g. ["Denis Villeneuve", "Philosophical Sci-Fi", "High Tension"])
-
-Output strictly valid JSON with the format:
+Output strictly valid JSON with this exact schema:
 {
-  "rankings": [
+  "taste_analysis": "Summary of underlying psychological & structural preferences...",
+  "unconstrained_discoveries": [
+    {
+      "title": "12 Angry Men",
+      "year": "1957",
+      "score": 97,
+      "reason": "You love high-stakes psychological tension and escalating power struggles in modern thrillers; this classic delivers that pure claustrophobic intensity without any reliance on genre tropes.",
+      "highlightTags": ["Claustrophobic Tension", "Psychological Stakes"]
+    }
+  ],
+  "pool_rankings": [
     {
       "id": 123,
-      "score": 96,
+      "score": 94,
       "reason": "...",
-      "serendipityType": "thematic_gem",
-      "highlightTags": ["Neo-noir", "Moral Ambiguity"]
+      "serendipityType": "director_match",
+      "highlightTags": ["Denis Villeneuve", "Philosophical Sci-Fi"]
     }
   ]
 }`;
@@ -148,7 +163,7 @@ Output strictly valid JSON with the format:
       throw new Error('Empty response from Gemini.');
     }
 
-    let parsed: { rankings: any[] };
+    let parsed: any;
     try {
       parsed = JSON.parse(rawText);
     } catch {
@@ -157,12 +172,13 @@ Output strictly valid JSON with the format:
       parsed = JSON.parse(cleanJson);
     }
 
-    const recommendations: Recommendation[] = [];
+    const poolRecommendations: Recommendation[] = [];
+    const poolItems = parsed.pool_rankings || parsed.rankings || [];
 
-    (parsed.rankings || []).forEach((item, index) => {
+    poolItems.forEach((item: any, index: number) => {
       const movie = candidateMap.get(Number(item.id));
       if (movie) {
-        recommendations.push({
+        poolRecommendations.push({
           movie,
           score: Math.min(99, Math.max(50, Number(item.score) || 85)),
           rank: index + 1,
@@ -173,6 +189,27 @@ Output strictly valid JSON with the format:
       }
     });
 
-    return recommendations;
+    const unconstrainedDiscoveries: UnconstrainedDiscovery[] = (
+      parsed.unconstrained_discoveries || []
+    )
+      .map((item: any) => ({
+        title: String(item.title || '').trim(),
+        year: item.year ? String(item.year).trim() : undefined,
+        score: Math.min(99, Math.max(50, Number(item.score) || 92)),
+        reason:
+          item.reason ||
+          'A cross-genre cinephile discovery matching your psychological and structural taste DNA.',
+        highlightTags:
+          Array.isArray(item.highlightTags) && item.highlightTags.length > 0
+            ? item.highlightTags
+            : ['AI Discovery', 'Cross-Genre'],
+      }))
+      .filter((d: UnconstrainedDiscovery) => Boolean(d.title));
+
+    return {
+      recommendations: poolRecommendations,
+      unconstrainedDiscoveries,
+      tasteAnalysis: parsed.taste_analysis,
+    };
   }
 }

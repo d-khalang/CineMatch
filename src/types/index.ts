@@ -38,8 +38,14 @@ export interface Recommendation {
   score: number; // 0 to 100
   rank: number;
   reason: string;
-  serendipityType: 'safe_bet' | 'thematic_gem' | 'director_match' | 'wildcard_discovery';
+  serendipityType:
+    | 'safe_bet'
+    | 'thematic_gem'
+    | 'director_match'
+    | 'wildcard_discovery'
+    | 'ai_cinephile_discovery';
   highlightTags: string[];
+  isAiCurated?: boolean;
 }
 
 export type AIProviderId = 'gemini' | 'openrouter' | 'local';
