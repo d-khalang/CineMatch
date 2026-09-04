@@ -33,9 +33,12 @@ export const RankedFeed: React.FC = () => {
     toggleWatchlist,
     setSelectedMovieForModal,
     setActiveTab,
+    showToast,
   } = useMovieStore();
 
   const ratedCount = Object.keys(ratings).length;
+  // Recommendations are movies to watch - filter out any movie that has been rated
+  const visibleRecommendations = recommendations.filter((rec) => !ratings[rec.movie.id]);
 
   useEffect(() => {
     // If we have ratings but no recommendations yet, auto-generate
@@ -183,9 +186,13 @@ export const RankedFeed: React.FC = () => {
             <div key={i} className="h-44 rounded-2xl glass-panel animate-shimmer" />
           ))}
         </div>
-      ) : recommendations.length === 0 ? (
+      ) : visibleRecommendations.length === 0 ? (
         <div className="text-center py-16 glass-panel rounded-2xl p-8 space-y-4">
-          <p className="text-slate-300">Click below to compute your personalized recommendations.</p>
+          <p className="text-slate-300">
+            {recommendations.length > 0
+              ? "You've rated all recommended movies in this batch! Click below to discover your next batch."
+              : 'Click below to compute your personalized recommendations.'}
+          </p>
           <button
             onClick={generateRankings}
             className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg shadow-indigo-950 cursor-pointer"
@@ -195,9 +202,9 @@ export const RankedFeed: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4 sm:space-y-6">
-          {recommendations.map((rec) => {
-            const { movie, rank, score, reason, serendipityType, highlightTags } = rec;
-            const userRating = ratings[movie.id]?.rating;
+          {visibleRecommendations.map((rec, index) => {
+            const { movie, score, reason, serendipityType, highlightTags } = rec;
+            const displayRank = index + 1;
             const inWatchlist = watchlist.includes(movie.id);
             const posterUrl = movie.poster_path ? `${IMAGE_BASE_URL}${movie.poster_path}` : null;
             const year = movie.release_date ? movie.release_date.slice(0, 4) : '';
@@ -214,10 +221,10 @@ export const RankedFeed: React.FC = () => {
                 {/* Rank Number Badge */}
                 <div
                   className={`absolute top-4 left-4 z-10 w-9 h-9 rounded-xl flex items-center justify-center text-sm border shadow-lg ${getRankBadgeStyle(
-                    rank
+                    displayRank
                   )}`}
                 >
-                  #{rank}
+                  #{displayRank}
                 </div>
 
                 {/* Poster Box */}
@@ -357,8 +364,8 @@ export const RankedFeed: React.FC = () => {
                       >
                         <span className="font-semibold text-white">
                           {serendipityType === 'ai_cinephile_discovery'
-                            ? `Why this AI Cinephile Discovery (#${rank}): `
-                            : `Why ranked #${rank}: `}
+                            ? `Why this AI Cinephile Discovery (#${displayRank}): `
+                            : `Why ranked #${displayRank}: `}
                         </span>
                         {reason}
                       </div>
@@ -369,8 +376,11 @@ export const RankedFeed: React.FC = () => {
                   <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="w-full sm:max-w-md">
                       <RatingControl
-                        currentRating={userRating}
-                        onRate={(val) => setRating(movie, val)}
+                        currentRating={ratings[movie.id]?.rating}
+                        onRate={(val) => {
+                          setRating(movie, val);
+                          showToast(`Rated "${movie.title}" ${val}/10 — added to My Ratings!`);
+                        }}
                         onClear={() => removeRating(movie.id)}
                         compact={true}
                       />

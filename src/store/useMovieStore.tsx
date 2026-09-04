@@ -224,6 +224,13 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       ...prev,
       [movie.id]: newRating,
     }));
+
+    // When a movie is rated, immediately remove it from recommendations and re-index ranks
+    setRecommendations((prev) =>
+      prev
+        .filter((r) => r.movie.id !== movie.id)
+        .map((r, idx) => ({ ...r, rank: idx + 1 }))
+    );
   }, []);
 
   const removeRating = useCallback((movieId: number) => {
