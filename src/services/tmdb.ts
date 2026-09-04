@@ -1,4 +1,4 @@
-import { Movie } from '../types';
+import { Movie, UserRating } from '../types';
 
 const TMDB_API_KEY = '6e19ae2b03346d3b682580d657f948ac';
 const BASE_URL = 'https://api.themoviedb.org/3';
@@ -65,7 +65,234 @@ async function fetchFromTMDB<T>(endpoint: string, params: Record<string, string 
   return data;
 }
 
-export async function getCalibrationMovies(category = 'all', page = 1): Promise<{ movies: Movie[]; totalPages: number }> {
+// Canonical Franchise Aliases for series deduplication
+const franchiseAliases = [
+  { match: ['spider-man', 'spiderman'], key: 'franchise:spider-man' },
+  { match: ['avengers'], key: 'franchise:avengers' },
+  { match: ['batman', 'dark knight'], key: 'franchise:batman' },
+  { match: ['star wars'], key: 'franchise:star-wars' },
+  { match: ['lord of the rings', 'hobbit', 'middle-earth'], key: 'franchise:lotr' },
+  { match: ['harry potter', 'fantastic beasts'], key: 'franchise:harry-potter' },
+  { match: ['planet of the apes'], key: 'franchise:planet-of-the-apes' },
+  { match: ['fast & furious', 'fast and furious', 'furious 7', 'fast x', 'fate of the furious'], key: 'franchise:fast-and-furious' },
+  { match: ['jurassic'], key: 'franchise:jurassic' },
+  { match: ['mission: impossible', 'mission impossible'], key: 'franchise:mission-impossible' },
+  { match: ['pirates of the caribbean'], key: 'franchise:pirates' },
+  { match: ['toy story'], key: 'franchise:toy-story' },
+  { match: ['shrek'], key: 'franchise:shrek' },
+  { match: ['godfather'], key: 'franchise:godfather' },
+  { match: ['matrix'], key: 'franchise:matrix' },
+  { match: ['dune'], key: 'franchise:dune' },
+  { match: ['deadpool'], key: 'franchise:deadpool' },
+  { match: ['iron man'], key: 'franchise:iron-man' },
+  { match: ['captain america'], key: 'franchise:captain-america' },
+  { match: ['thor'], key: 'franchise:thor' },
+  { match: ['guardians of the galaxy'], key: 'franchise:guardians' },
+  { match: ['alien'], key: 'franchise:alien' },
+  { match: ['terminator'], key: 'franchise:terminator' },
+  { match: ['indiana jones'], key: 'franchise:indiana-jones' },
+  { match: ['transformers'], key: 'franchise:transformers' },
+  { match: ['hunger games'], key: 'franchise:hunger-games' },
+  { match: ['x-men', 'wolverine'], key: 'franchise:x-men' },
+  { match: ['mad max'], key: 'franchise:mad-max' },
+  { match: ['john wick'], key: 'franchise:john-wick' },
+  { match: ['avatar'], key: 'franchise:avatar' },
+  { match: ['despicable me', 'minions'], key: 'franchise:despicable-me' },
+  { match: ['before sunrise', 'before sunset', 'before midnight'], key: 'franchise:before-trilogy' },
+];
+
+const movieCollectionCache = new Map<number, string>();
+
+/**
+ * Identify canonical series/franchise key for a movie using aliases,
+ * TMDB belongs_to_collection, or normalized title stems.
+ */
+export async function getSeriesKey(movieId: number, title: string): Promise<string> {
+  const lower = title.toLowerCase();
+  for (const f of franchiseAliases) {
+    if (f.match.some((m) => lower.includes(m))) {
+      return f.key;
+    }
+  }
+
+  if (movieCollectionCache.has(movieId)) {
+    return movieCollectionCache.get(movieId)!;
+  }
+
+  // Lookup TMDB belongs_to_collection
+  try {
+    const data = await fetchFromTMDB<any>(`/movie/${movieId}`);
+    if (data?.belongs_to_collection?.id) {
+      const colKey = `col:${data.belongs_to_collection.id}`;
+      movieCollectionCache.set(movieId, colKey);
+      return colKey;
+    }
+  } catch {
+    // Fallback to title stem
+  }
+
+  // Title stem normalization (e.g. remove articles, subtitles, roman numerals/part numbers)
+  let clean = lower.replace(/^(the|a|an)\s+/i, '');
+  if (clean.includes(':')) clean = clean.split(':')[0].trim();
+  else if (clean.includes(' - ')) clean = clean.split(' - ')[0].trim();
+  clean = clean.replace(/\s+(part|chapter|vol\.?|volume|episode)?\s*([0-9]+|[ivxlcdm]+)$/i, '').trim();
+
+  const stemKey = `series:${clean}`;
+  movieCollectionCache.set(movieId, stemKey);
+  return stemKey;
+}
+
+export interface CalibrationOptions {
+  userRatings?: Record<number, UserRating>;
+}
+
+export async function getCalibrationMovies(
+  category = 'all',
+  page = 1,
+  options?: CalibrationOptions
+): Promise<{ movies: Movie[]; totalPages: number }> {
+  // Extract user-disliked genre IDs if user explicitly rated films <= 3/10
+  const dislikedGenreIds = new Set<number>();
+  if (options?.userRatings) {
+    for (const r of Object.values(options.userRatings)) {
+      if (r.rating <= 3 && r.genres) {
+        r.genres.forEach((gName) => {
+          const gLower = gName.toLowerCase();
+          for (const [idStr, name] of Object.entries(GENRE_MAP)) {
+            if (name.toLowerCase() === gLower) {
+              dislikedGenreIds.add(Number(idStr));
+            }
+          }
+        });
+      }
+    }
+  }
+
+  const mapMovie = (m: any): Movie => ({
+    id: m.id,
+    title: m.title,
+    original_title: m.original_title,
+    overview: m.overview,
+    poster_path: m.poster_path,
+    backdrop_path: m.backdrop_path,
+    release_date: m.release_date || '',
+    vote_average: m.vote_average,
+    vote_count: m.vote_count,
+    genre_ids: m.genre_ids || [],
+    genres: (m.genre_ids || []).map((gid: number) => ({ id: gid, name: GENRE_MAP[gid] || 'Other' })),
+  });
+
+  // Series deduplication helper: at most 1 film per franchise per 20-movie batch
+  const deduplicateFranchises = async (candidates: Movie[], limit = 30): Promise<Movie[]> => {
+    // Sort so user-disliked genres are deprioritized to the back
+    const sorted = [...candidates].sort((a, b) => {
+      const aDisliked = a.genre_ids?.some((id) => dislikedGenreIds.has(id)) ? 1 : 0;
+      const bDisliked = b.genre_ids?.some((id) => dislikedGenreIds.has(id)) ? 1 : 0;
+      return aDisliked - bDisliked;
+    });
+
+    const seenSeries = new Set<string>();
+    const seenIds = new Set<number>();
+    const result: Movie[] = [];
+
+    for (const movie of sorted) {
+      if (seenIds.has(movie.id)) continue;
+      const seriesKey = await getSeriesKey(movie.id, movie.title);
+      if (seenSeries.has(seriesKey)) continue;
+
+      seenSeries.add(seriesKey);
+      seenIds.add(movie.id);
+      result.push(movie);
+      if (result.length >= limit) break;
+    }
+    return result;
+  };
+
+  if (category === 'all') {
+    // Multi-Genre Inclusivity Guarantee across 5 cinema pillars
+    // 4 Critical & Auteur Dramas
+    // 4 Thrillers & Crime / Mystery
+    // 4 Sci-Fi & Speculative Fiction
+    // 4 Comedies, Animation & Heartfelt Films
+    // 4 Blockbusters & Epic Adventures
+    const pillarConfigs: Array<{ name: string; params: Record<string, string | number> }> = [
+      { name: 'drama', params: { with_genres: '18', 'vote_count.gte': 2000, 'vote_average.gte': 7.6, sort_by: 'popularity.desc' } },
+      { name: 'thriller_crime', params: { with_genres: '53,80', 'vote_count.gte': 2500, sort_by: 'popularity.desc' } },
+      { name: 'scifi_speculative', params: { with_genres: '878,14', 'vote_count.gte': 2500, sort_by: 'popularity.desc' } },
+      { name: 'comedy_heartfelt', params: { with_genres: '35,16,10751', 'vote_count.gte': 1500, sort_by: 'popularity.desc' } },
+      { name: 'blockbusters', params: { with_genres: '28,12', 'vote_count.gte': 4500, sort_by: 'popularity.desc' } },
+    ];
+
+    const pillarResponses = await Promise.all(
+      pillarConfigs.map((cfg) =>
+        fetchFromTMDB<{ results: any[]; total_pages: number }>('/discover/movie', {
+          page,
+          include_adult: 'false',
+          ...cfg.params,
+        }).catch(() => ({ results: [], total_pages: 1 }))
+      )
+    );
+
+    const pillarCandidates = pillarResponses.map((res) => (res.results || []).map(mapMovie));
+
+    // Select up to 4-6 from each pillar, respecting franchise deduplication
+    const seenSeries = new Set<string>();
+    const seenIds = new Set<number>();
+    const pillarSelections: Movie[][] = [[], [], [], [], []];
+    const leftoverCandidates: Movie[] = [];
+
+    for (let pIdx = 0; pIdx < pillarCandidates.length; pIdx++) {
+      const candidates = pillarCandidates[pIdx];
+      // Deprioritize user disliked genres
+      const sorted = [...candidates].sort((a, b) => {
+        const aDisliked = a.genre_ids?.some((id) => dislikedGenreIds.has(id)) ? 1 : 0;
+        const bDisliked = b.genre_ids?.some((id) => dislikedGenreIds.has(id)) ? 1 : 0;
+        return aDisliked - bDisliked;
+      });
+
+      for (const movie of sorted) {
+        if (seenIds.has(movie.id)) continue;
+        const seriesKey = await getSeriesKey(movie.id, movie.title);
+        if (seenSeries.has(seriesKey)) {
+          continue;
+        }
+
+        if (pillarSelections[pIdx].length < 4) {
+          seenSeries.add(seriesKey);
+          seenIds.add(movie.id);
+          pillarSelections[pIdx].push(movie);
+        } else {
+          leftoverCandidates.push(movie);
+        }
+      }
+    }
+
+    // Interleave 4 from each pillar into a balanced 20-movie batch
+    const finalBatch: Movie[] = [];
+    for (let slot = 0; slot < 4; slot++) {
+      for (let pIdx = 0; pIdx < 5; pIdx++) {
+        if (pillarSelections[pIdx][slot]) {
+          finalBatch.push(pillarSelections[pIdx][slot]);
+        }
+      }
+    }
+
+    // Fill remaining buffer up to 30 movies from leftover candidates for immediate rated replacement
+    for (const leftover of leftoverCandidates) {
+      if (finalBatch.length >= 30) break;
+      if (seenIds.has(leftover.id)) continue;
+      const seriesKey = await getSeriesKey(leftover.id, leftover.title);
+      if (seenSeries.has(seriesKey)) continue;
+
+      seenSeries.add(seriesKey);
+      seenIds.add(leftover.id);
+      finalBatch.push(leftover);
+    }
+
+    return { movies: finalBatch, totalPages: 10 };
+  }
+
+  // Archetype-specific categories
   let endpoint = '/discover/movie';
   let params: Record<string, string | number> = {
     page,
@@ -80,6 +307,7 @@ export async function getCalibrationMovies(category = 'all', page = 1): Promise<
         with_genres: '878,9648,53', // Sci-Fi, Mystery, Thriller
         sort_by: 'vote_average.desc',
         'vote_count.gte': 2000,
+        'vote_average.gte': 7.4,
       };
       break;
     case 'masterpieces':
@@ -92,13 +320,14 @@ export async function getCalibrationMovies(category = 'all', page = 1): Promise<
         with_genres: '53,80',
         sort_by: 'vote_average.desc',
         'vote_count.gte': 2500,
+        'vote_average.gte': 7.4,
       };
       break;
     case 'blockbusters':
       params = {
         ...params,
         sort_by: 'popularity.desc',
-        'vote_count.gte': 6000,
+        'vote_count.gte': 5000,
       };
       break;
     case 'indie_cult':
@@ -115,10 +344,10 @@ export async function getCalibrationMovies(category = 'all', page = 1): Promise<
         with_genres: '35,10751,10749',
         sort_by: 'vote_average.desc',
         'vote_count.gte': 1500,
+        'vote_average.gte': 7.2,
       };
       break;
     default:
-      // High-signal diverse iconic films
       params = {
         ...params,
         sort_by: 'popularity.desc',
@@ -128,23 +357,12 @@ export async function getCalibrationMovies(category = 'all', page = 1): Promise<
   }
 
   const data = await fetchFromTMDB<{ results: any[]; total_pages: number }>(endpoint, params);
-  
-  const movies: Movie[] = (data.results || []).map((m: any) => ({
-    id: m.id,
-    title: m.title,
-    original_title: m.original_title,
-    overview: m.overview,
-    poster_path: m.poster_path,
-    backdrop_path: m.backdrop_path,
-    release_date: m.release_date || '',
-    vote_average: m.vote_average,
-    vote_count: m.vote_count,
-    genre_ids: m.genre_ids || [],
-    genres: (m.genre_ids || []).map((gid: number) => ({ id: gid, name: GENRE_MAP[gid] || 'Other' })),
-  }));
+  const rawMovies = (data.results || []).map(mapMovie);
+  const dedupedMovies = await deduplicateFranchises(rawMovies, 30);
 
-  return { movies, totalPages: data.total_pages || 10 };
+  return { movies: dedupedMovies, totalPages: data.total_pages || 10 };
 }
+
 
 export async function searchMovies(query: string, page = 1): Promise<{ movies: Movie[]; totalPages: number }> {
   if (!query.trim()) return { movies: [], totalPages: 0 };

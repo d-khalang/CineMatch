@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Sparkles, Search, Loader2, ArrowRight, CheckCircle2, SlidersHorizontal, Flame, Award, Brain, Clapperboard, Compass, Smile, Bookmark, BookmarkCheck } from 'lucide-react';
+import { Sparkles, Search, Loader2, ArrowRight, CheckCircle2, SlidersHorizontal, Flame, Award, Brain, Clapperboard, Compass, Smile, Bookmark, BookmarkCheck, Shuffle, Eye, EyeOff } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useMovieStore } from '../store/useMovieStore';
 import { getCalibrationMovies, searchMovies, CALIBRATION_CATEGORIES, IMAGE_BASE_URL } from '../services/tmdb';
@@ -15,6 +15,8 @@ export const TasteCalibration: React.FC = () => {
   const [page, setPage] = useState<number>(1);
   const [hasMore, setHasMore] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isShuffling, setIsShuffling] = useState<boolean>(false);
+  const [hideRated, setHideRated] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResults, setSearchResults] = useState<Movie[] | null>(null);
   const [isSearching, setIsSearching] = useState<boolean>(false);
@@ -22,19 +24,20 @@ export const TasteCalibration: React.FC = () => {
   const ratedCount = Object.keys(ratings).length;
   const isProfileReady = ratedCount >= 3;
 
-  // Fetch calibration movies
+  // Fetch calibration movies with user ratings for dynamic taste feedback
   const fetchCategoryMovies = useCallback(async (cat: string, pageNum: number, append = false) => {
     setIsLoading(true);
     try {
-      const data = await getCalibrationMovies(cat, pageNum);
+      const data = await getCalibrationMovies(cat, pageNum, { userRatings: ratings });
       setMovies((prev) => (append ? [...prev, ...data.movies] : data.movies));
       setHasMore(pageNum < data.totalPages);
     } catch (err) {
       console.error('Failed to load calibration movies', err);
     } finally {
       setIsLoading(false);
+      setIsShuffling(false);
     }
-  }, []);
+  }, [ratings]);
 
   useEffect(() => {
     setPage(1);
@@ -74,7 +77,30 @@ export const TasteCalibration: React.FC = () => {
     }
   };
 
-  const displayedMovies = searchResults !== null ? searchResults : movies;
+  const handleShuffle = () => {
+    setIsShuffling(true);
+    const pageCandidates = [1, 2, 3, 4, 5, 6].filter((p) => p !== page);
+    const randomPage = pageCandidates[Math.floor(Math.random() * pageCandidates.length)] || 1;
+    setPage(randomPage);
+    fetchCategoryMovies(activeCategory, randomPage, false);
+  };
+
+  // When hideRated is active, auto-replenish if visible unrated films drop below threshold
+  useEffect(() => {
+    if (hideRated && searchResults === null && !isLoading && !isShuffling && hasMore && movies.length > 0) {
+      const unratedCount = movies.filter((m) => !ratings[m.id]).length;
+      if (unratedCount < 10) {
+        const nextPage = page + 1;
+        setPage(nextPage);
+        fetchCategoryMovies(activeCategory, nextPage, true);
+      }
+    }
+  }, [ratings, hideRated, searchResults, isLoading, isShuffling, hasMore, movies, activeCategory, page, fetchCategoryMovies]);
+
+  // Search results are 100% uncapped; browse grid applies hideRated filter
+  const displayedMovies = searchResults !== null
+    ? searchResults
+    : (hideRated ? movies.filter((m) => !ratings[m.id]) : movies);
 
   const getCategoryIcon = (iconName: string) => {
     switch (iconName) {
@@ -164,26 +190,72 @@ export const TasteCalibration: React.FC = () => {
           </button>
         </form>
 
-        {/* Categories Bar */}
+        {/* Categories Bar & Calibration Controls */}
         {searchResults === null && (
-          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
-            {CALIBRATION_CATEGORIES.map((cat) => {
-              const isSelected = activeCategory === cat.id;
-              return (
-                <button
-                  key={cat.id}
-                  onClick={() => setActiveCategory(cat.id)}
-                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium whitespace-nowrap transition-all border cursor-pointer ${
-                    isSelected
-                      ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-950'
-                      : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
-                  }`}
-                >
-                  {getCategoryIcon(cat.icon)}
-                  {cat.label}
-                </button>
-              );
-            })}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            {/* Category Pills */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1.5 scrollbar-none flex-1">
+              {CALIBRATION_CATEGORIES.map((cat) => {
+                const isSelected = activeCategory === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => setActiveCategory(cat.id)}
+                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium whitespace-nowrap transition-all border cursor-pointer ${
+                      isSelected
+                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-950'
+                        : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                  >
+                    {getCategoryIcon(cat.icon)}
+                    {cat.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Grid Tools: Shuffle Batch & Hide Rated Toggle */}
+            <div className="flex items-center gap-2 shrink-0 self-start md:self-auto">
+              {/* Shuffle Button */}
+              <button
+                onClick={handleShuffle}
+                disabled={isLoading || isShuffling}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-200 hover:text-white text-xs font-semibold transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
+                title="Shuffle for a fresh randomized batch of iconic films"
+              >
+                <Shuffle className={`w-3.5 h-3.5 text-purple-400 ${isShuffling ? 'animate-spin' : ''}`} />
+                <span>Shuffle Batch</span>
+              </button>
+
+              {/* Hide/Show Rated Toggle */}
+              <button
+                onClick={() => setHideRated((prev) => !prev)}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all border cursor-pointer ${
+                  hideRated
+                    ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40 hover:bg-indigo-500/30 shadow-sm'
+                    : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+                }`}
+                title={hideRated ? 'Click to show already rated movies' : 'Click to hide already rated movies'}
+              >
+                {hideRated ? (
+                  <>
+                    <EyeOff className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Hide Rated</span>
+                    <span className="px-1.5 py-0.5 bg-indigo-500/30 text-indigo-200 rounded-md text-[10px] font-bold">
+                      ON
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Eye className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Show Rated</span>
+                    <span className="px-1.5 py-0.5 bg-slate-800 text-slate-400 rounded-md text-[10px] font-bold">
+                      OFF
+                    </span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         )}
 
@@ -212,8 +284,38 @@ export const TasteCalibration: React.FC = () => {
           ))}
         </div>
       ) : displayedMovies.length === 0 ? (
-        <div className="text-center py-16 text-slate-400">
-          <p>No movies found. Try another search or category.</p>
+        <div className="text-center py-16 space-y-4 glass-panel rounded-3xl border border-slate-800/80 p-8">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mx-auto text-indigo-400">
+            <CheckCircle2 className="w-6 h-6" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-lg font-bold text-white">
+              {hideRated && movies.length > 0 ? 'All Movies in this Batch Rated!' : 'No movies found.'}
+            </h3>
+            <p className="text-slate-400 text-sm max-w-md mx-auto">
+              {hideRated && movies.length > 0
+                ? "You've calibrated every film shown in this batch. Shuffle for a fresh set, or toggle \"Show Rated\" to review your ratings."
+                : 'Try another search query or choose a different category.'}
+            </p>
+          </div>
+          <div className="flex items-center justify-center gap-3 pt-2">
+            <button
+              onClick={handleShuffle}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-950/60 transition-all active:scale-95"
+            >
+              <Shuffle className="w-4 h-4" />
+              Shuffle Fresh Batch
+            </button>
+            {hideRated && ratedCount > 0 && (
+              <button
+                onClick={() => setHideRated(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2 cursor-pointer transition-all border border-slate-700/60"
+              >
+                <Eye className="w-4 h-4" />
+                Show Rated Films ({ratedCount})
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6">
