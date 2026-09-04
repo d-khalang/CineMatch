@@ -43,6 +43,7 @@ interface MovieStoreContextType {
   generateRankings: () => Promise<void>;
   importRatingsList: (newRatings: UserRating[]) => void;
   clearAllData: () => void;
+  dismissRecommendation: (movieId: number) => void;
   tasteStats: TasteStats;
   toastMessage: string | null;
   showToast: (msg: string) => void;
@@ -224,11 +225,12 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       ...prev,
       [movie.id]: newRating,
     }));
+  }, []);
 
-    // When a movie is rated, immediately remove it from recommendations and re-index ranks
+  const dismissRecommendation = useCallback((movieId: number) => {
     setRecommendations((prev) =>
       prev
-        .filter((r) => r.movie.id !== movie.id)
+        .filter((r) => r.movie.id !== movieId)
         .map((r, idx) => ({ ...r, rank: idx + 1 }))
     );
   }, []);
@@ -485,6 +487,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         generateRankings,
         importRatingsList,
         clearAllData,
+        dismissRecommendation,
         tasteStats,
         toastMessage,
         showToast,

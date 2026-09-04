@@ -35,11 +35,14 @@ export const TasteCalibration: React.FC = () => {
   const ratedCount = Object.keys(ratings).length;
   const isProfileReady = ratedCount >= 3;
 
+  const ratingsRef = useRef(ratings);
+  ratingsRef.current = ratings;
+
   // Fetch calibration movies with user ratings for dynamic taste feedback
   const fetchCategoryMovies = useCallback(async (cat: string, pageNum: number, append = false) => {
     setIsLoading(true);
     try {
-      const data = await getCalibrationMovies(cat, pageNum, { userRatings: ratings });
+      const data = await getCalibrationMovies(cat, pageNum, { userRatings: ratingsRef.current });
       setMovies((prev) => (append ? [...prev, ...data.movies] : data.movies));
       setHasMore(pageNum < data.totalPages);
     } catch (err) {
@@ -48,7 +51,7 @@ export const TasteCalibration: React.FC = () => {
       setIsLoading(false);
       setIsShuffling(false);
     }
-  }, [ratings]);
+  }, []);
 
   useEffect(() => {
     setPage(1);
@@ -128,17 +131,19 @@ export const TasteCalibration: React.FC = () => {
     fetchCategoryMovies(activeCategory, randomPage, false);
   };
 
-  // When hideRated is active, auto-replenish if visible unrated films drop below threshold
+  // When hideRated is active, quietly append next page in background only when remaining unrated films get critically low (< 4)
   useEffect(() => {
     if (hideRated && searchResults === null && !isLoading && !isShuffling && hasMore && movies.length > 0) {
-      const unratedCount = movies.filter((m) => !ratings[m.id]).length;
-      if (unratedCount < 10) {
-        const nextPage = page + 1;
-        setPage(nextPage);
-        fetchCategoryMovies(activeCategory, nextPage, true);
+      const unratedCount = movies.filter((m) => !ratingsRef.current[m.id]).length;
+      if (unratedCount < 4) {
+        setPage((prevPage) => {
+          const nextPage = prevPage + 1;
+          fetchCategoryMovies(activeCategory, nextPage, true);
+          return nextPage;
+        });
       }
     }
-  }, [ratings, hideRated, searchResults, isLoading, isShuffling, hasMore, movies, activeCategory, page, fetchCategoryMovies]);
+  }, [movies.length, hideRated, searchResults, isLoading, isShuffling, hasMore, activeCategory, fetchCategoryMovies]);
 
   // Search results are 100% uncapped; browse grid applies hideRated filter but retains pending removal items during grace window
   const displayedMovies = searchResults !== null

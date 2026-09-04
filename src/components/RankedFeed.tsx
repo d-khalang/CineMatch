@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Trophy,
   Sparkles,
@@ -11,12 +11,14 @@ import {
   AlertCircle,
   Clapperboard,
   SlidersHorizontal,
+  CheckCircle2,
 } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
 import { IMAGE_BASE_URL } from '../services/tmdb';
 import { RatingControl } from './RatingControl';
 import { DiscoveryFilters } from './DiscoveryFilters';
 import { ShareButton } from './ShareButton';
+import { Movie } from '../types';
 
 export const RankedFeed: React.FC = () => {
   const {
@@ -31,14 +33,61 @@ export const RankedFeed: React.FC = () => {
     setRating,
     removeRating,
     toggleWatchlist,
+    dismissRecommendation,
     setSelectedMovieForModal,
     setActiveTab,
     showToast,
   } = useMovieStore();
 
+  const [pendingRemovalIds, setPendingRemovalIds] = useState<Record<number, boolean>>({});
+  const pendingTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(pendingTimersRef.current).forEach((t) => clearTimeout(t));
+    };
+  }, []);
+
   const ratedCount = Object.keys(ratings).length;
-  // Recommendations are movies to watch - filter out any movie that has been rated
-  const visibleRecommendations = recommendations.filter((rec) => !ratings[rec.movie.id]);
+
+  const handleRateRecommendedMovie = (movie: Movie, val: number) => {
+    setRating(movie, val);
+    showToast(`Rated "${movie.title}" ${val}/10 — saved to My Ratings!`);
+
+    if (pendingTimersRef.current[movie.id]) {
+      clearTimeout(pendingTimersRef.current[movie.id]);
+    }
+    setPendingRemovalIds((prev) => ({ ...prev, [movie.id]: true }));
+
+    pendingTimersRef.current[movie.id] = setTimeout(() => {
+      dismissRecommendation(movie.id);
+      setPendingRemovalIds((prev) => {
+        const next = { ...prev };
+        delete next[movie.id];
+        return next;
+      });
+      delete pendingTimersRef.current[movie.id];
+    }, 2500);
+  };
+
+  const handleClearRecommendedMovie = (movieId: number) => {
+    if (pendingTimersRef.current[movieId]) {
+      clearTimeout(pendingTimersRef.current[movieId]);
+      delete pendingTimersRef.current[movieId];
+    }
+    setPendingRemovalIds((prev) => {
+      const next = { ...prev };
+      delete next[movieId];
+      return next;
+    });
+    removeRating(movieId);
+  };
+
+  // Keep unrated movies AND movies currently in grace period
+  const visibleRecommendations = recommendations.filter(
+    (rec) => !ratings[rec.movie.id] || Boolean(pendingRemovalIds[rec.movie.id])
+  );
 
   useEffect(() => {
     // If we have ratings but no recommendations yet, auto-generate
@@ -208,12 +257,15 @@ export const RankedFeed: React.FC = () => {
             const inWatchlist = watchlist.includes(movie.id);
             const posterUrl = movie.poster_path ? `${IMAGE_BASE_URL}${movie.poster_path}` : null;
             const year = movie.release_date ? movie.release_date.slice(0, 4) : '';
+            const isPendingRemoval = Boolean(pendingRemovalIds[movie.id]);
 
             return (
               <div
                 key={movie.id}
-                className={`group relative flex flex-col md:flex-row gap-4 sm:gap-6 rounded-2xl sm:rounded-3xl p-4 sm:p-5 glass-panel glass-panel-hover border transition-all overflow-hidden ${
-                  serendipityType === 'ai_cinephile_discovery'
+                className={`group relative flex flex-col md:flex-row gap-4 sm:gap-6 rounded-2xl sm:rounded-3xl p-4 sm:p-5 glass-panel glass-panel-hover border transition-all duration-300 overflow-hidden ${
+                  isPendingRemoval
+                    ? 'ring-2 ring-indigo-400 border-indigo-400 shadow-xl shadow-indigo-950/80 bg-slate-900/95 scale-[1.01]'
+                    : serendipityType === 'ai_cinephile_discovery'
                     ? 'border-purple-500/40 shadow-lg shadow-purple-950/20 ring-1 ring-purple-500/30 bg-slate-950/90'
                     : 'border-slate-800'
                 }`}
@@ -374,14 +426,20 @@ export const RankedFeed: React.FC = () => {
 
                   {/* Rating Strip at the bottom of the card */}
                   <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="w-full sm:max-w-md">
+                    <div className="w-full sm:max-w-md space-y-1">
+                      {isPendingRemoval && (
+                        <div className="flex items-center justify-between text-[10px] text-indigo-200 bg-indigo-950/70 px-2 py-0.5 rounded border border-indigo-500/30 animate-pulse">
+                          <span className="font-semibold flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            Grade saved! Adjust or leaves queue in 2s...
+                          </span>
+                        </div>
+                      )}
+
                       <RatingControl
                         currentRating={ratings[movie.id]?.rating}
-                        onRate={(val) => {
-                          setRating(movie, val);
-                          showToast(`Rated "${movie.title}" ${val}/10 — added to My Ratings!`);
-                        }}
-                        onClear={() => removeRating(movie.id)}
+                        onRate={(val) => handleRateRecommendedMovie(movie, val)}
+                        onClear={() => handleClearRecommendedMovie(movie.id)}
                         compact={true}
                       />
                     </div>
