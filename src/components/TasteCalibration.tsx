@@ -1,11 +1,33 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Sparkles, Search, Loader2, ArrowRight, CheckCircle2, SlidersHorizontal, Flame, Award, Brain, Clapperboard, Compass, Smile, Bookmark, BookmarkCheck, Shuffle, Eye, EyeOff } from 'lucide-react';
+import {
+  Sparkles,
+  Search,
+  Loader2,
+  ArrowRight,
+  CheckCircle2,
+  SlidersHorizontal,
+  Flame,
+  Award,
+  Brain,
+  Clapperboard,
+  Compass,
+  Smile,
+  Bookmark,
+  BookmarkCheck,
+  Shuffle,
+  Eye,
+  EyeOff,
+  X,
+  Star,
+  Film,
+} from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useMovieStore } from '../store/useMovieStore';
 import { getCalibrationMovies, searchMovies, CALIBRATION_CATEGORIES, IMAGE_BASE_URL } from '../services/tmdb';
 import { Movie } from '../types';
 import { RatingControl } from './RatingControl';
 import { ShareButton } from './ShareButton';
+import { useDebounce } from '../hooks/useDebounce';
 
 export const TasteCalibration: React.FC = () => {
   const { ratings, watchlist, toggleWatchlist, setRating, removeRating, setSelectedMovieForModal, setActiveTab, generateRankings } = useMovieStore();
@@ -19,7 +41,15 @@ export const TasteCalibration: React.FC = () => {
   const [hideRated, setHideRated] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchResults, setSearchResults] = useState<Movie[] | null>(null);
+  const [autocompleteResults, setAutocompleteResults] = useState<Movie[] | null>(null);
   const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // 400ms debounce for real-time movie search
+  const debouncedSearchQuery = useDebounce(searchQuery, 400);
 
   // Grace-period for rated movies: keeps card visible & fully interactive with a pulse before auto-hiding
   const [pendingRemovalIds, setPendingRemovalIds] = useState<Record<number, boolean>>({});
@@ -58,22 +88,134 @@ export const TasteCalibration: React.FC = () => {
     fetchCategoryMovies(activeCategory, 1, false);
   }, [activeCategory, fetchCategoryMovies]);
 
-  // Handle Search
-  const handleSearchSubmit = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!searchQuery.trim()) {
+  // Real-time search effect with 400ms debounce and AbortController request cancellation
+  useEffect(() => {
+    const trimmed = debouncedSearchQuery.trim();
+
+    // If query is empty, reset search results and autocomplete
+    if (!trimmed) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      setAutocompleteResults(null);
       setSearchResults(null);
+      setIsDropdownOpen(false);
+      setIsSearching(false);
       return;
     }
 
+    // Require at least 3 characters for live searching
+    if (trimmed.length < 3) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      setAutocompleteResults(null);
+      setIsDropdownOpen(false);
+      setIsSearching(false);
+      return;
+    }
+
+    // Abort previous in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     setIsSearching(true);
+    setIsDropdownOpen(true);
+
+    searchMovies(trimmed, 1, controller.signal)
+      .then((data) => {
+        setAutocompleteResults(data.movies);
+        setIsSearching(false);
+      })
+      .catch((err: any) => {
+        if (err.name !== 'AbortError') {
+          console.error('Real-time search failed', err);
+          setIsSearching(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [debouncedSearchQuery]);
+
+  // Click outside to close autocomplete dropdown
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(e.target as Node)
+      ) {
+        setIsDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Handle Search Submit (Immediate manual bypass via Enter key or Search button)
+  const handleSearchSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      setSearchResults(null);
+      setAutocompleteResults(null);
+      setIsDropdownOpen(false);
+      return;
+    }
+
+    if (trimmed.length < 3) return;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    setIsDropdownOpen(false);
+    setIsSearching(true);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
-      const data = await searchMovies(searchQuery.trim());
+      const data = await searchMovies(trimmed, 1, controller.signal);
       setSearchResults(data.movies);
-    } catch (err) {
-      console.error('Search failed', err);
+      setAutocompleteResults(data.movies);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.error('Search failed', err);
+      }
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  const handleClearSearch = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setSearchQuery('');
+    setAutocompleteResults(null);
+    setSearchResults(null);
+    setIsDropdownOpen(false);
+    setIsSearching(false);
+  };
+
+  const handleViewAllInGrid = () => {
+    if (autocompleteResults && autocompleteResults.length > 0) {
+      setSearchResults(autocompleteResults);
+      setIsDropdownOpen(false);
+    } else {
+      handleSearchSubmit();
     }
   };
 
@@ -221,24 +363,203 @@ export const TasteCalibration: React.FC = () => {
 
       {/* Search & Category Filter Bar */}
       <div className="space-y-4">
-        {/* Search Bar */}
-        <form onSubmit={handleSearchSubmit} className="relative max-w-xl">
-          <input
-            type="text"
-            placeholder="Search any movie to rate it (e.g. Interstellar, Parasite, Godfather)..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-11 pr-24 py-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-inner"
-          />
-          <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-          <button
-            type="submit"
-            disabled={isSearching}
-            className="absolute right-2 top-1/2 -translate-y-1/2 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all cursor-pointer"
-          >
-            {isSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Search'}
-          </button>
-        </form>
+        {/* Search Bar & Autocomplete Container */}
+        <div ref={searchContainerRef} className="relative max-w-xl">
+          <form onSubmit={handleSearchSubmit} className="relative">
+            <input
+              type="text"
+              placeholder="Search any movie to rate it (e.g. Interstellar, Parasite, Godfather)..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => {
+                if (searchQuery.trim().length >= 3 && autocompleteResults !== null) {
+                  setIsDropdownOpen(true);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setIsDropdownOpen(false);
+                }
+              }}
+              className="w-full pl-11 pr-28 py-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-inner"
+            />
+            <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+              {searchQuery.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearSearch}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Clear search"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                type="submit"
+                disabled={isSearching}
+                className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-indigo-950/40 disabled:opacity-50"
+              >
+                {isSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Search'}
+              </button>
+            </div>
+          </form>
+
+          {/* Sub-3 character helper hint */}
+          {searchQuery.trim().length > 0 && searchQuery.trim().length < 3 && (
+            <p className="text-[11px] text-indigo-400/90 font-medium pt-1.5 pl-2 flex items-center gap-1.5">
+              <span>Type at least 3 characters to search...</span>
+            </p>
+          )}
+
+          {/* Floating Live Autocomplete Dropdown */}
+          {isDropdownOpen && searchQuery.trim().length >= 3 && (
+            <div className="absolute left-0 right-0 top-full mt-2 z-50 bg-slate-900/95 backdrop-blur-2xl border border-slate-700/80 rounded-2xl shadow-2xl shadow-slate-950/90 overflow-hidden">
+              {/* Dropdown Header */}
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800/80 bg-slate-950/50 text-xs text-slate-400">
+                <div className="flex items-center gap-1.5 font-medium">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Real-Time Suggestions</span>
+                </div>
+                {isSearching ? (
+                  <div className="flex items-center gap-1.5 text-indigo-400 text-[11px]">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Searching TMDB...</span>
+                  </div>
+                ) : (
+                  autocompleteResults && (
+                    <span className="text-[11px] text-slate-500">
+                      {autocompleteResults.length} film{autocompleteResults.length === 1 ? '' : 's'} found
+                    </span>
+                  )
+                )}
+              </div>
+
+              {/* Dropdown Body */}
+              {isSearching && (!autocompleteResults || autocompleteResults.length === 0) ? (
+                <div className="p-6 text-center text-slate-400 text-xs space-y-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-indigo-500 mx-auto" />
+                  <p className="text-slate-300">Searching TMDB for "{searchQuery}"...</p>
+                </div>
+              ) : !isSearching && autocompleteResults && autocompleteResults.length === 0 ? (
+                <div className="p-6 text-center text-slate-400 text-xs space-y-1">
+                  <Film className="w-6 h-6 text-slate-600 mx-auto mb-1" />
+                  <p className="font-semibold text-slate-300">No movies found</p>
+                  <p className="text-slate-500 text-[11px]">No results matching "{searchQuery}". Check the spelling or try another title.</p>
+                </div>
+              ) : autocompleteResults && autocompleteResults.length > 0 ? (
+                <>
+                  <div className="max-h-[360px] overflow-y-auto divide-y divide-slate-800/60">
+                    {autocompleteResults.slice(0, 7).map((movie) => {
+                      const userRating = ratings[movie.id]?.rating;
+                      const inWatchlist = watchlist.includes(movie.id);
+                      const posterUrl = movie.poster_path ? `${IMAGE_BASE_URL}${movie.poster_path}` : null;
+                      const year = movie.release_date ? movie.release_date.slice(0, 4) : '';
+                      const genres = (movie.genres || []).slice(0, 2).map((g) => g.name).join(', ');
+
+                      return (
+                        <div
+                          key={movie.id}
+                          onClick={() => {
+                            setSelectedMovieForModal(movie);
+                            setIsDropdownOpen(false);
+                          }}
+                          className="group flex items-center justify-between p-3 hover:bg-slate-800/70 transition-colors cursor-pointer gap-3"
+                        >
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            {/* Poster Thumbnail */}
+                            <div className="w-10 h-14 rounded-lg bg-slate-800 overflow-hidden shrink-0 border border-slate-700/50 relative">
+                              {posterUrl ? (
+                                <img
+                                  src={posterUrl}
+                                  alt={movie.title}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-slate-600">
+                                  <Film className="w-4 h-4" />
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Info */}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <h4 className="text-xs font-semibold text-white group-hover:text-indigo-300 transition-colors truncate">
+                                  {movie.title}
+                                </h4>
+                                {year && <span className="text-[11px] text-slate-500 shrink-0">({year})</span>}
+                              </div>
+
+                              <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
+                                {movie.vote_average > 0 && (
+                                  <span className="text-amber-400 font-bold flex items-center gap-0.5">
+                                    ★ {movie.vote_average.toFixed(1)}
+                                  </span>
+                                )}
+                                {genres && (
+                                  <>
+                                    <span className="text-slate-600">•</span>
+                                    <span className="truncate text-slate-400">{genres}</span>
+                                  </>
+                                )}
+                              </div>
+
+                              {userRating && (
+                                <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-300 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                                  <CheckCircle2 className="w-2.5 h-2.5" />
+                                  <span>Rated {userRating}/10</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Quick Actions */}
+                          <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => toggleWatchlist(movie)}
+                              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                                inWatchlist
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
+                                  : 'bg-slate-800/80 text-slate-400 border-slate-700/60 hover:text-white hover:border-slate-500'
+                              }`}
+                              title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                            >
+                              {inWatchlist ? <BookmarkCheck className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                setSelectedMovieForModal(movie);
+                                setIsDropdownOpen(false);
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-200 hover:text-white border border-indigo-500/40 text-[11px] font-medium transition-all cursor-pointer"
+                            >
+                              {userRating ? 'Edit Grade' : 'Rate Film'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Dropdown Footer */}
+                  <div className="p-2.5 border-t border-slate-800/80 bg-slate-950/60">
+                    <button
+                      type="button"
+                      onClick={handleViewAllInGrid}
+                      className="w-full py-2 px-3 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 hover:text-indigo-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <span>View all {autocompleteResults.length} results in main grid</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          )}
+        </div>
 
         {/* Categories Bar & Calibration Controls */}
         {searchResults === null && (
@@ -314,11 +635,8 @@ export const TasteCalibration: React.FC = () => {
           <div className="flex items-center justify-between py-1 text-sm text-slate-400">
             <span>Search Results for "{searchQuery}" ({searchResults.length} found)</span>
             <button
-              onClick={() => {
-                setSearchResults(null);
-                setSearchQuery('');
-              }}
-              className="text-indigo-400 hover:text-indigo-300 text-xs font-medium underline"
+              onClick={handleClearSearch}
+              className="text-indigo-400 hover:text-indigo-300 text-xs font-medium underline cursor-pointer"
             >
               Clear Search & Back to Iconic Grid
             </button>

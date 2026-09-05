@@ -42,7 +42,11 @@ export const CALIBRATION_CATEGORIES = [
   { id: 'feel_good', label: 'Heartfelt & Comedy', icon: 'Smile' },
 ];
 
-async function fetchFromTMDB<T>(endpoint: string, params: Record<string, string | number> = {}): Promise<T> {
+async function fetchFromTMDB<T>(
+  endpoint: string,
+  params: Record<string, string | number> = {},
+  signal?: AbortSignal
+): Promise<T> {
   const query = new URLSearchParams({
     api_key: TMDB_API_KEY,
     language: 'en-US',
@@ -55,7 +59,7 @@ async function fetchFromTMDB<T>(endpoint: string, params: Record<string, string 
     return cache.get(url) as T;
   }
 
-  const response = await fetch(url);
+  const response = await fetch(url, { signal });
   if (!response.ok) {
     throw new Error(`TMDB API Error: ${response.status} ${response.statusText}`);
   }
@@ -290,13 +294,21 @@ export async function getCalibrationMovies(
 }
 
 
-export async function searchMovies(query: string, page = 1): Promise<{ movies: Movie[]; totalPages: number }> {
+export async function searchMovies(
+  query: string,
+  page = 1,
+  signal?: AbortSignal
+): Promise<{ movies: Movie[]; totalPages: number }> {
   if (!query.trim()) return { movies: [], totalPages: 0 };
-  const data = await fetchFromTMDB<{ results: any[]; total_pages: number }>('/search/movie', {
-    query,
-    page,
-    include_adult: 'false',
-  });
+  const data = await fetchFromTMDB<{ results: any[]; total_pages: number }>(
+    '/search/movie',
+    {
+      query,
+      page,
+      include_adult: 'false',
+    },
+    signal
+  );
 
   const movies: Movie[] = (data.results || []).map((m: any) => ({
     id: m.id,
