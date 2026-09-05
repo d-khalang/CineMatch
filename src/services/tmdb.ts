@@ -65,82 +65,8 @@ async function fetchFromTMDB<T>(endpoint: string, params: Record<string, string 
   return data;
 }
 
-// Canonical Franchise Aliases for series deduplication
-const franchiseAliases = [
-  { match: ['spider-man', 'spiderman'], key: 'franchise:spider-man' },
-  { match: ['avengers'], key: 'franchise:avengers' },
-  { match: ['batman', 'dark knight'], key: 'franchise:batman' },
-  { match: ['star wars'], key: 'franchise:star-wars' },
-  { match: ['lord of the rings', 'hobbit', 'middle-earth'], key: 'franchise:lotr' },
-  { match: ['harry potter', 'fantastic beasts'], key: 'franchise:harry-potter' },
-  { match: ['planet of the apes'], key: 'franchise:planet-of-the-apes' },
-  { match: ['fast & furious', 'fast and furious', 'furious 7', 'fast x', 'fate of the furious'], key: 'franchise:fast-and-furious' },
-  { match: ['jurassic'], key: 'franchise:jurassic' },
-  { match: ['mission: impossible', 'mission impossible'], key: 'franchise:mission-impossible' },
-  { match: ['pirates of the caribbean'], key: 'franchise:pirates' },
-  { match: ['toy story'], key: 'franchise:toy-story' },
-  { match: ['shrek'], key: 'franchise:shrek' },
-  { match: ['godfather'], key: 'franchise:godfather' },
-  { match: ['matrix'], key: 'franchise:matrix' },
-  { match: ['dune'], key: 'franchise:dune' },
-  { match: ['deadpool'], key: 'franchise:deadpool' },
-  { match: ['iron man'], key: 'franchise:iron-man' },
-  { match: ['captain america'], key: 'franchise:captain-america' },
-  { match: ['thor'], key: 'franchise:thor' },
-  { match: ['guardians of the galaxy'], key: 'franchise:guardians' },
-  { match: ['alien'], key: 'franchise:alien' },
-  { match: ['terminator'], key: 'franchise:terminator' },
-  { match: ['indiana jones'], key: 'franchise:indiana-jones' },
-  { match: ['transformers'], key: 'franchise:transformers' },
-  { match: ['hunger games'], key: 'franchise:hunger-games' },
-  { match: ['x-men', 'wolverine'], key: 'franchise:x-men' },
-  { match: ['mad max'], key: 'franchise:mad-max' },
-  { match: ['john wick'], key: 'franchise:john-wick' },
-  { match: ['avatar'], key: 'franchise:avatar' },
-  { match: ['despicable me', 'minions'], key: 'franchise:despicable-me' },
-  { match: ['before sunrise', 'before sunset', 'before midnight'], key: 'franchise:before-trilogy' },
-];
-
-const movieCollectionCache = new Map<number, string>();
-
-/**
- * Identify canonical series/franchise key for a movie using aliases,
- * TMDB belongs_to_collection, or normalized title stems.
- */
-export async function getSeriesKey(movieId: number, title: string): Promise<string> {
-  const lower = title.toLowerCase();
-  for (const f of franchiseAliases) {
-    if (f.match.some((m) => lower.includes(m))) {
-      return f.key;
-    }
-  }
-
-  if (movieCollectionCache.has(movieId)) {
-    return movieCollectionCache.get(movieId)!;
-  }
-
-  // Lookup TMDB belongs_to_collection
-  try {
-    const data = await fetchFromTMDB<any>(`/movie/${movieId}`);
-    if (data?.belongs_to_collection?.id) {
-      const colKey = `col:${data.belongs_to_collection.id}`;
-      movieCollectionCache.set(movieId, colKey);
-      return colKey;
-    }
-  } catch {
-    // Fallback to title stem
-  }
-
-  // Title stem normalization (e.g. remove articles, subtitles, roman numerals/part numbers)
-  let clean = lower.replace(/^(the|a|an)\s+/i, '');
-  if (clean.includes(':')) clean = clean.split(':')[0].trim();
-  else if (clean.includes(' - ')) clean = clean.split(' - ')[0].trim();
-  clean = clean.replace(/\s+(part|chapter|vol\.?|volume|episode)?\s*([0-9]+|[ivxlcdm]+)$/i, '').trim();
-
-  const stemKey = `series:${clean}`;
-  movieCollectionCache.set(movieId, stemKey);
-  return stemKey;
-}
+import { getSeriesKey, FRANCHISE_ALIASES } from '../constants/franchises';
+export { getSeriesKey, FRANCHISE_ALIASES };
 
 export interface CalibrationOptions {
   userRatings?: Record<number, UserRating>;
@@ -183,7 +109,7 @@ export async function getCalibrationMovies(
   });
 
   // Series deduplication helper: at most 1 film per franchise per 20-movie batch
-  const deduplicateFranchises = async (candidates: Movie[], limit = 30): Promise<Movie[]> => {
+  const deduplicateFranchises = (candidates: Movie[], limit = 30): Movie[] => {
     // Sort so user-disliked genres are deprioritized to the back
     const sorted = [...candidates].sort((a, b) => {
       const aDisliked = a.genre_ids?.some((id) => dislikedGenreIds.has(id)) ? 1 : 0;
@@ -197,7 +123,7 @@ export async function getCalibrationMovies(
 
     for (const movie of sorted) {
       if (seenIds.has(movie.id)) continue;
-      const seriesKey = await getSeriesKey(movie.id, movie.title);
+      const seriesKey = getSeriesKey(movie.id, movie.title);
       if (seenSeries.has(seriesKey)) continue;
 
       seenSeries.add(seriesKey);
@@ -252,7 +178,7 @@ export async function getCalibrationMovies(
 
       for (const movie of sorted) {
         if (seenIds.has(movie.id)) continue;
-        const seriesKey = await getSeriesKey(movie.id, movie.title);
+        const seriesKey = getSeriesKey(movie.id, movie.title);
         if (seenSeries.has(seriesKey)) {
           continue;
         }
@@ -281,7 +207,7 @@ export async function getCalibrationMovies(
     for (const leftover of leftoverCandidates) {
       if (finalBatch.length >= 30) break;
       if (seenIds.has(leftover.id)) continue;
-      const seriesKey = await getSeriesKey(leftover.id, leftover.title);
+      const seriesKey = getSeriesKey(leftover.id, leftover.title);
       if (seenSeries.has(seriesKey)) continue;
 
       seenSeries.add(seriesKey);
@@ -358,7 +284,7 @@ export async function getCalibrationMovies(
 
   const data = await fetchFromTMDB<{ results: any[]; total_pages: number }>(endpoint, params);
   const rawMovies = (data.results || []).map(mapMovie);
-  const dedupedMovies = await deduplicateFranchises(rawMovies, 30);
+  const dedupedMovies = deduplicateFranchises(rawMovies, 30);
 
   return { movies: dedupedMovies, totalPages: data.total_pages || 10 };
 }
