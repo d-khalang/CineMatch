@@ -292,11 +292,15 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
                     </div>
                   )}
 
-                  {/* Rating Badge & Share Button */}
-                  <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10">
-                    <div className="px-2.5 py-1 rounded-lg bg-slate-950/90 backdrop-blur-md text-xs font-bold text-amber-400 border border-amber-500/30 shadow-lg">
+                  {/* Top Left: Rating Badge */}
+                  <div className="absolute top-2 left-2 z-10 flex flex-col items-start gap-1">
+                    <div className="px-2 py-0.5 rounded-md bg-slate-950/80 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-amber-500/20 shadow-md">
                       ★ {item.rating}/10
                     </div>
+                  </div>
+
+                  {/* Top Right: Share Button */}
+                  <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10">
                     <ShareButton
                       movie={{
                         id: item.movieId,
