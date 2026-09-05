@@ -409,32 +409,36 @@ export const TasteCalibration: React.FC = () => {
                   {/* Gradient Overlay */}
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
 
-                  {/* User Rating Indicator Badge */}
-                  {userRating && (
-                    <div
-                      className={`absolute top-2 left-2 z-10 px-2.5 py-1 rounded-md text-[11px] font-bold shadow-lg shadow-indigo-950 border transition-all ${
-                        isPendingRemoval
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-black border-emerald-300 shadow-emerald-950/80 flex items-center gap-1'
-                          : 'bg-indigo-600 text-white border-indigo-400/40'
-                      }`}
-                    >
-                      {isPendingRemoval ? (
-                        <>
-                          <CheckCircle2 className="w-3 h-3 text-slate-950 stroke-[2.5]" />
+                  {/* Top Left: Score Badge & User Rating Indicator Badge */}
+                  <div className="absolute top-2 left-2 z-10 flex flex-col items-start gap-1">
+                    {movie.vote_average > 0 && (
+                      <div className="px-2 py-0.5 rounded-md bg-slate-950/80 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-amber-500/20 shadow-md">
+                        ★ {movie.vote_average.toFixed(1)}
+                      </div>
+                    )}
+
+                    {userRating && (
+                      <div
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-bold shadow-lg shadow-indigo-950 border transition-all ${
+                          isPendingRemoval
+                            ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-black border-emerald-300 shadow-emerald-950/80 flex items-center gap-1'
+                            : 'bg-indigo-600 text-white border-indigo-400/40'
+                        }`}
+                      >
+                        {isPendingRemoval ? (
+                          <>
+                            <CheckCircle2 className="w-3 h-3 text-slate-950 stroke-[2.5]" />
+                            <span>Rated: {userRating}/10</span>
+                          </>
+                        ) : (
                           <span>Rated: {userRating}/10</span>
-                        </>
-                      ) : (
-                        <span>Rated: {userRating}/10</span>
-                      )}
-                    </div>
-                  )}
+                        )}
+                      </div>
+                    )}
+                  </div>
 
-                  {/* Top Right: TMDB Score Badge & Bookmark Button */}
+                  {/* Top Right: Watchlist & Share Action Buttons */}
                   <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5">
-                    <div className="px-2 py-0.5 rounded-md bg-slate-950/80 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-amber-500/20 shadow-md">
-                      ★ {movie.vote_average.toFixed(1)}
-                    </div>
-
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
