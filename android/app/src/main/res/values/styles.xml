@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="cinematch_dark">#121c17</color>
+
+    <!-- Base application theme. -->
+    <style name="AppTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="colorPrimary">@color/cinematch_dark</item>
+        <item name="colorPrimaryDark">@color/cinematch_dark</item>
+        <item name="colorAccent">#e6283b</item>
+        <item name="android:windowBackground">@color/cinematch_dark</item>
+        <item name="android:colorBackground">@color/cinematch_dark</item>
+        <item name="android:statusBarColor">@color/cinematch_dark</item>
+        <item name="android:navigationBarColor">@color/cinematch_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowBackground">@color/cinematch_dark</item>
+        <item name="android:colorBackground">@color/cinematch_dark</item>
+        <item name="android:statusBarColor">@color/cinematch_dark</item>
+        <item name="android:navigationBarColor">@color/cinematch_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="android:background">@color/cinematch_dark</item>
+        <item name="android:windowBackground">@color/cinematch_dark</item>
+        <item name="android:statusBarColor">@color/cinematch_dark</item>
+        <item name="android:navigationBarColor">@color/cinematch_dark</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>
