@@ -37,20 +37,20 @@ export const DiscoveryFilters: React.FC = () => {
   };
 
   const getSerendipityLabel = (level: number) => {
-    if (level < 25) return { title: 'Safe Bets', desc: 'Predictable high-accuracy matches matching your proven favorites', color: 'text-emerald-400' };
-    if (level < 60) return { title: 'Balanced Discovery', desc: 'A smart blend of core favorites and fresh thematic twists', color: 'text-indigo-400' };
-    if (level < 85) return { title: 'Hidden Gems', desc: 'Branching outside usual comfort zones with high-quality under-the-radar cinema', color: 'text-amber-400' };
-    return { title: 'Wildcard Horizon', desc: 'Bold, genre-defying recommendations sharing deeper emotional & narrative DNA', color: 'text-rose-400' };
+    if (level < 25) return { title: 'Safe Bets', desc: 'Predictable high-accuracy matches matching your proven favorites', color: 'text-[var(--accent-secondary)] font-bold' };
+    if (level < 60) return { title: 'Balanced Discovery', desc: 'A smart blend of core favorites and fresh thematic twists', color: 'text-slate-200 font-bold' };
+    if (level < 85) return { title: 'Hidden Gems', desc: 'Branching outside usual comfort zones with high-quality under-the-radar cinema', color: 'text-[var(--accent-hover)] font-bold' };
+    return { title: 'Wildcard Horizon', desc: 'Bold, genre-defying recommendations sharing deeper emotional & narrative DNA', color: 'text-[var(--accent-primary)] font-extrabold' };
   };
 
   const currentSerendipity = getSerendipityLabel(aiSettings.serendipityLevel);
 
   return (
-    <div className="glass-panel rounded-2xl p-5 sm:p-6 mb-8 border border-slate-800 shadow-xl space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-5">
+    <div className="glass-panel rounded-2xl p-5 sm:p-6 mb-8 border border-[var(--border-subtle)] shadow-xl space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[var(--border-subtle)] pb-5">
         <div>
           <div className="flex items-center gap-2">
-            <Sliders className="w-5 h-5 text-indigo-400" />
+            <Sliders className="w-5 h-5 text-[var(--accent-secondary)]" />
             <h2 className="text-lg font-bold text-white tracking-wide">Discovery & AI Calibration</h2>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -61,10 +61,10 @@ export const DiscoveryFilters: React.FC = () => {
         <button
           onClick={generateRankings}
           disabled={isGeneratingRecs}
-          className="self-start md:self-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white text-sm font-semibold shadow-lg shadow-indigo-950/60 active:scale-95 transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+          className="btn-tactile btn-tactile-primary self-start md:self-auto px-5 py-2.5 text-xs font-bold shadow-lg disabled:opacity-50"
         >
           <Sparkles className={`w-4 h-4 ${isGeneratingRecs ? 'animate-spin' : ''}`} />
-          {isGeneratingRecs ? 'Re-Ranking Taste Profile...' : 'Re-Rank with AI'}
+          <span>{isGeneratingRecs ? 'Re-Ranking Taste Profile...' : 'Re-Rank with AI'}</span>
         </button>
       </div>
 
@@ -72,7 +72,7 @@ export const DiscoveryFilters: React.FC = () => {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Compass className="w-4 h-4 text-purple-400" />
+            <Compass className="w-4 h-4 text-[var(--accent-secondary)]" />
             <span className="text-sm font-semibold text-slate-200">Recommendation Serendipity:</span>
             <span className={`text-sm font-bold ${currentSerendipity.color}`}>
               {aiSettings.serendipityLevel}% — {currentSerendipity.title}
@@ -91,9 +91,9 @@ export const DiscoveryFilters: React.FC = () => {
             step="5"
             value={aiSettings.serendipityLevel}
             onChange={(e) => handleSerendipityChange(Number(e.target.value))}
-            className="w-full h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 focus:outline-none"
+            className="w-full h-2.5 bg-[var(--bg-surface-elevated)] rounded-lg appearance-none cursor-pointer accent-[var(--accent-primary)] focus:outline-none border border-[var(--border-subtle)]"
           />
-          <div className="flex justify-between text-[11px] text-slate-500 mt-2 font-medium">
+          <div className="flex justify-between text-[11px] text-slate-400 mt-2 font-mono">
             <span className="flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> 0% Safe Bets</span>
             <span>50% Balanced</span>
             <span className="flex items-center gap-1"><Flame className="w-3.5 h-3.5 text-rose-400" /> 100% Wildcard</span>
@@ -102,7 +102,7 @@ export const DiscoveryFilters: React.FC = () => {
       </div>
 
       {/* Vibe & Mood Filters */}
-      <div className="space-y-2 pt-2 border-t border-slate-800/60">
+      <div className="space-y-2 pt-2 border-t border-[var(--border-subtle)]">
         <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
           Filter by Mood / Vibe (Optional)
         </span>
@@ -113,10 +113,10 @@ export const DiscoveryFilters: React.FC = () => {
               <button
                 key={vibe}
                 onClick={() => toggleVibe(vibe)}
-                className={`text-xs px-3 py-1.5 rounded-lg border transition-all cursor-pointer ${
+                className={`btn-tactile text-xs px-3 py-1.5 transition-all cursor-pointer ${
                   isSelected
-                    ? 'bg-indigo-600/30 text-indigo-200 border-indigo-500 font-semibold shadow-sm'
-                    : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
+                    ? 'btn-tactile-primary shadow-sm'
+                    : 'btn-tactile-secondary'
                 }`}
               >
                 {vibe}
@@ -138,10 +138,10 @@ export const DiscoveryFilters: React.FC = () => {
               <button
                 key={era}
                 onClick={() => toggleEra(era)}
-                className={`text-xs px-3 py-1.5 rounded-lg border transition-all cursor-pointer ${
+                className={`btn-tactile text-xs px-3 py-1.5 transition-all cursor-pointer ${
                   isSelected
-                    ? 'bg-purple-600/30 text-purple-200 border-purple-500 font-semibold shadow-sm'
-                    : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
+                    ? 'btn-tactile-primary shadow-sm'
+                    : 'btn-tactile-secondary'
                 }`}
               >
                 {era}

@@ -54,23 +54,23 @@ export const MovieDetailsModal: React.FC = () => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-md overflow-y-auto animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-[var(--bg-canvas)]/85 backdrop-blur-md overflow-y-auto animate-fadeIn"
       onClick={() => setSelectedMovieForModal(null)}
     >
       <div
-        className="relative w-full max-w-3xl rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden my-auto"
+        className="relative w-full max-w-3xl rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-2xl overflow-hidden my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close Button */}
         <button
           onClick={() => setSelectedMovieForModal(null)}
-          className="absolute top-4 right-4 z-20 p-2 rounded-full bg-slate-950/80 text-slate-300 hover:text-white hover:bg-slate-800 transition-colors border border-slate-700/60 cursor-pointer"
+          className="absolute top-4 right-4 z-20 p-2 rounded-full bg-[var(--bg-surface-elevated)] text-slate-300 hover:text-white hover:border-[var(--border-focus)] transition-colors border border-[var(--border-subtle)] cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
 
         {/* Hero Media / Trailer Header */}
-        <div className="relative aspect-video w-full bg-slate-950 max-h-80 overflow-hidden">
+        <div className="relative aspect-video w-full bg-[var(--bg-canvas)] max-h-80 overflow-hidden">
           {showTrailer && movie.trailer_key ? (
             <iframe
               src={`https://www.youtube.com/embed/${movie.trailer_key}?autoplay=1`}
@@ -82,20 +82,20 @@ export const MovieDetailsModal: React.FC = () => {
           ) : backdropUrl ? (
             <>
               <img src={backdropUrl} alt={movie.title} className="w-full h-full object-cover" />
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-surface)] via-[var(--bg-surface)]/40 to-transparent" />
               {movie.trailer_key && (
                 <button
                   onClick={() => setShowTrailer(true)}
                   className="absolute inset-0 flex items-center justify-center group cursor-pointer"
                 >
-                  <div className="w-16 h-16 rounded-full bg-indigo-600/90 text-white flex items-center justify-center shadow-2xl shadow-indigo-950 group-hover:scale-110 group-hover:bg-indigo-500 transition-all border border-indigo-400/40">
-                    <Play className="w-7 h-7 fill-white ml-1" />
+                  <div className="w-16 h-16 rounded-full bg-[var(--accent-primary)] text-[var(--accent-text)] flex items-center justify-center shadow-2xl shadow-[var(--accent-glow)] group-hover:scale-110 group-hover:bg-[var(--accent-hover)] transition-all border border-[var(--border-focus)]">
+                    <Play className="w-7 h-7 fill-current ml-1" />
                   </div>
                 </button>
               )}
             </>
           ) : (
-            <div className="w-full h-full flex items-center justify-center bg-slate-950 text-slate-500">
+            <div className="w-full h-full flex items-center justify-center bg-[var(--bg-canvas)] text-slate-500">
               <Film className="w-12 h-12" />
             </div>
           )}
@@ -106,7 +106,7 @@ export const MovieDetailsModal: React.FC = () => {
           {/* Main Title & Action Row */}
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
             <div className="space-y-1">
-              <h2 className="text-xl sm:text-3xl font-extrabold text-white tracking-tight">
+              <h2 className="font-heading text-xl sm:text-3xl font-extrabold text-white tracking-tight">
                 {movie.title}
               </h2>
               <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm text-slate-400">
@@ -133,13 +133,13 @@ export const MovieDetailsModal: React.FC = () => {
             <div className="flex items-center gap-2">
               <button
                 onClick={() => toggleWatchlist(movie)}
-                className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 border transition-all cursor-pointer ${
+                className={`btn-tactile px-3.5 py-1.5 text-xs font-semibold flex items-center gap-2 border transition-all cursor-pointer ${
                   inWatchlist
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                    : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:text-white'
+                    ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-hover)] border-[var(--border-focus)]'
+                    : 'btn-tactile-secondary'
                 }`}
               >
-                {inWatchlist ? <BookmarkCheck className="w-4 h-4 text-amber-400" /> : <Bookmark className="w-4 h-4" />}
+                {inWatchlist ? <BookmarkCheck className="w-4 h-4 text-[var(--accent-hover)]" /> : <Bookmark className="w-4 h-4" />}
                 {inWatchlist ? 'In Watchlist' : 'Watchlist'}
               </button>
 
@@ -148,7 +148,7 @@ export const MovieDetailsModal: React.FC = () => {
                   href={`https://www.imdb.com/title/${movie.imdb_id}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-3 py-2 rounded-xl text-xs font-semibold bg-amber-400/10 text-amber-300 border border-amber-400/30 flex items-center gap-1 hover:bg-amber-400/20 transition-all"
+                  className="btn-tactile btn-tactile-secondary px-3 py-1.5 text-xs font-semibold flex items-center gap-1"
                 >
                   IMDb <ExternalLink className="w-3 h-3" />
                 </a>
@@ -163,7 +163,7 @@ export const MovieDetailsModal: React.FC = () => {
             {(movie.genres || []).map((g) => (
               <span
                 key={g.id}
-                className="text-xs px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 font-medium"
+                className="text-xs px-2.5 py-1 rounded-md palette-tag-secondary font-medium"
               >
                 {g.name}
               </span>
@@ -177,11 +177,11 @@ export const MovieDetailsModal: React.FC = () => {
           </div>
 
           {/* Cast & Director */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs pt-2 border-t border-slate-800">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs pt-2 border-t border-[var(--border-subtle)]">
             {movie.director && (
               <div className="space-y-1">
                 <span className="text-slate-400 uppercase tracking-wider font-semibold flex items-center gap-1">
-                  <User className="w-3.5 h-3.5 text-indigo-400" /> Director
+                  <User className="w-3.5 h-3.5 text-[var(--accent-secondary)]" /> Director
                 </span>
                 <p className="text-white font-medium text-sm">{movie.director}</p>
               </div>
@@ -189,7 +189,7 @@ export const MovieDetailsModal: React.FC = () => {
             {movie.cast && movie.cast.length > 0 && (
               <div className="space-y-1">
                 <span className="text-slate-400 uppercase tracking-wider font-semibold flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5 text-purple-400" /> Key Cast
+                  <Sparkles className="w-3.5 h-3.5 text-[var(--accent-secondary)]" /> Key Cast
                 </span>
                 <p className="text-slate-200 font-medium">{movie.cast.join(', ')}</p>
               </div>
@@ -198,15 +198,15 @@ export const MovieDetailsModal: React.FC = () => {
 
           {/* Keywords / Thematic Tags */}
           {movie.keywords && movie.keywords.length > 0 && (
-            <div className="space-y-1.5 pt-2 border-t border-slate-800">
+            <div className="space-y-1.5 pt-2 border-t border-[var(--border-subtle)]">
               <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold flex items-center gap-1">
-                <Tag className="w-3.5 h-3.5 text-pink-400" /> Themes & Keywords
+                <Tag className="w-3.5 h-3.5 text-[var(--accent-primary)]" /> Themes & Keywords
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {movie.keywords.slice(0, 10).map((kw, i) => (
                   <span
                     key={i}
-                    className="text-[11px] px-2 py-0.5 rounded-md bg-slate-800/60 text-slate-400 border border-slate-800"
+                    className="text-[11px] px-2 py-0.5 rounded-md bg-[var(--bg-surface-elevated)] text-slate-300 border border-[var(--border-subtle)]"
                   >
                     #{kw}
                   </span>

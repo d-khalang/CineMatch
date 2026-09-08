@@ -109,17 +109,17 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--bg-canvas)]/85 backdrop-blur-md animate-fadeIn"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden p-6 sm:p-8 space-y-6"
+        className="relative w-full max-w-lg rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-2xl overflow-hidden p-6 sm:p-8 space-y-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+        <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-4">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
-              <Upload className="w-5 h-5" />
+            <div className="p-2 rounded-full palette-tag-secondary">
+              <Upload className="w-5 h-5 text-[var(--accent-secondary)]" />
             </div>
             <div>
               <h2 className="text-lg font-bold text-white">Import Movie Ratings CSV</h2>
@@ -129,23 +129,23 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
 
           <button
             onClick={onClose}
-            className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Upload Zone */}
-        <div className="border-2 border-dashed border-slate-700 hover:border-indigo-500 rounded-2xl p-6 text-center space-y-3 transition-colors bg-slate-950/40">
-          <FileText className="w-10 h-10 text-slate-500 mx-auto" />
+        <div className="border-2 border-dashed border-[var(--border-subtle)] hover:border-[var(--border-focus)] rounded-2xl p-6 text-center space-y-3 transition-colors bg-[var(--bg-surface-elevated)]">
+          <FileText className="w-10 h-10 text-[var(--accent-secondary)] mx-auto opacity-70" />
           <div className="space-y-1">
-            <p className="text-xs text-slate-300 font-semibold">
+            <p className="text-xs text-slate-200 font-semibold">
               {file ? file.name : 'Upload ratings.csv exported from IMDb or Letterboxd'}
             </p>
-            <p className="text-[11px] text-slate-500">Supports standard CSV files with Title and Rating columns</p>
+            <p className="text-[11px] text-slate-400">Supports standard CSV files with Title and Rating columns</p>
           </div>
 
-          <label className="inline-block px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 cursor-pointer border border-slate-700 transition-all">
+          <label className="btn-tactile btn-tactile-secondary inline-flex px-4 py-2 text-xs font-semibold cursor-pointer">
             Choose CSV File
             <input type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
           </label>
@@ -157,24 +157,24 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
             className={`p-3.5 rounded-xl text-xs flex items-center gap-2 border ${
               importedCount > 0
                 ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
-                : 'bg-indigo-950/40 border-indigo-800 text-indigo-200'
+                : 'bg-[var(--bg-surface-elevated)] border-[var(--border-focus)] text-slate-200'
             }`}
           >
             {importedCount > 0 ? (
               <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
             ) : (
-              <AlertCircle className="w-4 h-4 text-indigo-400 shrink-0" />
+              <AlertCircle className="w-4 h-4 text-[var(--accent-primary)] shrink-0" />
             )}
             <span>{statusMessage}</span>
           </div>
         )}
 
         {/* Action Buttons */}
-        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--border-subtle)]">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-slate-900 text-slate-400 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
+            className="btn-tactile btn-tactile-secondary px-4 py-2 text-xs font-semibold"
           >
             Close
           </button>
@@ -182,10 +182,10 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
             type="button"
             onClick={processCsv}
             disabled={!file || isProcessing}
-            className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-950 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+            className="btn-tactile btn-tactile-primary px-5 py-2 text-xs font-bold shadow-lg disabled:opacity-50 flex items-center gap-1.5"
           >
             {isProcessing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            {isProcessing ? 'Processing & Matching...' : 'Import Ratings'}
+            <span>{isProcessing ? 'Importing Ratings...' : 'Import Ratings'}</span>
           </button>
         </div>
       </div>

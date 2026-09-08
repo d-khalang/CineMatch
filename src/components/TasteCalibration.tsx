@@ -308,36 +308,61 @@ export const TasteCalibration: React.FC = () => {
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto px-4 sm:px-6 pb-20">
-      {/* Hero / Taste Calibration Header */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-950/80 via-slate-900/90 to-purple-950/80 border border-indigo-900/40 p-6 sm:p-8 shadow-2xl backdrop-blur-xl">
-        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+      {/* Hero / Taste Calibration Header (Archival Cinephile Console) */}
+      <div className="relative overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-6 sm:p-8 shadow-2xl backdrop-blur-xl">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-72 h-72 bg-[var(--accent-glow)] rounded-full blur-3xl pointer-events-none" />
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2 max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-semibold border border-indigo-500/30">
-              <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-400" />
-              Taste Calibration
+          <div className="space-y-2.5 max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md palette-tag-secondary text-xs font-mono tracking-wider uppercase">
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>Taste Profiler & Vector Engine</span>
             </div>
-            <h1 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
-              Calibrate Your Movie DNA
+            <h1 className="font-heading text-2xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">
+              Calibrate Your Cinephile Index
             </h1>
             <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
-              Rate the movies you have seen on a <strong className="text-white">1–10 scale</strong>. Our multi-factor AI will analyze your director affinities, narrative tropes, and pacing preferences to generate your personalized ranked list.
+              Rate titles you have seen on a <strong className="text-white font-semibold">1–10 scale</strong>. The intelligence engine models director synergies, thematic resonance, and narrative density to rank cinema tailored to your taste.
             </p>
           </div>
 
-          {/* Progress Tracker Card */}
-          <div className="glass-panel p-5 rounded-2xl border border-slate-700/60 min-w-[260px] flex flex-col justify-center space-y-3">
+          {/* Progress Tracker Card (Archival Step Gauge) */}
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] p-5 min-w-[270px] shadow-inner flex flex-col justify-center space-y-3.5">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400 font-medium">Ratings Logged</span>
-              <span className="text-indigo-400 font-bold text-sm">{ratedCount} rated</span>
+              <span className="text-slate-400 font-medium">Calibrated Sample</span>
+              <span className="font-mono text-xs font-bold text-[var(--accent-secondary)]">
+                {ratedCount} <span className="text-slate-500 font-normal">/ 5 logged</span>
+              </span>
             </div>
 
-            {/* Progress Bar */}
-            <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 transition-all duration-500"
-                style={{ width: `${Math.min(100, (ratedCount / 5) * 100)}%` }}
-              />
+            {/* Precision Step Gauge */}
+            <div className="space-y-1.5">
+              <div className="grid grid-cols-5 gap-1.5 w-full">
+                {[1, 2, 3, 4, 5].map((step) => {
+                  const isDone = ratedCount >= step;
+                  const isCurrent = ratedCount + 1 === step;
+                  return (
+                    <div
+                      key={step}
+                      className={`h-2 rounded-sm transition-all duration-300 ${
+                        isDone
+                          ? 'bg-[var(--accent-primary)] shadow-sm'
+                          : isCurrent
+                          ? 'bg-white/25 animate-pulse'
+                          : 'bg-white/5'
+                      }`}
+                    />
+                  );
+                })}
+              </div>
+              <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                <span>Start</span>
+                <span className={ratedCount >= 3 ? 'text-[var(--accent-secondary)] font-semibold' : ''}>
+                  3: Ready
+                </span>
+                <span className={ratedCount >= 5 ? 'text-[var(--accent-secondary)] font-semibold' : ''}>
+                  5: Synergies
+                </span>
+              </div>
             </div>
 
             {isProfileReady ? (
@@ -346,15 +371,14 @@ export const TasteCalibration: React.FC = () => {
                   generateRankings();
                   setActiveTab('rankings');
                 }}
-                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/60 transition-all active:scale-95 cursor-pointer"
+                className="btn-tactile btn-tactile-primary w-full py-2.5 px-4 text-xs font-bold shadow-lg"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                View Your Ranked List ({ratedCount})
-                <ArrowRight className="w-3.5 h-3.5" />
+                <span>View Personalized Rankings ({ratedCount})</span>
               </button>
             ) : (
               <p className="text-[11px] text-slate-400 text-center font-medium">
-                Rate <strong className="text-indigo-300">{Math.max(0, 3 - ratedCount)} more</strong> to activate AI rankings
+                Rate <strong className="text-[var(--accent-primary)] font-bold">{Math.max(0, 3 - ratedCount)} more</strong> to activate rankings
               </p>
             )}
           </div>
@@ -381,7 +405,7 @@ export const TasteCalibration: React.FC = () => {
                   setIsDropdownOpen(false);
                 }
               }}
-              className="w-full pl-11 pr-28 py-3 rounded-2xl bg-slate-900/90 border border-slate-800 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all shadow-inner"
+              className="w-full pl-11 pr-28 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-[var(--accent-primary)] focus:ring-1 focus:ring-[var(--accent-primary)] transition-all shadow-inner"
             />
             <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
 
@@ -390,7 +414,7 @@ export const TasteCalibration: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleClearSearch}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
                   title="Clear search"
                 >
                   <X className="w-4 h-4" />
@@ -399,7 +423,7 @@ export const TasteCalibration: React.FC = () => {
               <button
                 type="submit"
                 disabled={isSearching}
-                className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-indigo-950/40 disabled:opacity-50"
+                className="btn-tactile btn-tactile-primary px-3.5 py-1.5 text-xs disabled:opacity-50"
               >
                 {isSearching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Search'}
               </button>
@@ -408,28 +432,28 @@ export const TasteCalibration: React.FC = () => {
 
           {/* Sub-3 character helper hint */}
           {searchQuery.trim().length > 0 && searchQuery.trim().length < 3 && (
-            <p className="text-[11px] text-indigo-400/90 font-medium pt-1.5 pl-2 flex items-center gap-1.5">
+            <p className="text-[11px] text-[var(--accent-secondary)] font-medium pt-1.5 pl-2 flex items-center gap-1.5">
               <span>Type at least 3 characters to search...</span>
             </p>
           )}
 
           {/* Floating Live Autocomplete Dropdown */}
           {isDropdownOpen && searchQuery.trim().length >= 3 && (
-            <div className="absolute left-0 right-0 top-full mt-2 z-50 bg-slate-900/95 backdrop-blur-2xl border border-slate-700/80 rounded-2xl shadow-2xl shadow-slate-950/90 overflow-hidden">
+            <div className="absolute left-0 right-0 top-full mt-2 z-50 bg-[var(--bg-surface-elevated)]/95 backdrop-blur-2xl border border-[var(--border-subtle)] rounded-2xl shadow-2xl overflow-hidden">
               {/* Dropdown Header */}
-              <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800/80 bg-slate-950/50 text-xs text-slate-400">
-                <div className="flex items-center gap-1.5 font-medium">
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]/80 text-xs text-slate-400">
+                <div className="flex items-center gap-1.5 font-medium text-[var(--accent-secondary)]">
+                  <Sparkles className="w-3.5 h-3.5" />
                   <span>Real-Time Suggestions</span>
                 </div>
                 {isSearching ? (
-                  <div className="flex items-center gap-1.5 text-indigo-400 text-[11px]">
+                  <div className="flex items-center gap-1.5 text-[var(--accent-secondary)] text-[11px]">
                     <Loader2 className="w-3 h-3 animate-spin" />
                     <span>Searching TMDB...</span>
                   </div>
                 ) : (
                   autocompleteResults && (
-                    <span className="text-[11px] text-slate-500">
+                    <span className="text-[11px] text-slate-400 font-mono">
                       {autocompleteResults.length} film{autocompleteResults.length === 1 ? '' : 's'} found
                     </span>
                   )
@@ -439,18 +463,18 @@ export const TasteCalibration: React.FC = () => {
               {/* Dropdown Body */}
               {isSearching && (!autocompleteResults || autocompleteResults.length === 0) ? (
                 <div className="p-6 text-center text-slate-400 text-xs space-y-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-indigo-500 mx-auto" />
+                  <Loader2 className="w-5 h-5 animate-spin text-[var(--accent-primary)] mx-auto" />
                   <p className="text-slate-300">Searching TMDB for "{searchQuery}"...</p>
                 </div>
               ) : !isSearching && autocompleteResults && autocompleteResults.length === 0 ? (
                 <div className="p-6 text-center text-slate-400 text-xs space-y-1">
-                  <Film className="w-6 h-6 text-slate-600 mx-auto mb-1" />
+                  <Film className="w-6 h-6 text-slate-500 mx-auto mb-1" />
                   <p className="font-semibold text-slate-300">No movies found</p>
-                  <p className="text-slate-500 text-[11px]">No results matching "{searchQuery}". Check the spelling or try another title.</p>
+                  <p className="text-slate-400 text-[11px]">No results matching "{searchQuery}". Check the spelling or try another title.</p>
                 </div>
               ) : autocompleteResults && autocompleteResults.length > 0 ? (
                 <>
-                  <div className="max-h-[360px] overflow-y-auto divide-y divide-slate-800/60">
+                  <div className="max-h-[360px] overflow-y-auto divide-y divide-[var(--border-subtle)]">
                     {autocompleteResults.slice(0, 7).map((movie) => {
                       const userRating = ratings[movie.id]?.rating;
                       const inWatchlist = watchlist.includes(movie.id);
@@ -465,11 +489,11 @@ export const TasteCalibration: React.FC = () => {
                             setSelectedMovieForModal(movie);
                             setIsDropdownOpen(false);
                           }}
-                          className="group flex items-center justify-between p-3 hover:bg-slate-800/70 transition-colors cursor-pointer gap-3"
+                          className="group flex items-center justify-between p-3 hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer gap-3"
                         >
                           <div className="flex items-center gap-3 min-w-0 flex-1">
                             {/* Poster Thumbnail */}
-                            <div className="w-10 h-14 rounded-lg bg-slate-800 overflow-hidden shrink-0 border border-slate-700/50 relative">
+                            <div className="w-10 h-14 rounded-lg bg-[var(--bg-surface)] overflow-hidden shrink-0 border border-[var(--border-subtle)] relative">
                               {posterUrl ? (
                                 <img
                                   src={posterUrl}
@@ -477,7 +501,7 @@ export const TasteCalibration: React.FC = () => {
                                   className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                                 />
                               ) : (
-                                <div className="w-full h-full flex items-center justify-center text-slate-600">
+                                <div className="w-full h-full flex items-center justify-center text-slate-500">
                                   <Film className="w-4 h-4" />
                                 </div>
                               )}
@@ -486,10 +510,10 @@ export const TasteCalibration: React.FC = () => {
                             {/* Info */}
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-1.5">
-                                <h4 className="text-xs font-semibold text-white group-hover:text-indigo-300 transition-colors truncate">
+                                <h4 className="text-xs font-semibold text-white group-hover:text-[var(--accent-secondary)] transition-colors truncate">
                                   {movie.title}
                                 </h4>
-                                {year && <span className="text-[11px] text-slate-500 shrink-0">({year})</span>}
+                                {year && <span className="text-[11px] text-slate-400 shrink-0">({year})</span>}
                               </div>
 
                               <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-400">
@@ -500,14 +524,14 @@ export const TasteCalibration: React.FC = () => {
                                 )}
                                 {genres && (
                                   <>
-                                    <span className="text-slate-600">•</span>
+                                    <span className="text-slate-500">•</span>
                                     <span className="truncate text-slate-400">{genres}</span>
                                   </>
                                 )}
                               </div>
 
                               {userRating && (
-                                <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-300 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                                <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold palette-tag-secondary px-1.5 py-0.5 rounded">
                                   <CheckCircle2 className="w-2.5 h-2.5" />
                                   <span>Rated {userRating}/10</span>
                                 </div>
@@ -521,8 +545,8 @@ export const TasteCalibration: React.FC = () => {
                               onClick={() => toggleWatchlist(movie)}
                               className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
                                 inWatchlist
-                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
-                                  : 'bg-slate-800/80 text-slate-400 border-slate-700/60 hover:text-white hover:border-slate-500'
+                                  ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-hover)] border-[var(--border-focus)] shadow-sm'
+                                  : 'bg-[var(--bg-surface)] text-slate-400 border-[var(--border-subtle)] hover:text-white'
                               }`}
                               title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
                             >
@@ -534,7 +558,7 @@ export const TasteCalibration: React.FC = () => {
                                 setSelectedMovieForModal(movie);
                                 setIsDropdownOpen(false);
                               }}
-                              className="px-2.5 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 text-indigo-200 hover:text-white border border-indigo-500/40 text-[11px] font-medium transition-all cursor-pointer"
+                              className="px-2.5 py-1.5 rounded-lg btn-tactile btn-tactile-secondary text-[11px]"
                             >
                               {userRating ? 'Edit Grade' : 'Rate Film'}
                             </button>
@@ -545,11 +569,11 @@ export const TasteCalibration: React.FC = () => {
                   </div>
 
                   {/* Dropdown Footer */}
-                  <div className="p-2.5 border-t border-slate-800/80 bg-slate-950/60">
+                  <div className="p-2.5 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)]">
                     <button
                       type="button"
                       onClick={handleViewAllInGrid}
-                      className="w-full py-2 px-3 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 hover:text-indigo-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                      className="btn-tactile btn-tactile-primary w-full py-2 px-3 text-xs font-semibold flex items-center justify-center gap-1.5"
                     >
                       <span>View all {autocompleteResults.length} results in main grid</span>
                       <ArrowRight className="w-3.5 h-3.5" />
@@ -572,10 +596,10 @@ export const TasteCalibration: React.FC = () => {
                   <button
                     key={cat.id}
                     onClick={() => setActiveCategory(cat.id)}
-                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium whitespace-nowrap transition-all border cursor-pointer ${
+                    className={`btn-tactile px-3.5 py-2 text-xs font-semibold whitespace-nowrap transition-all border cursor-pointer ${
                       isSelected
-                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-950'
-                        : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+                        ? 'btn-tactile-primary shadow-md'
+                        : 'btn-tactile-secondary'
                     }`}
                   >
                     {getCategoryIcon(cat.icon)}
@@ -591,28 +615,28 @@ export const TasteCalibration: React.FC = () => {
               <button
                 onClick={handleShuffle}
                 disabled={isLoading || isShuffling}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-200 hover:text-white text-xs font-semibold transition-all shadow-sm active:scale-95 cursor-pointer disabled:opacity-50"
+                className="btn-tactile btn-tactile-secondary px-3.5 py-2 text-xs font-semibold disabled:opacity-50"
                 title="Shuffle for a fresh randomized batch of iconic films"
               >
-                <Shuffle className={`w-3.5 h-3.5 text-purple-400 ${isShuffling ? 'animate-spin' : ''}`} />
+                <Shuffle className={`w-3.5 h-3.5 text-[var(--accent-primary)] ${isShuffling ? 'animate-spin' : ''}`} />
                 <span>Shuffle Batch</span>
               </button>
 
               {/* Hide/Show Rated Toggle */}
               <button
                 onClick={() => setHideRated((prev) => !prev)}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all border cursor-pointer ${
+                className={`btn-tactile px-3.5 py-2 text-xs font-semibold transition-all border cursor-pointer ${
                   hideRated
-                    ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40 hover:bg-indigo-500/30 shadow-sm'
-                    : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+                    ? 'palette-tag-secondary font-bold'
+                    : 'btn-tactile-secondary'
                 }`}
                 title={hideRated ? 'Click to show already rated movies' : 'Click to hide already rated movies'}
               >
                 {hideRated ? (
                   <>
-                    <EyeOff className="w-3.5 h-3.5 text-indigo-400" />
+                    <EyeOff className="w-3.5 h-3.5 text-[var(--accent-secondary)]" />
                     <span>Hide Rated</span>
-                    <span className="px-1.5 py-0.5 bg-indigo-500/30 text-indigo-200 rounded-md text-[10px] font-bold">
+                    <span className="px-1.5 py-0.2 rounded bg-black/20 text-[10px] font-mono font-bold">
                       ON
                     </span>
                   </>
@@ -620,7 +644,7 @@ export const TasteCalibration: React.FC = () => {
                   <>
                     <Eye className="w-3.5 h-3.5 text-slate-400" />
                     <span>Show Rated</span>
-                    <span className="px-1.5 py-0.5 bg-slate-800 text-slate-400 rounded-md text-[10px] font-bold">
+                    <span className="px-1.5 py-0.2 rounded bg-white/10 text-slate-400 text-[10px] font-mono font-bold">
                       OFF
                     </span>
                   </>
@@ -636,7 +660,7 @@ export const TasteCalibration: React.FC = () => {
             <span>Search Results for "{searchQuery}" ({searchResults.length} found)</span>
             <button
               onClick={handleClearSearch}
-              className="text-indigo-400 hover:text-indigo-300 text-xs font-medium underline cursor-pointer"
+              className="text-[var(--accent-primary)] hover:text-[var(--accent-hover)] text-xs font-semibold underline cursor-pointer"
             >
               Clear Search & Back to Iconic Grid
             </button>
@@ -652,9 +676,9 @@ export const TasteCalibration: React.FC = () => {
           ))}
         </div>
       ) : displayedMovies.length === 0 ? (
-        <div className="text-center py-16 space-y-4 glass-panel rounded-3xl border border-slate-800/80 p-8">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mx-auto text-indigo-400">
-            <CheckCircle2 className="w-6 h-6" />
+        <div className="text-center py-16 space-y-4 glass-panel rounded-3xl border border-[var(--border-subtle)] p-8">
+          <div className="w-12 h-12 rounded-2xl palette-tag-secondary flex items-center justify-center mx-auto">
+            <CheckCircle2 className="w-6 h-6 text-[var(--accent-secondary)]" />
           </div>
           <div className="space-y-1">
             <h3 className="text-lg font-bold text-white">
@@ -669,18 +693,18 @@ export const TasteCalibration: React.FC = () => {
           <div className="flex items-center justify-center gap-3 pt-2">
             <button
               onClick={handleShuffle}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-950/60 transition-all active:scale-95"
+              className="btn-tactile btn-tactile-primary px-5 py-2.5 text-xs font-bold shadow-lg"
             >
               <Shuffle className="w-4 h-4" />
-              Shuffle Fresh Batch
+              <span>Shuffle Fresh Batch</span>
             </button>
             {hideRated && ratedCount > 0 && (
               <button
                 onClick={() => setHideRated(false)}
-                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2 cursor-pointer transition-all border border-slate-700/60"
+                className="btn-tactile btn-tactile-secondary px-5 py-2.5 text-xs font-semibold"
               >
                 <Eye className="w-4 h-4" />
-                Show Rated Films ({ratedCount})
+                <span>Show Rated Films ({ratedCount})</span>
               </button>
             )}
           </div>
@@ -700,17 +724,17 @@ export const TasteCalibration: React.FC = () => {
                 onClick={() => setSelectedMovieForModal(movie)}
                 className={`group relative flex flex-col rounded-2xl overflow-hidden glass-panel glass-panel-hover cursor-pointer border transition-all duration-300 ${
                   isPendingRemoval
-                    ? 'animate-pulse-glow bg-slate-900/95'
-                    : 'border-slate-800/80'
+                    ? 'animate-pulse-glow bg-[var(--bg-surface-elevated)]'
+                    : 'border-[var(--border-subtle)]'
                 }`}
               >
                 {/* Active Pending Grace Indicator Strip */}
                 {isPendingRemoval && (
-                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-400 via-indigo-400 to-purple-400 animate-shimmer z-30 shadow-md shadow-indigo-500/50" />
+                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-[var(--accent-secondary)] via-[var(--accent-primary)] to-[var(--accent-hover)] animate-shimmer z-30 shadow-md" />
                 )}
 
                 {/* Poster Box */}
-                <div className="relative aspect-[2/3] w-full bg-slate-900 overflow-hidden">
+                <div className="relative aspect-[2/3] w-full bg-[var(--bg-canvas)] overflow-hidden">
                   {posterUrl ? (
                     <img
                       src={posterUrl}
@@ -725,22 +749,22 @@ export const TasteCalibration: React.FC = () => {
                   )}
 
                   {/* Gradient Overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-surface)] via-transparent to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
 
                   {/* Top Left: Score Badge & User Rating Indicator Badge */}
                   <div className="absolute top-2 left-2 z-10 flex flex-col items-start gap-1">
                     {movie.vote_average > 0 && (
-                      <div className="px-2 py-0.5 rounded-md bg-slate-950/80 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-amber-500/20 shadow-md">
+                      <div className="px-2 py-0.5 rounded-md bg-[var(--bg-surface)]/90 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-[var(--border-subtle)] shadow-md">
                         ★ {movie.vote_average.toFixed(1)}
                       </div>
                     )}
 
                     {userRating && (
                       <div
-                        className={`px-2.5 py-1 rounded-md text-[11px] font-bold shadow-lg shadow-indigo-950 border transition-all ${
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-bold shadow-lg border transition-all ${
                           isPendingRemoval
-                            ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-black border-emerald-300 shadow-emerald-950/80 flex items-center gap-1'
-                            : 'bg-indigo-600 text-white border-indigo-400/40'
+                            ? 'bg-[var(--accent-secondary)] text-slate-950 font-black border-[var(--accent-secondary)] flex items-center gap-1'
+                            : 'bg-[var(--accent-primary)] text-white border-[var(--border-focus)]'
                         }`}
                       >
                         {isPendingRemoval ? (
@@ -764,27 +788,27 @@ export const TasteCalibration: React.FC = () => {
                       }}
                       className={`p-1.5 rounded-md backdrop-blur-md border transition-all cursor-pointer ${
                         inWatchlist
-                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-md'
-                          : 'bg-slate-950/80 text-slate-400 border-slate-700/60 hover:text-white opacity-90 sm:opacity-0 sm:group-hover:opacity-100'
+                          ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-hover)] border-[var(--border-focus)] shadow-md'
+                          : 'bg-[var(--bg-surface)]/80 text-slate-400 border-[var(--border-subtle)] hover:text-white opacity-90 sm:opacity-0 sm:group-hover:opacity-100'
                       }`}
                       title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
                     >
-                      {inWatchlist ? <BookmarkCheck className="w-3.5 h-3.5 text-amber-400" /> : <Bookmark className="w-3.5 h-3.5" />}
+                      {inWatchlist ? <BookmarkCheck className="w-3.5 h-3.5 text-[var(--accent-hover)]" /> : <Bookmark className="w-3.5 h-3.5" />}
                     </button>
 
                     <ShareButton
                       movie={movie}
                       variant="icon"
                       iconSize="w-3.5 h-3.5"
-                      className="p-1.5 rounded-md opacity-90 sm:opacity-0 sm:group-hover:opacity-100"
+                      className="p-1.5 rounded-md opacity-90 sm:opacity-0 sm:group-hover:opacity-100 bg-[var(--bg-surface)]/80 border-[var(--border-subtle)]"
                     />
                   </div>
                 </div>
 
-                {/* Content Box */}
-                <div className="p-3 flex flex-col flex-grow justify-between gap-2.5 bg-slate-950/90">
+                {/* Content Box - Dynamically inherits active palette surface */}
+                <div className="p-3 flex flex-col flex-grow justify-between gap-2.5 bg-[var(--bg-surface)] border-t border-[var(--border-subtle)]">
                   <div>
-                    <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-indigo-300 transition-colors">
+                    <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-[var(--accent-secondary)] transition-colors">
                       {movie.title}
                     </h3>
                     <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
@@ -799,10 +823,10 @@ export const TasteCalibration: React.FC = () => {
                   </div>
 
                   {/* 1-10 Rating Control */}
-                  <div className="pt-1 border-t border-slate-800/60 space-y-1">
+                  <div className="pt-1 border-t border-[var(--border-subtle)] space-y-1">
                     {isPendingRemoval && (
-                      <div className="flex items-center justify-between text-[11px] text-white bg-gradient-to-r from-indigo-900 via-purple-900 to-indigo-900 px-2.5 py-1.5 rounded-lg border border-indigo-400 shadow-lg shadow-indigo-950">
-                        <span className="font-bold flex items-center gap-1.5 text-emerald-300">
+                      <div className="flex items-center justify-between text-[11px] text-white bg-[var(--bg-surface-elevated)] px-2.5 py-1.5 rounded-lg border border-[var(--border-focus)] shadow-lg shadow-[var(--accent-glow)]">
+                        <span className="font-bold flex items-center gap-1.5 text-[var(--accent-secondary)]">
                           ✓ Grade saved! Hiding soon...
                         </span>
                       </div>
@@ -832,10 +856,10 @@ export const TasteCalibration: React.FC = () => {
               fetchCategoryMovies(activeCategory, nextPage, true);
             }}
             disabled={isLoading}
-            className="px-6 py-3 rounded-2xl glass-panel text-slate-200 hover:text-white hover:border-indigo-500 text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer shadow-lg active:scale-95 disabled:opacity-50"
+            className="btn-tactile btn-tactile-secondary px-6 py-3 text-xs font-semibold shadow-lg active:scale-95 disabled:opacity-50"
           >
-            {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-indigo-400" />}
-            {isLoading ? 'Loading More Movies...' : 'Explore More Iconic Films'}
+            {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-[var(--accent-primary)]" />}
+            <span>{isLoading ? 'Loading More Films...' : 'Explore More Iconic Films'}</span>
           </button>
         </div>
       )}

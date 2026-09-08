@@ -18,7 +18,7 @@ export const RatingControl: React.FC<RatingControlProps> = ({
 
   const getRatingColor = (score: number, isSelected: boolean) => {
     if (!isSelected && hoveredRating === null) {
-      return 'bg-slate-800/80 text-slate-300 border-slate-700/60 hover:border-slate-500';
+      return 'bg-[var(--bg-surface-elevated)] text-slate-300 border-[var(--border-subtle)] hover:border-[var(--border-focus)]';
     }
 
     if (score <= 3) {
@@ -38,8 +38,8 @@ export const RatingControl: React.FC<RatingControlProps> = ({
     }
     // 9-10 Masterpiece
     return isSelected
-      ? 'bg-gradient-to-r from-indigo-500 via-purple-500 to-amber-400 text-white border-indigo-400 shadow-lg shadow-indigo-900/50 font-bold scale-105'
-      : 'hover:bg-indigo-600/40 text-indigo-300 border-indigo-800/40';
+      ? 'bg-[var(--accent-primary)] text-[var(--accent-text)] border-[var(--border-focus)] shadow-lg shadow-[var(--accent-glow)] font-bold scale-105'
+      : 'hover:bg-[var(--accent-secondary-bg)] text-[var(--accent-secondary)] border-[var(--border-subtle)]';
   };
 
   const getRatingLabel = (score: number) => {
@@ -89,7 +89,7 @@ export const RatingControl: React.FC<RatingControlProps> = ({
                 e.stopPropagation();
                 onClear();
               }}
-              className="text-[11px] text-slate-400 hover:text-rose-400 flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded bg-slate-800/60 hover:bg-slate-800"
+              className="text-[11px] text-slate-400 hover:text-rose-400 flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)]"
               title="Reset rating"
             >
               <EyeOff className="w-3 h-3" />
@@ -123,13 +123,13 @@ export const RatingControl: React.FC<RatingControlProps> = ({
 
   // Expanded Mode (For Modals and Detail Views)
   return (
-    <div className="flex flex-col gap-3 p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+    <div className="flex flex-col gap-3 p-4 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)]">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Star className="w-5 h-5 text-amber-400 fill-amber-400" />
           <span className="text-sm font-semibold text-slate-200">Your Rating</span>
           {activeScore && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-indigo-300 font-medium border border-slate-700">
+            <span className="text-xs px-2 py-0.5 rounded-full palette-tag-secondary font-medium">
               {activeScore}/10 — {getRatingLabel(activeScore)}
             </span>
           )}
@@ -140,8 +140,8 @@ export const RatingControl: React.FC<RatingControlProps> = ({
           onClick={onClear}
           className={`text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors border ${
             currentRating
-              ? 'text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 border-slate-800 hover:border-rose-900/50'
-              : 'text-slate-500 bg-slate-950/40 border-slate-900'
+              ? 'text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 border-[var(--border-subtle)] hover:border-rose-900/50'
+              : 'text-slate-500 bg-[var(--bg-surface)] border-[var(--border-subtle)]'
           }`}
         >
           <EyeOff className="w-3.5 h-3.5" />
@@ -173,11 +173,11 @@ export const RatingControl: React.FC<RatingControlProps> = ({
       </div>
 
       {/* Guidance Labels */}
-      <div className="flex justify-between text-[11px] text-slate-500 px-1 font-medium">
+      <div className="flex justify-between text-[11px] text-slate-400 px-1 font-medium">
         <span>1-3: Poor / Disliked</span>
         <span>5-6: Decent</span>
         <span>7-8: Great</span>
-        <span className="text-indigo-400">9-10: Masterpiece</span>
+        <span className="text-[var(--accent-secondary)] font-bold">9-10: Masterpiece</span>
       </div>
     </div>
   );

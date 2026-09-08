@@ -82,8 +82,8 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <Film className="w-6 h-6 text-indigo-400" />
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            <Film className="w-6 h-6 text-[var(--accent-primary)]" />
+            <h1 className="font-heading text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
               My Movie Library & Ratings
             </h1>
           </div>
@@ -96,22 +96,22 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setActiveTab('watchlist')}
-            className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 flex items-center gap-1.5 transition-all cursor-pointer"
+            className="btn-tactile btn-tactile-secondary px-3.5 py-1.5 text-xs font-semibold"
           >
             <Bookmark className="w-3.5 h-3.5" />
             Watchlist ({watchlist.length})
           </button>
           <button
             onClick={onOpenCsvModal}
-            className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 border border-slate-700 text-slate-200 hover:text-white hover:border-slate-500 flex items-center gap-1.5 transition-all cursor-pointer"
+            className="btn-tactile btn-tactile-secondary px-3.5 py-1.5 text-xs font-semibold"
           >
-            <Upload className="w-3.5 h-3.5 text-indigo-400" />
+            <Upload className="w-3.5 h-3.5 text-[var(--accent-secondary)]" />
             Import CSV
           </button>
           <button
             onClick={exportRatingsToCsv}
             disabled={ratingsList.length === 0}
-            className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 border border-slate-700 text-slate-200 hover:text-white hover:border-slate-500 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40"
+            className="btn-tactile btn-tactile-secondary px-3.5 py-1.5 text-xs font-semibold disabled:opacity-40"
           >
             <Download className="w-3.5 h-3.5 text-emerald-400" />
             Export CSV
@@ -123,23 +123,23 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
       {ratingsList.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Average & Total */}
-          <div className="glass-panel p-5 rounded-2xl border border-slate-800 space-y-2">
+          <div className="glass-panel p-5 rounded-2xl border border-[var(--border-subtle)] space-y-2">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-              <TrendingUp className="w-3.5 h-3.5 text-indigo-400" /> Rating Stats
+              <TrendingUp className="w-3.5 h-3.5 text-[var(--accent-secondary)]" /> Rating Stats
             </span>
             <div className="flex items-baseline gap-3">
               <span className="text-3xl font-black text-white">{tasteStats.averageRating}</span>
               <span className="text-xs text-slate-400">/ 10 Average across {tasteStats.totalRated} films</span>
             </div>
-            <p className="text-xs text-slate-300 leading-relaxed pt-1 border-t border-slate-800/60">
+            <p className="text-xs text-slate-300 leading-relaxed pt-1 border-t border-[var(--border-subtle)]">
               {tasteStats.tasteVectorSummary}
             </p>
           </div>
 
           {/* Top Genres */}
-          <div className="glass-panel p-5 rounded-2xl border border-slate-800 space-y-2">
+          <div className="glass-panel p-5 rounded-2xl border border-[var(--border-subtle)] space-y-2">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-              <BarChart3 className="w-3.5 h-3.5 text-purple-400" /> Favorite Genres
+              <BarChart3 className="w-3.5 h-3.5 text-[var(--accent-secondary)]" /> Favorite Genres
             </span>
             <div className="space-y-1.5 pt-1">
               {tasteStats.topGenres.length === 0 ? (
@@ -148,7 +148,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
                 tasteStats.topGenres.slice(0, 3).map((g) => (
                   <div key={g.genre} className="flex items-center justify-between text-xs">
                     <span className="text-slate-200 font-medium">{g.genre}</span>
-                    <span className="text-indigo-400 font-bold">
+                    <span className="text-[var(--accent-primary)] font-bold">
                       {g.count} films ({g.avgRating}★)
                     </span>
                   </div>
@@ -158,9 +158,9 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
           </div>
 
           {/* Top Directors */}
-          <div className="glass-panel p-5 rounded-2xl border border-slate-800 space-y-2">
+          <div className="glass-panel p-5 rounded-2xl border border-[var(--border-subtle)] space-y-2">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-              <User className="w-3.5 h-3.5 text-pink-400" /> Favorite Directors
+              <User className="w-3.5 h-3.5 text-[var(--accent-primary)]" /> Favorite Directors
             </span>
             <div className="space-y-1.5 pt-1">
               {tasteStats.topDirectors.length === 0 ? (
@@ -169,7 +169,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
                 tasteStats.topDirectors.slice(0, 3).map((d) => (
                   <div key={d.director} className="flex items-center justify-between text-xs">
                     <span className="text-slate-200 font-medium">{d.director}</span>
-                    <span className="text-purple-400 font-bold">
+                    <span className="text-[var(--accent-secondary)] font-bold">
                       {d.count} films ({d.avgRating}★)
                     </span>
                   </div>
@@ -181,7 +181,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
       )}
 
       {/* Filter and Sort Toolbar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 glass-panel p-4 rounded-2xl border border-slate-800">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 glass-panel p-4 rounded-2xl border border-[var(--border-subtle)]">
         {/* Tier Buttons */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
           {[
@@ -194,10 +194,10 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
             <button
               key={tier.id}
               onClick={() => setFilterTier(tier.id)}
-              className={`text-xs px-3 py-1.5 rounded-xl whitespace-nowrap transition-all border cursor-pointer ${
+              className={`btn-tactile text-xs px-3 py-1.5 whitespace-nowrap transition-all border cursor-pointer ${
                 filterTier === tier.id
-                  ? 'bg-indigo-600 text-white border-indigo-500 font-bold shadow-md shadow-indigo-950'
-                  : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+                  ? 'btn-tactile-primary font-bold shadow-md'
+                  : 'btn-tactile-secondary'
               }`}
             >
               {tier.label}
@@ -206,7 +206,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
 
           <button
             onClick={() => setActiveTab('watchlist')}
-            className="text-xs px-3 py-1.5 rounded-xl whitespace-nowrap transition-all border cursor-pointer bg-slate-900 text-amber-300 border-amber-500/30 hover:bg-amber-500/20 hover:text-amber-200 flex items-center gap-1.5 ml-1"
+            className="btn-tactile btn-tactile-secondary text-xs px-3 py-1.5 whitespace-nowrap transition-all border cursor-pointer flex items-center gap-1.5 ml-1"
           >
             <Bookmark className="w-3.5 h-3.5" />
             Watchlist ({watchlist.length})
@@ -221,15 +221,15 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
               placeholder="Search rated films..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+              className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-200 focus:outline-none focus:border-[var(--border-focus)]"
             />
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           </div>
 
           <select
             value={sortBy}
             onChange={(e: any) => setSortBy(e.target.value)}
-            className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
+            className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-300 focus:outline-none focus:border-[var(--border-focus)] cursor-pointer"
           >
             <option value="recent">Recently Rated</option>
             <option value="rating-desc">Highest Rating</option>
@@ -240,11 +240,11 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
 
       {/* Ratings Grid */}
       {ratingsList.length === 0 ? (
-        <div className="text-center py-16 glass-panel rounded-2xl p-8 space-y-4">
+        <div className="text-center py-16 glass-panel rounded-2xl p-8 space-y-4 border border-[var(--border-subtle)]">
           <p className="text-slate-400 text-sm">You have not rated any movies yet.</p>
           <button
             onClick={() => setActiveTab('calibration')}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-950 cursor-pointer"
+            className="btn-tactile btn-tactile-primary px-5 py-2.5 text-xs font-bold shadow-lg"
           >
             Start in Taste Calibration
           </button>
@@ -260,7 +260,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
             return (
               <div
                 key={item.movieId}
-                className="group relative flex flex-col rounded-2xl overflow-hidden glass-panel glass-panel-hover border border-slate-800"
+                className="group relative flex flex-col rounded-2xl overflow-hidden glass-panel glass-panel-hover border border-[var(--border-subtle)]"
               >
                 {/* Poster Box */}
                 <div
@@ -277,7 +277,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
                       director: item.director,
                     })
                   }
-                  className="relative aspect-[2/3] w-full bg-slate-900 overflow-hidden cursor-pointer"
+                  className="relative aspect-[2/3] w-full bg-[var(--bg-canvas)] overflow-hidden cursor-pointer"
                 >
                   {posterUrl ? (
                     <img
@@ -294,7 +294,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
 
                   {/* Top Left: Rating Badge */}
                   <div className="absolute top-2 left-2 z-10 flex flex-col items-start gap-1">
-                    <div className="px-2 py-0.5 rounded-md bg-slate-950/80 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-amber-500/20 shadow-md">
+                    <div className="px-2 py-0.5 rounded-md bg-[var(--bg-surface)]/90 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-[var(--border-subtle)] shadow-md">
                       ★ {item.rating}/10
                     </div>
                   </div>
@@ -315,15 +315,15 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
                       }}
                       variant="icon"
                       iconSize="w-3.5 h-3.5"
-                      className="opacity-90 sm:opacity-0 sm:group-hover:opacity-100"
+                      className="opacity-90 sm:opacity-0 sm:group-hover:opacity-100 bg-[var(--bg-surface)]/90 border border-[var(--border-subtle)]"
                     />
                   </div>
                 </div>
 
                 {/* Content Box */}
-                <div className="p-3 flex flex-col flex-grow justify-between gap-2 bg-slate-950/90">
+                <div className="p-3 flex flex-col flex-grow justify-between gap-2 card-content-box">
                   <div>
-                    <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1">
+                    <h3 className="text-xs sm:text-sm font-bold text-white line-clamp-1 group-hover:text-[var(--accent-secondary)] transition-colors">
                       {item.title}
                     </h3>
                     <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
@@ -338,7 +338,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
                   </div>
 
                   {/* Rating Control */}
-                  <div className="pt-1 border-t border-slate-800/60">
+                  <div className="pt-1 border-t border-[var(--border-subtle)]">
                     <RatingControl
                       currentRating={item.rating}
                       onRate={(newScore) =>

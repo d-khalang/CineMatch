@@ -19,7 +19,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ onOpenSettings
   ];
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/90 backdrop-blur-xl border-t border-slate-800/90 safe-pb">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--bg-surface)]/95 backdrop-blur-xl border-t border-[var(--border-subtle)] safe-pb transition-colors duration-300">
       <div className="flex items-center justify-around h-16 px-1">
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -29,13 +29,13 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ onOpenSettings
               key={item.id}
               onClick={() => setActiveTab(item.id as any)}
               className={`relative flex-1 max-w-[76px] flex flex-col items-center justify-center py-1 rounded-xl transition-all cursor-pointer ${
-                isActive ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+                isActive ? 'text-[var(--accent-primary)] font-bold' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <div className="relative">
                 <Icon className={`w-5 h-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
                 {item.badge && (
-                  <span className="absolute -top-1.5 -right-2.5 px-1.5 py-0.2 bg-indigo-600 text-white text-[9px] font-extrabold rounded-full shadow-sm">
+                  <span className="absolute -top-1.5 -right-2.5 px-1.5 py-0.2 bg-[var(--accent-primary)] text-white text-[9px] font-extrabold rounded-full shadow-sm">
                     {item.badge}
                   </span>
                 )}

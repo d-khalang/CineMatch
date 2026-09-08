@@ -98,48 +98,48 @@ export const RankedFeed: React.FC = () => {
 
   const getRankBadgeStyle = (rank: number) => {
     if (rank === 1) {
-      return 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black shadow-lg shadow-amber-500/30 border-amber-300';
+      return 'bg-[var(--accent-primary)] text-[var(--accent-text)] font-black shadow-lg shadow-[var(--accent-glow)] border-[var(--border-focus)]';
     }
     if (rank === 2) {
-      return 'bg-gradient-to-r from-slate-200 to-slate-400 text-slate-950 font-black shadow-lg shadow-slate-300/20 border-slate-200';
+      return 'bg-[var(--bg-surface-elevated)] text-[var(--accent-secondary)] font-black shadow-md border-[var(--border-subtle)]';
     }
     if (rank === 3) {
-      return 'bg-gradient-to-r from-amber-600 to-orange-700 text-white font-black shadow-lg shadow-orange-700/30 border-orange-400';
+      return 'bg-[var(--bg-surface-hover)] text-slate-200 font-bold border-[var(--border-subtle)]';
     }
-    return 'bg-slate-800 text-slate-200 font-bold border-slate-700';
+    return 'bg-[var(--bg-surface-elevated)] text-slate-400 font-bold border-[var(--border-subtle)]';
   };
 
   const getSerendipityBadge = (type: string) => {
     switch (type) {
       case 'ai_cinephile_discovery':
         return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] px-3 py-1 rounded-full bg-gradient-to-r from-purple-500/25 via-pink-500/25 to-indigo-500/25 text-pink-200 border border-pink-500/40 font-bold shadow-lg shadow-purple-950/40 animate-pulse">
-            <Sparkles className="w-3.5 h-3.5 text-pink-300 fill-pink-400/20" />
+          <span className="inline-flex items-center gap-1.5 text-[11px] px-3 py-1 rounded-md palette-tag-primary font-bold shadow-md animate-pulse">
+            <Sparkles className="w-3.5 h-3.5 text-inherit" />
             <span>🧠 AI Cinephile Discovery (Cross-Genre)</span>
           </span>
         );
       case 'wildcard_discovery':
         return (
-          <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-semibold">
-            <Flame className="w-3 h-3 text-rose-400" /> Wildcard Discovery
+          <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
+            <Flame className="w-3 h-3 text-[var(--accent-primary)]" /> Wildcard Discovery
           </span>
         );
       case 'thematic_gem':
         return (
-          <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-semibold">
-            <Compass className="w-3 h-3 text-purple-400" /> Thematic Gem
+          <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
+            <Compass className="w-3 h-3 text-[var(--accent-secondary)]" /> Thematic Gem
           </span>
         );
       case 'director_match':
         return (
-          <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-semibold">
-            <Clapperboard className="w-3 h-3 text-blue-400" /> Director Match
+          <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
+            <Clapperboard className="w-3 h-3 text-[var(--accent-secondary)]" /> Director Match
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
-            <Award className="w-3 h-3 text-emerald-400" /> Safe Bet (High Match)
+          <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
+            <Award className="w-3 h-3 text-[var(--accent-secondary)]" /> Safe Bet (High Match)
           </span>
         );
     }
@@ -148,8 +148,8 @@ export const RankedFeed: React.FC = () => {
   if (ratedCount < 2) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-16 text-center space-y-6">
-        <div className="w-20 h-20 mx-auto rounded-3xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-2xl">
-          <Trophy className="w-10 h-10" />
+        <div className="w-20 h-20 mx-auto rounded-3xl palette-tag-secondary flex items-center justify-center shadow-2xl">
+          <Trophy className="w-10 h-10 text-[var(--accent-secondary)]" />
         </div>
         <div className="space-y-2">
           <h2 className="text-2xl sm:text-3xl font-extrabold text-white">Your Rank List Needs Calibration</h2>
@@ -159,7 +159,7 @@ export const RankedFeed: React.FC = () => {
         </div>
         <button
           onClick={() => setActiveTab('calibration')}
-          className="px-6 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-sm shadow-xl shadow-indigo-950 flex items-center gap-2 mx-auto active:scale-95 transition-all cursor-pointer"
+          className="btn-tactile btn-tactile-primary px-6 py-3 text-sm font-bold shadow-xl mx-auto"
         >
           <SlidersHorizontal className="w-4 h-4" />
           Go to Taste Calibration Grid
@@ -174,8 +174,8 @@ export const RankedFeed: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <Trophy className="w-6 h-6 text-amber-400" />
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            <Trophy className="w-6 h-6 text-[var(--accent-primary)]" />
+            <h1 className="font-heading text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
               Top Ranked Movies for You
             </h1>
           </div>
@@ -184,7 +184,7 @@ export const RankedFeed: React.FC = () => {
             {lastProviderUsed && (
               <>
                 <span>•</span>
-                <span className="text-indigo-400 font-medium">{lastProviderUsed}</span>
+                <span className="text-[var(--accent-secondary)] font-medium">{lastProviderUsed}</span>
               </>
             )}
           </p>
@@ -196,17 +196,17 @@ export const RankedFeed: React.FC = () => {
 
       {/* AI Psychological Taste DNA card if available */}
       {aiTasteAnalysis && (
-        <div className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl glass-panel border border-purple-500/30 bg-gradient-to-r from-purple-950/40 via-slate-900/60 to-indigo-950/40 shadow-xl relative overflow-hidden">
+        <div className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl glass-panel border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] shadow-xl relative overflow-hidden">
           <div className="flex items-start gap-3">
-            <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400 shrink-0">
-              <Sparkles className="w-5 h-5 text-purple-300" />
+            <div className="p-2.5 rounded-xl palette-tag-secondary shrink-0">
+              <Sparkles className="w-5 h-5 text-[var(--accent-secondary)]" />
             </div>
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <h3 className="text-xs sm:text-sm font-bold text-white tracking-wide uppercase">
                   AI Psychological Taste Synthesis
                 </h3>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-semibold border border-purple-500/30">
+                <span className="text-[10px] px-2 py-0.5 rounded-full palette-tag-secondary font-semibold">
                   Cross-Genre DNA
                 </span>
               </div>
@@ -244,7 +244,7 @@ export const RankedFeed: React.FC = () => {
           </p>
           <button
             onClick={generateRankings}
-            className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg shadow-indigo-950 cursor-pointer"
+            className="btn-tactile btn-tactile-primary px-6 py-3 text-sm font-bold shadow-lg"
           >
             Generate AI Rankings
           </button>
@@ -264,15 +264,15 @@ export const RankedFeed: React.FC = () => {
                 key={movie.id}
                 className={`group relative flex flex-col md:flex-row gap-4 sm:gap-6 rounded-2xl sm:rounded-3xl p-4 sm:p-5 glass-panel glass-panel-hover border transition-all duration-300 overflow-hidden ${
                   isPendingRemoval
-                    ? 'animate-pulse-glow bg-slate-900/95'
+                    ? 'animate-pulse-glow bg-[var(--bg-surface-elevated)]'
                     : serendipityType === 'ai_cinephile_discovery'
-                    ? 'border-purple-500/40 shadow-lg shadow-purple-950/20 ring-1 ring-purple-500/30 bg-slate-950/90'
-                    : 'border-slate-800'
+                    ? 'border-[var(--border-focus)] shadow-lg shadow-[var(--accent-glow)] ring-1 ring-[var(--border-focus)]'
+                    : 'border-[var(--border-subtle)]'
                 }`}
               >
                 {/* Active Pending Grace Indicator Strip */}
                 {isPendingRemoval && (
-                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-400 via-indigo-400 to-purple-400 animate-shimmer z-30 shadow-md shadow-indigo-500/50" />
+                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-[var(--accent-secondary)] via-[var(--accent-primary)] to-[var(--accent-hover)] animate-shimmer z-30 shadow-md" />
                 )}
 
                 {/* Rank Number Badge */}
@@ -287,7 +287,7 @@ export const RankedFeed: React.FC = () => {
                 {/* Poster Box */}
                 <div
                   onClick={() => setSelectedMovieForModal(movie)}
-                  className="relative w-full md:w-44 aspect-[2/3] md:aspect-auto md:h-64 rounded-xl sm:rounded-2xl overflow-hidden bg-slate-900 shrink-0 cursor-pointer"
+                  className="relative w-full md:w-44 aspect-[2/3] md:aspect-auto md:h-64 rounded-xl sm:rounded-2xl overflow-hidden bg-[var(--bg-canvas)] shrink-0 cursor-pointer"
                 >
                   {posterUrl ? (
                     <img
@@ -301,7 +301,7 @@ export const RankedFeed: React.FC = () => {
                     </div>
                   )}
 
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent opacity-60 md:hidden" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-surface)] via-transparent to-transparent opacity-60 md:hidden" />
 
                     {/* Mobile Match pill, Watchlist & Share buttons */}
                     <div className="absolute top-4 right-4 md:hidden flex items-center gap-1.5">
@@ -312,15 +312,15 @@ export const RankedFeed: React.FC = () => {
                         }}
                         className={`p-1.5 rounded-lg backdrop-blur-md border transition-all cursor-pointer ${
                           inWatchlist
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-md'
-                            : 'bg-slate-950/80 text-slate-300 border-slate-700/60 hover:text-white'
+                            ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-hover)] border-[var(--border-focus)] shadow-md'
+                            : 'bg-[var(--bg-surface)]/80 text-slate-300 border-[var(--border-subtle)] hover:text-white'
                         }`}
                         title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
                       >
-                        {inWatchlist ? <BookmarkCheck className="w-4 h-4 text-amber-400" /> : <Bookmark className="w-4 h-4" />}
+                        {inWatchlist ? <BookmarkCheck className="w-4 h-4 text-[var(--accent-hover)]" /> : <Bookmark className="w-4 h-4" />}
                       </button>
                       <ShareButton movie={movie} variant="icon" iconSize="w-4 h-4" />
-                      <div className="px-2.5 py-1 rounded-full bg-slate-950/80 backdrop-blur-md text-xs font-bold text-emerald-400 border border-emerald-500/30">
+                      <div className="px-2.5 py-1 rounded-full bg-[var(--bg-surface)]/90 backdrop-blur-md text-xs font-bold text-[var(--accent-primary)] border border-[var(--border-focus)] shadow-md">
                         {score}% Match
                       </div>
                     </div>
@@ -338,7 +338,7 @@ export const RankedFeed: React.FC = () => {
                               highlightTags.map((tag, idx) => (
                                 <span
                                   key={idx}
-                                  className="text-[11px] px-2 py-0.5 rounded-md bg-slate-800/80 text-slate-300 border border-slate-700/60"
+                                  className="text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-medium tracking-wide"
                                 >
                                   {tag}
                                 </span>
@@ -347,7 +347,7 @@ export const RankedFeed: React.FC = () => {
 
                           <h2
                             onClick={() => setSelectedMovieForModal(movie)}
-                            className="text-lg sm:text-xl font-bold text-white hover:text-indigo-300 transition-colors cursor-pointer flex items-center gap-2"
+                            className="text-lg sm:text-xl font-bold text-white hover:text-[var(--accent-secondary)] transition-colors cursor-pointer flex items-center gap-2"
                           >
                             {movie.title}
                             {year && <span className="text-slate-400 font-normal text-sm">({year})</span>}
@@ -357,8 +357,8 @@ export const RankedFeed: React.FC = () => {
                         {/* Desktop Match Score & Watchlist & Share */}
                         <div className="hidden md:flex items-center gap-2">
                           <div className="text-right mr-1">
-                            <div className="text-lg font-extrabold text-emerald-400">{score}%</div>
-                            <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                            <div className="text-lg font-extrabold text-[var(--accent-primary)]">{score}%</div>
+                            <div className="text-[10px] text-[var(--accent-secondary)] uppercase tracking-wider font-bold">
                               Taste Match
                             </div>
                           </div>
@@ -367,19 +367,19 @@ export const RankedFeed: React.FC = () => {
                             onClick={() => toggleWatchlist(movie)}
                             className={`p-2.5 rounded-xl border transition-colors cursor-pointer ${
                               inWatchlist
-                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                                ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-hover)] border-[var(--border-focus)]'
+                                : 'bg-[var(--bg-surface-elevated)] text-slate-400 border-[var(--border-subtle)] hover:text-white'
                             }`}
                             title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
                           >
-                            {inWatchlist ? <BookmarkCheck className="w-5 h-5" /> : <Bookmark className="w-5 h-5" />}
+                            {inWatchlist ? <BookmarkCheck className="w-5 h-5 text-[var(--accent-hover)]" /> : <Bookmark className="w-5 h-5" />}
                           </button>
 
                           <ShareButton
                             movie={movie}
                             variant="icon"
                             iconSize="w-5 h-5"
-                            className="p-2.5 rounded-xl bg-slate-900 text-slate-400 border-slate-800 hover:text-white hover:border-slate-700"
+                            className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] text-slate-400 border-[var(--border-subtle)] hover:text-white"
                           />
                         </div>
                       </div>
@@ -403,26 +403,14 @@ export const RankedFeed: React.FC = () => {
 
                     {/* AI Explanation Box */}
                     <div
-                      className={`p-3 sm:p-3.5 rounded-xl flex items-start gap-2.5 ${
-                        serendipityType === 'ai_cinephile_discovery'
-                          ? 'bg-gradient-to-r from-purple-950/50 via-pink-950/30 to-indigo-950/50 border border-pink-500/40 shadow-md'
-                          : 'bg-indigo-950/30 border border-indigo-500/20'
-                      }`}
+                      className="p-3 sm:p-3.5 rounded-xl flex items-start gap-2.5 border border-[var(--border-subtle)] border-l-2 border-l-[var(--accent-primary)] bg-[var(--bg-surface-elevated)]/90 shadow-sm"
                     >
                       <Sparkles
-                        className={`w-4 h-4 shrink-0 mt-0.5 ${
-                          serendipityType === 'ai_cinephile_discovery' ? 'text-pink-400' : 'text-indigo-400'
-                        }`}
+                        className="w-4 h-4 shrink-0 mt-0.5 text-[var(--accent-primary)]"
                       />
-                      <div
-                        className={`text-xs leading-relaxed ${
-                          serendipityType === 'ai_cinephile_discovery' ? 'text-pink-100' : 'text-indigo-200'
-                        }`}
-                      >
+                      <div className="text-xs leading-relaxed text-slate-200">
                         <span className="font-semibold text-white">
-                          {serendipityType === 'ai_cinephile_discovery'
-                            ? `Why this AI Cinephile Discovery (#${displayRank}): `
-                            : `Why ranked #${displayRank}: `}
+                          Why ranked #{displayRank}:{' '}
                         </span>
                         {reason}
                       </div>
@@ -430,11 +418,11 @@ export const RankedFeed: React.FC = () => {
                   </div>
 
                   {/* Rating Strip at the bottom of the card */}
-                  <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="pt-2 border-t border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="w-full sm:max-w-md space-y-1">
                       {isPendingRemoval && (
-                        <div className="flex items-center justify-between text-[11px] text-white bg-gradient-to-r from-indigo-900 via-purple-900 to-indigo-900 px-2.5 py-1.5 rounded-lg border border-indigo-400 shadow-lg shadow-indigo-950">
-                          <span className="font-bold flex items-center gap-1.5 text-emerald-300">
+                        <div className="flex items-center justify-between text-[11px] text-white bg-[var(--bg-surface-elevated)] px-2.5 py-1.5 rounded-lg border border-[var(--border-focus)] shadow-lg shadow-[var(--accent-glow)]">
+                          <span className="font-bold flex items-center gap-1.5 text-[var(--accent-secondary)]">
                             ✓ Grade saved! Hiding soon...
                           </span>
                         </div>
@@ -450,9 +438,9 @@ export const RankedFeed: React.FC = () => {
 
                     <button
                       onClick={() => setSelectedMovieForModal(movie)}
-                      className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold self-end sm:self-center transition-colors cursor-pointer"
+                      className="text-xs text-[var(--accent-primary)] hover:text-[var(--accent-hover)] hover:underline font-bold self-end sm:self-center transition-colors cursor-pointer"
                     >
-                      Trailer & Details →
+                      Trailer & Details
                     </button>
                   </div>
                 </div>
