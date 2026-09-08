@@ -2,17 +2,199 @@
 
 @layer base {
   :root {
-    --font-heading: 'Outfit', sans-serif;
+    --font-heading: 'Bricolage Grotesque', sans-serif;
     --font-sans: 'Plus Jakarta Sans', sans-serif;
+
+    /* Default Palette: Autumn Maple & Moss (From user photo) */
+    --bg-canvas: #121c17;
+    --bg-surface: #192721;
+    --bg-surface-elevated: #22352c;
+    --bg-surface-hover: #2d453a;
+    --border-subtle: rgba(138, 184, 148, 0.30);
+    --border-focus: #e6283b;
+    --border-accent: rgba(230, 40, 59, 0.50);
+    --accent-primary: #e6283b;
+    --accent-hover: #ff3b4e;
+    --accent-text: #ffffff;
+    --accent-glow: rgba(230, 40, 59, 0.35);
+    --accent-secondary: #8ab894;
+    --accent-secondary-bg: rgba(138, 184, 148, 0.18);
+    --accent-secondary-border: rgba(138, 184, 148, 0.38);
+    --accent-tag-bg: rgba(138, 184, 148, 0.18);
+    --accent-tag-text: #a8d5b1;
+    --ambient-glow-1: rgba(230, 40, 59, 0.22);
+    --ambient-glow-2: rgba(138, 184, 148, 0.18);
+  }
+
+  /* Palette 1: Autumn Maple & Moss (From user photo) */
+  [data-palette="maple"] {
+    --bg-canvas: #121c17;
+    --bg-surface: #192721;
+    --bg-surface-elevated: #22352c;
+    --bg-surface-hover: #2d453a;
+    --border-subtle: rgba(138, 184, 148, 0.30);
+    --border-focus: #e6283b;
+    --border-accent: rgba(230, 40, 59, 0.50);
+    --accent-primary: #e6283b;
+    --accent-hover: #ff3b4e;
+    --accent-text: #ffffff;
+    --accent-glow: rgba(230, 40, 59, 0.35);
+    --accent-secondary: #8ab894;
+    --accent-secondary-bg: rgba(138, 184, 148, 0.18);
+    --accent-secondary-border: rgba(138, 184, 148, 0.38);
+    --accent-tag-bg: rgba(138, 184, 148, 0.18);
+    --accent-tag-text: #a8d5b1;
+    --ambient-glow-1: rgba(230, 40, 59, 0.22);
+    --ambient-glow-2: rgba(138, 184, 148, 0.18);
+  }
+
+  /* Palette 2: Criterion Noir & Gold (Archival Prestige & Amber Gold) */
+  [data-palette="criterion"] {
+    --bg-canvas: #181410;
+    --bg-surface: #231c17;
+    --bg-surface-elevated: #2f251f;
+    --bg-surface-hover: #3c3028;
+    --border-subtle: rgba(212, 175, 55, 0.28);
+    --border-focus: #d4af37;
+    --border-accent: rgba(212, 175, 55, 0.48);
+    --accent-primary: #d4af37;
+    --accent-hover: #ebd59b;
+    --accent-text: #12100e;
+    --accent-glow: rgba(212, 175, 55, 0.35);
+    --accent-secondary: #ebd59b;
+    --accent-secondary-bg: rgba(212, 175, 55, 0.16);
+    --accent-secondary-border: rgba(212, 175, 55, 0.35);
+    --accent-tag-bg: rgba(212, 175, 55, 0.16);
+    --accent-tag-text: #f5e2b3;
+    --ambient-glow-1: rgba(212, 175, 55, 0.22);
+    --ambient-glow-2: rgba(190, 130, 50, 0.16);
+  }
+
+  /* Palette 3: A24 Midnight Velvet (Moody Blackberry, Plum & Neon Crimson) */
+  [data-palette="a24"] {
+    --bg-canvas: #160e22;
+    --bg-surface: #211534;
+    --bg-surface-elevated: #2d1d46;
+    --bg-surface-hover: #3b265c;
+    --border-subtle: rgba(244, 63, 94, 0.30);
+    --border-focus: #f43f5e;
+    --border-accent: rgba(244, 63, 94, 0.50);
+    --accent-primary: #f43f5e;
+    --accent-hover: #fb7185;
+    --accent-text: #ffffff;
+    --accent-glow: rgba(244, 63, 94, 0.35);
+    --accent-secondary: #c084fc;
+    --accent-secondary-bg: rgba(192, 132, 252, 0.18);
+    --accent-secondary-border: rgba(192, 132, 252, 0.38);
+    --accent-tag-bg: rgba(192, 132, 252, 0.18);
+    --accent-tag-text: #e9d5ff;
+    --ambient-glow-1: rgba(244, 63, 94, 0.24);
+    --ambient-glow-2: rgba(168, 85, 247, 0.18);
+  }
+
+  /* Palette 4: MUBI Scandi Cyan (Deep Arctic Navy & Icy Fjord Cerulean) */
+  [data-palette="mubi"] {
+    --bg-canvas: #0a1624;
+    --bg-surface: #102237;
+    --bg-surface-elevated: #172f4c;
+    --bg-surface-hover: #1f3d63;
+    --border-subtle: rgba(56, 189, 248, 0.30);
+    --border-focus: #38bdf8;
+    --border-accent: rgba(56, 189, 248, 0.50);
+    --accent-primary: #0ea5e9;
+    --accent-hover: #38bdf8;
+    --accent-text: #ffffff;
+    --accent-glow: rgba(56, 189, 248, 0.35);
+    --accent-secondary: #7dd3fc;
+    --accent-secondary-bg: rgba(56, 189, 248, 0.18);
+    --accent-secondary-border: rgba(56, 189, 248, 0.38);
+    --accent-tag-bg: rgba(56, 189, 248, 0.18);
+    --accent-tag-text: #bae6fd;
+    --ambient-glow-1: rgba(14, 165, 233, 0.24);
+    --ambient-glow-2: rgba(56, 189, 248, 0.18);
+  }
+
+  /* Palette 5: Celluloid 35mm (Kodak Warm Amber & Vintage Film Jade) */
+  [data-palette="celluloid"] {
+    --bg-canvas: #191208;
+    --bg-surface: #261b0d;
+    --bg-surface-elevated: #342513;
+    --bg-surface-hover: #433019;
+    --border-subtle: rgba(245, 158, 11, 0.30);
+    --border-focus: #f59e0b;
+    --border-accent: rgba(245, 158, 11, 0.50);
+    --accent-primary: #f59e0b;
+    --accent-hover: #fbbf24;
+    --accent-text: #191208;
+    --accent-glow: rgba(245, 158, 11, 0.35);
+    --accent-secondary: #10b981;
+    --accent-secondary-bg: rgba(16, 185, 129, 0.18);
+    --accent-secondary-border: rgba(16, 185, 129, 0.38);
+    --accent-tag-bg: rgba(16, 185, 129, 0.18);
+    --accent-tag-text: #6ee7b7;
+    --ambient-glow-1: rgba(245, 158, 11, 0.24);
+    --ambient-glow-2: rgba(16, 185, 129, 0.18);
+  }
+
+  /* Palette 6: Neo-Noir Slate (Tailored Obsidian & Electric Indigo) */
+  [data-palette="slate"] {
+    --bg-canvas: #0e1220;
+    --bg-surface: #151b2e;
+    --bg-surface-elevated: #1e2641;
+    --bg-surface-hover: #283255;
+    --border-subtle: rgba(99, 102, 241, 0.30);
+    --border-focus: #6366f1;
+    --border-accent: rgba(99, 102, 241, 0.50);
+    --accent-primary: #6366f1;
+    --accent-hover: #818cf8;
+    --accent-text: #ffffff;
+    --accent-glow: rgba(99, 102, 241, 0.35);
+    --accent-secondary: #a5b4fc;
+    --accent-secondary-bg: rgba(99, 102, 241, 0.18);
+    --accent-secondary-border: rgba(99, 102, 241, 0.38);
+    --accent-tag-bg: rgba(99, 102, 241, 0.18);
+    --accent-tag-text: #c7d2fe;
+    --ambient-glow-1: rgba(99, 102, 241, 0.24);
+    --ambient-glow-2: rgba(129, 140, 248, 0.18);
+  }
+
+  /* Font selection bindings */
+  [data-font="bricolage"] {
+    --font-heading: 'Bricolage Grotesque', sans-serif;
+  }
+  [data-font="fraunces"] {
+    --font-heading: 'Fraunces', serif;
+  }
+  [data-font="space"] {
+    --font-heading: 'Space Grotesk', sans-serif;
+  }
+  [data-font="syne"] {
+    --font-heading: 'Syne', sans-serif;
+  }
+  [data-font="cinzel"] {
+    --font-heading: 'Cinzel', serif;
+  }
+  [data-font="dmserif"] {
+    --font-heading: 'DM Serif Display', serif;
+  }
+  [data-font="outfit"] {
+    --font-heading: 'Outfit', sans-serif;
   }
 
   body {
     font-family: var(--font-sans);
-    background-color: #070a12;
+    background-color: var(--bg-canvas);
+    background-image: 
+      radial-gradient(ellipse 100% 60% at 50% -10%, var(--ambient-glow-1), transparent 75%),
+      radial-gradient(ellipse 80% 60% at 90% 90%, var(--ambient-glow-2), transparent 60%),
+      radial-gradient(circle at 10% 45%, var(--ambient-glow-2), transparent 50%);
+    background-attachment: fixed;
     color: #f1f5f9;
+    min-height: 100vh;
+    transition: background-color 0.35s ease;
   }
 
-  h1, h2, h3, h4, h5, h6 {
+  h1, h2, h3, h4, h5, h6, .font-heading {
     font-family: var(--font-heading);
   }
 }
@@ -24,24 +206,25 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: var(--bg-canvas, rgba(15, 23, 42, 0.6));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
+  background: var(--accent-glow, rgba(99, 102, 241, 0.3));
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.6);
+  background: var(--accent-hover, rgba(99, 102, 241, 0.6));
 }
 
-/* Glassmorphism utilities */
+/* Card & Glassmorphism utilities - PRESERVED & DYNAMICALLY TIED TO PALETTE */
 .glass-panel {
-  background: rgba(15, 23, 42, 0.75);
+  background: var(--bg-surface);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
+  transition: background-color 0.25s ease, border-color 0.25s ease;
 }
 
 .glass-panel-hover {
@@ -49,11 +232,58 @@
 }
 
 .glass-panel-hover:hover {
-  background: rgba(30, 41, 59, 0.85);
-  border-color: rgba(99, 102, 241, 0.35);
+  background: var(--bg-surface-hover);
+  border-color: var(--border-focus);
   transform: translateY(-2px);
-  box-shadow: 0 12px 30px -10px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 14px 34px -8px var(--accent-glow);
 }
+
+.card-content-box {
+  background-color: var(--bg-surface-elevated);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.palette-tag-secondary {
+  background-color: var(--accent-secondary-bg);
+  color: var(--accent-secondary);
+  border: 1px solid var(--accent-secondary-border);
+}
+
+.palette-tag-primary {
+  background-color: var(--accent-primary);
+  color: var(--accent-text);
+  border: 1px solid var(--border-focus);
+  box-shadow: 0 2px 8px -2px var(--accent-glow);
+}
+
+.bg-canvas {
+  background-color: var(--bg-canvas);
+}
+
+.bg-surface {
+  background-color: var(--bg-surface);
+}
+
+.bg-surface-elevated {
+  background-color: var(--bg-surface-elevated);
+}
+
+.border-subtle {
+  border-color: var(--border-subtle);
+}
+
+.border-focus {
+  border-color: var(--border-focus);
+}
+
+.text-accent-primary {
+  color: var(--accent-primary);
+}
+
+.text-accent-secondary {
+  color: var(--accent-secondary);
+}
+
 
 /* Mobile Safe Area helper */
 .safe-pb {
@@ -81,22 +311,65 @@
   0%, 100% {
     opacity: 1;
     box-shadow: 
-      0 0 0 1.5px rgba(129, 140, 248, 0.55), 
-      0 8px 24px -4px rgba(99, 102, 241, 0.3);
-    border-color: rgba(129, 140, 248, 0.65);
+      0 0 0 1.5px var(--accent-hover, rgba(129, 140, 248, 0.55)), 
+      0 8px 24px -4px var(--accent-glow, rgba(99, 102, 241, 0.3));
+    border-color: var(--accent-hover, rgba(129, 140, 248, 0.65));
   }
   50% {
     opacity: 0.7;
     box-shadow: 
-      0 0 0 1px rgba(99, 102, 241, 0.25), 
-      0 4px 14px -2px rgba(99, 102, 241, 0.15);
-    border-color: rgba(99, 102, 241, 0.35);
+      0 0 0 1px var(--border-accent, rgba(99, 102, 241, 0.25)), 
+      0 4px 14px -2px var(--accent-glow, rgba(99, 102, 241, 0.15));
+    border-color: var(--border-accent, rgba(99, 102, 241, 0.35));
   }
 }
 
 .animate-pulse-glow {
   animation: pulse-glow 2s ease-in-out infinite !important;
   z-index: 20;
+}
+
+/* ARCHITECTURAL TACTILE BUTTONS */
+.btn-tactile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+}
+
+.btn-tactile:active {
+  transform: scale(0.98);
+}
+
+.btn-tactile-primary {
+  background-color: var(--accent-primary);
+  color: var(--accent-text);
+  border: 1px solid var(--accent-hover);
+  box-shadow: 0 4px 14px -2px var(--accent-glow), inset 0 1px 0 0 rgba(255, 255, 255, 0.25);
+}
+
+.btn-tactile-primary:hover {
+  background-color: var(--accent-hover);
+  box-shadow: 0 6px 20px -2px var(--accent-glow);
+}
+
+.btn-tactile-secondary {
+  background-color: rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+}
+
+.btn-tactile-secondary:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
 }
 
 
