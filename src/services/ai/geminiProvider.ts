@@ -1,35 +1,60 @@
-import { IAIProvider, RecommendationRequest, AIRecommendationResult, UnconstrainedDiscovery } from './types';
-import { Recommendation, Movie } from '../../types';
+import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './types';
+import { Movie } from '../../types';
+import { validateAndSanitizeAIResponse } from './aiResponseValidator';
 
 export const GEMINI_AVAILABLE_MODELS = [
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Latest & Recommended)', speed: 'Fastest', tier: 'Free Quota' },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', speed: 'Ultra Fast', tier: 'Free Quota' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Latest & Recommended)', speed: 'Fastest', tier: 'Free Quota' },
+  { id: 'gemini-3.7-flash', name: 'Gemini 3.7 Flash', speed: 'Ultra Fast', tier: 'Free Quota' },
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', speed: 'Fast', tier: 'Free Quota' },
+  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', speed: 'Fast', tier: 'Free Quota' },
   { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', speed: 'Fast', tier: 'Free Quota' },
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (Deepest Analysis)', speed: 'High Quality', tier: 'Free Quota' },
 ];
+
+function composeSignals(signals: (AbortSignal | undefined)[]): AbortSignal {
+  const controller = new AbortController();
+  for (const s of signals) {
+    if (!s) continue;
+    if (s.aborted) {
+      controller.abort(s.reason);
+      return controller.signal;
+    }
+    s.addEventListener('abort', () => controller.abort(s.reason), { once: true });
+  }
+  return controller.signal;
+}
 
 export class GeminiProvider implements IAIProvider {
   readonly id = 'gemini';
   readonly name = 'Google Gemini AI';
   readonly description = 'Powered by Google Gemini models for deep contextual cinematic taste synthesis';
 
-  async testConnection(apiKey: string, model = 'gemini-2.5-flash'): Promise<{ success: boolean; message: string }> {
+  async testConnection(apiKey: string, model = 'gemini-3.8-flash'): Promise<{ success: boolean; message: string }> {
     if (!apiKey?.trim()) {
-      return { success: false, message: 'API key is required.' };
+      return { success: false, message: 'Gemini API key is required.' };
     }
 
     try {
+      const timeoutController = new AbortController();
+      const timeout = setTimeout(() => timeoutController.abort(new Error('Connection test timed out after 10s')), 10000);
+
+      // Pass API key via x-goog-api-key header (no secret in URL query parameters)
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey.trim(),
+          },
           body: JSON.stringify({
             contents: [{ parts: [{ text: 'Respond with the word "CONNECTED" in JSON: {"status": "CONNECTED"}' }] }],
             generationConfig: { responseMimeType: 'application/json' },
           }),
+          signal: timeoutController.signal,
         }
       );
+      clearTimeout(timeout);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -38,12 +63,13 @@ export class GeminiProvider implements IAIProvider {
       }
 
       return { success: true, message: `Successfully connected to ${model}!` };
-    } catch (err: any) {
-      return { success: false, message: `Network error: ${err.message}` };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, message: `Network error: ${msg}` };
     }
   }
 
-  async generateRecommendations(request: RecommendationRequest): Promise<AIRecommendationResult> {
+  async generateRecommendations(request: RecommendationRequest, signal?: AbortSignal): Promise<AIRecommendationResult> {
     const {
       userRatings,
       candidatePool,
@@ -51,165 +77,123 @@ export class GeminiProvider implements IAIProvider {
       selectedVibes = [],
       preferredEras = [],
       apiKey,
-      model = 'gemini-2.5-flash',
+      model = 'gemini-3.8-flash',
     } = request;
 
-    if (!apiKey) {
+    if (!apiKey?.trim()) {
       throw new Error('Gemini API key is required to use the Gemini provider.');
     }
 
-    const candidateMap = new Map<number, Movie>(candidatePool.map((m) => [m.id, m]));
+    const candidateMap = new Map<number, Movie>();
+    candidatePool.forEach((m) => candidateMap.set(m.id, m));
 
-    // Format User Ratings for prompt
-    const userRatingsSummary = userRatings.map((r) => ({
+    // Format ratings profile
+    const ratingsSummary = userRatings.map((r) => ({
       title: r.title,
       user_rating: `${r.rating}/10`,
       genres: r.genres,
-      director: r.director || 'Unknown',
+      director: r.director,
       year: r.year,
     }));
 
-    // Format Candidates Pool
-    const candidatesSummary = candidatePool.slice(0, 35).map((m) => ({
+    // Format candidate pool (up to 40 candidates)
+    const poolSummary = candidatePool.slice(0, 40).map((m) => ({
       id: m.id,
       title: m.title,
-      year: m.release_date ? m.release_date.slice(0, 4) : 'Unknown',
+      year: m.release_date?.slice(0, 4),
       genres: (m.genres || []).map((g) => g.name),
       tmdb_rating: m.vote_average,
-      overview: (m.overview || '').slice(0, 160),
+      overview: m.overview ? m.overview.slice(0, 200) + '...' : '',
     }));
 
-    const serendipityDescription =
-      serendipityLevel > 70
-        ? 'High Serendipity / Wildcard: Boldly recommend unexpected films, foreign gems, or different genres that share the subtle emotional or structural DNA of what the user loves.'
-        : serendipityLevel > 35
-        ? 'Balanced Discovery: Mix trusted thematic continuations with 2-3 creative crossover suggestions.'
-        : 'Safe Bets: Stick closely to the highest affinity styles, directors, and genres the user explicitly praised.';
-
-    const systemPrompt = `You are Cinephile AI, a world-class film critic, narrative theorist, and master cinematic curator.
-Your mission is to escape the mechanical "genre echo-chamber" and deliver both unconstrained cross-genre film discoveries and top selections from the candidate pool based on the user's deep psychological taste DNA.
-
-STEP 1: DEDUCE PSYCHOLOGICAL TASTE DNA
-Analyze the user's movie ratings (1-10 scale). Do NOT merely look at surface genres. Instead, deduce their underlying psychological, structural, and tonal preferences:
-- Narrative structure & pacing (e.g. escalating ticking-clock tension, slow-burn psychological dread, non-linear puzzles, character study)
-- Emotional & tonal resonance (e.g. moral ambiguity, cynical neo-noir, existential wonder, warm humanism)
-- Directorial craft & aesthetic (e.g. claustrophobic staging, grand scale, dialogue-driven chamber pieces)
-
-STEP 2: CURATE UNCONSTRAINED CINEPHILE DISCOVERIES (5-8 FILMS)
-Brainstorm 5 to 8 films freely chosen from anywhere in cinema history (any era, country, or genre).
-- CRITICAL: These films should transcend the user's explicit genres (e.g. recommending '12 Angry Men' or 'Uncut Gems' to an 'Inception' fan because of high-stakes ticking-clock tension, rather than just more Sci-Fi).
-- Specifically explain why this cross-genre choice fits their psychological profile.
-
-STEP 3: RANK CANDIDATE POOL (8-12 FILMS)
-Select and rank the top 8-12 films from the provided TMDB candidate pool that best align with their profile.
+    const systemPrompt = `You are Cinephile AI, an expert cinematic curator and film critic.
+Synthesize the user's taste based on their 1-10 movie ratings.
 
 User Profile:
-${JSON.stringify(userRatingsSummary, null, 2)}
+${JSON.stringify(ratingsSummary, null, 2)}
 
-Serendipity Setting: ${serendipityLevel}% (${serendipityDescription})
-User Vibe Filters: ${selectedVibes.join(', ') || 'Any'}
-User Era Preferences: ${preferredEras.join(', ') || 'Any'}
+Serendipity Preference: ${serendipityLevel}% (0 = Safe bets matching user comfort zone, 100 = Wildcard discoveries).
+Vibe Filters: ${selectedVibes.length ? selectedVibes.join(', ') : 'None'}
+Preferred Eras: ${preferredEras.length ? preferredEras.join(', ') : 'Any'}
 
 Candidate Pool:
-${JSON.stringify(candidatesSummary, null, 2)}
+${JSON.stringify(poolSummary, null, 2)}
 
-Output strictly valid JSON with this exact schema:
+Instructions:
+1. Select and rank the best 10-20 films from Candidate Pool in order of personalized match.
+2. Provide a 1-sentence personalized rationale for each choice citing user affinities.
+3. Also suggest up to 3 unconstrained discoveries outside the candidate pool if they represent exceptional matches.
+4. Output strictly valid JSON matching this schema:
 {
-  "taste_analysis": "Summary of underlying psychological & structural preferences...",
-  "unconstrained_discoveries": [
-    {
-      "title": "12 Angry Men",
-      "year": "1957",
-      "score": 97,
-      "reason": "You love high-stakes psychological tension and escalating power struggles in modern thrillers; this classic delivers that pure claustrophobic intensity without any reliance on genre tropes.",
-      "highlightTags": ["Claustrophobic Tension", "Psychological Stakes"]
-    }
-  ],
+  "taste_analysis": "Concise 2-sentence summary of user's cinematic taste DNA.",
   "pool_rankings": [
     {
-      "id": 123,
-      "score": 94,
-      "reason": "...",
-      "serendipityType": "director_match",
-      "highlightTags": ["Denis Villeneuve", "Philosophical Sci-Fi"]
+      "id": 12345,
+      "score": 95,
+      "reason": "Personalized reason",
+      "serendipityType": "safe_bet",
+      "highlightTags": ["Atmospheric", "Masterpiece"]
+    }
+  ],
+  "unconstrained_discoveries": [
+    {
+      "title": "Movie Title",
+      "year": "1994",
+      "score": 92,
+      "reason": "Reason for recommendation",
+      "highlightTags": ["Hidden Gem"]
     }
   ]
 }`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: systemPrompt }] }],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            temperature: 0.7,
-          },
-        }),
-      }
-    );
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(() => timeoutController.abort(new Error('Gemini request timed out after 20s')), 20000);
+    const combinedSignal = composeSignals([signal, timeoutController.signal]);
 
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(`Gemini API error: ${err.error?.message || response.statusText}`);
-    }
-
-    const data = await response.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!rawText) {
-      throw new Error('Empty response from Gemini.');
-    }
-
-    let parsed: any;
     try {
-      parsed = JSON.parse(rawText);
-    } catch {
-      // Clean possible markdown code fence
-      const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-      parsed = JSON.parse(cleanJson);
-    }
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey.trim(),
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: systemPrompt }] }],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.7,
+            },
+          }),
+          signal: combinedSignal,
+        }
+      );
 
-    const poolRecommendations: Recommendation[] = [];
-    const poolItems = parsed.pool_rankings || parsed.rankings || [];
-
-    poolItems.forEach((item: any, index: number) => {
-      const movie = candidateMap.get(Number(item.id));
-      if (movie) {
-        poolRecommendations.push({
-          movie,
-          score: Math.min(99, Math.max(50, Number(item.score) || 85)),
-          rank: index + 1,
-          reason: item.reason || 'Curated specifically based on your unique cinematic profile.',
-          serendipityType: item.serendipityType || 'thematic_gem',
-          highlightTags: Array.isArray(item.highlightTags) ? item.highlightTags : ['Top Pick'],
-        });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(`Gemini API error: ${err.error?.message || response.statusText}`);
       }
-    });
 
-    const unconstrainedDiscoveries: UnconstrainedDiscovery[] = (
-      parsed.unconstrained_discoveries || []
-    )
-      .map((item: any) => ({
-        title: String(item.title || '').trim(),
-        year: item.year ? String(item.year).trim() : undefined,
-        score: Math.min(99, Math.max(50, Number(item.score) || 92)),
-        reason:
-          item.reason ||
-          'A cross-genre cinephile discovery matching your psychological and structural taste DNA.',
-        highlightTags:
-          Array.isArray(item.highlightTags) && item.highlightTags.length > 0
-            ? item.highlightTags
-            : ['AI Discovery', 'Cross-Genre'],
-      }))
-      .filter((d: UnconstrainedDiscovery) => Boolean(d.title));
+      const data = await response.json();
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    return {
-      recommendations: poolRecommendations,
-      unconstrainedDiscoveries,
-      tasteAnalysis: parsed.taste_analysis,
-    };
+      if (!rawText) {
+        throw new Error('Empty response from Gemini.');
+      }
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        // Clean possible markdown code fence
+        const cleanJson = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+        parsed = JSON.parse(cleanJson);
+      }
+
+      return validateAndSanitizeAIResponse(parsed, candidateMap);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
