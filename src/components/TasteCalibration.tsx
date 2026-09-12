@@ -18,10 +18,8 @@ import {
   Eye,
   EyeOff,
   X,
-  Star,
   Film,
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { useMovieStore } from '../store/useMovieStore';
 import { getCalibrationMovies, searchMovies, CALIBRATION_CATEGORIES, IMAGE_BASE_URL } from '../services/tmdb';
 import { Movie } from '../types';
@@ -57,8 +55,9 @@ export const TasteCalibration: React.FC = () => {
 
   // Clean up all pending removal timers on unmount
   useEffect(() => {
+    const timers = pendingTimersRef.current;
     return () => {
-      Object.values(pendingTimersRef.current).forEach((timer) => clearTimeout(timer));
+      Object.values(timers).forEach((timer) => clearTimeout(timer));
     };
   }, []);
 
@@ -66,14 +65,21 @@ export const TasteCalibration: React.FC = () => {
   const isProfileReady = ratedCount >= 3;
 
   const ratingsRef = useRef(ratings);
-  ratingsRef.current = ratings;
+  useEffect(() => {
+    ratingsRef.current = ratings;
+  }, [ratings]);
 
   // Fetch calibration movies with user ratings for dynamic taste feedback
   const fetchCategoryMovies = useCallback(async (cat: string, pageNum: number, append = false) => {
     setIsLoading(true);
     try {
       const data = await getCalibrationMovies(cat, pageNum, { userRatings: ratingsRef.current });
-      setMovies((prev) => (append ? [...prev, ...data.movies] : data.movies));
+      setMovies((prev) => {
+        if (!append) return data.movies;
+        const existingIds = new Set(prev.map((m) => m.id));
+        const newMovies = data.movies.filter((m) => !existingIds.has(m.id));
+        return [...prev, ...newMovies];
+      });
       setHasMore(pageNum < data.totalPages);
     } catch (err) {
       console.error('Failed to load calibration movies', err);
@@ -83,10 +89,15 @@ export const TasteCalibration: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
+  const handleCategorySelect = useCallback((catId: string) => {
+    setActiveCategory(catId);
     setPage(1);
-    fetchCategoryMovies(activeCategory, 1, false);
-  }, [activeCategory, fetchCategoryMovies]);
+    fetchCategoryMovies(catId, 1, false);
+  }, [fetchCategoryMovies]);
+
+  useEffect(() => {
+    fetchCategoryMovies('all', 1, false);
+  }, [fetchCategoryMovies]);
 
   // Real-time search effect with 400ms debounce and AbortController request cancellation
   useEffect(() => {
@@ -223,13 +234,17 @@ export const TasteCalibration: React.FC = () => {
     const isNewRating = !ratings[movie.id];
     setRating(movie, score);
 
-    // Fire celebratory confetti when reaching 5 or 10 ratings
+    // Fire celebratory confetti when reaching 3, 5, or 10 ratings
     if (isNewRating && (ratedCount + 1 === 3 || ratedCount + 1 === 5 || ratedCount + 1 === 10)) {
-      confetti({
-        particleCount: 70,
-        spread: 60,
-        origin: { y: 0.8 },
-      });
+      import('canvas-confetti')
+        .then((m) => {
+          m.default({
+            particleCount: 70,
+            spread: 60,
+            origin: { y: 0.8 },
+          });
+        })
+        .catch(() => {});
     }
 
     // If hideRated is active, give the user a 2.5s grace window with a pulsing confirmation
@@ -595,7 +610,7 @@ export const TasteCalibration: React.FC = () => {
                 return (
                   <button
                     key={cat.id}
-                    onClick={() => setActiveCategory(cat.id)}
+                    onClick={() => handleCategorySelect(cat.id)}
                     className={`btn-tactile px-3.5 py-2 text-xs font-semibold whitespace-nowrap transition-all border cursor-pointer ${
                       isSelected
                         ? 'btn-tactile-primary shadow-md'

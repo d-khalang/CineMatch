@@ -1,12 +1,64 @@
 import { Movie, UserRating } from '../types';
+import { credentialStore, TmdbCredentialType } from './credentialStore';
+import { getSeriesKey, FRANCHISE_ALIASES } from '../constants/franchises';
+export { getSeriesKey, FRANCHISE_ALIASES };
 
-const TMDB_API_KEY = '6e19ae2b03346d3b682580d657f948ac';
+export class MissingTmdbCredentialError extends Error {
+  constructor() {
+    super(
+      'TMDB credential required. Please configure your TMDB API Read Access Token or API Key in Settings.'
+    );
+    this.name = 'MissingTmdbCredentialError';
+  }
+}
+
+// Bounded LRU Map to prevent unbounded memory growth during long browsing sessions
+export class BoundedLRUMap<K, V> {
+  private max: number;
+  private map: Map<K, V>;
+
+  constructor(max = 250) {
+    this.max = max;
+    this.map = new Map();
+  }
+
+  get(key: K): V | undefined {
+    const item = this.map.get(key);
+    if (item !== undefined) {
+      this.map.delete(key);
+      this.map.set(key, item);
+    }
+    return item;
+  }
+
+  set(key: K, value: V): void {
+    if (this.map.has(key)) {
+      this.map.delete(key);
+    } else if (this.map.size >= this.max) {
+      const oldestKey = this.map.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.map.delete(oldestKey);
+      }
+    }
+    this.map.set(key, value);
+  }
+
+  has(key: K): boolean {
+    return this.map.has(key);
+  }
+
+  clear(): void {
+    this.map.clear();
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+}
+
 const BASE_URL = 'https://api.themoviedb.org/3';
 export const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 export const BACKDROP_BASE_URL = 'https://image.tmdb.org/t/p/w1280';
-
-// In-memory cache for fast repeated views
-const cache = new Map<string, any>();
 
 // Genre Dictionary
 export const GENRE_MAP: Record<number, string> = {
@@ -42,38 +94,168 @@ export const CALIBRATION_CATEGORIES = [
   { id: 'feel_good', label: 'Heartfelt & Comedy', icon: 'Smile' },
 ];
 
+// Bounded in-memory caches
+const cache = new BoundedLRUMap<string, any>(250);
+const hydrationCache = new BoundedLRUMap<string, Movie | null>(250);
+export const failedMovieIds = new Set<number>();
+
+export function redactTmdbUrl(urlStr: string): string {
+  try {
+    const url = new URL(urlStr);
+    if (url.searchParams.has('api_key')) {
+      url.searchParams.set('api_key', '[REDACTED]');
+    }
+    return url.toString();
+  } catch {
+    return urlStr.replace(/api_key=[^&]+/gi, 'api_key=[REDACTED]');
+  }
+}
+
+// Helper to compose multiple abort signals safely
+function composeSignals(signals: (AbortSignal | undefined)[]): AbortSignal {
+  const controller = new AbortController();
+  for (const s of signals) {
+    if (!s) continue;
+    if (s.aborted) {
+      controller.abort(s.reason);
+      return controller.signal;
+    }
+    s.addEventListener('abort', () => controller.abort(s.reason), { once: true });
+  }
+  return controller.signal;
+}
+
+export async function testTmdbConnection(
+  type: TmdbCredentialType,
+  value: string
+): Promise<{ success: boolean; message: string }> {
+  if (!value?.trim()) {
+    return { success: false, message: 'TMDB credential cannot be empty.' };
+  }
+
+  try {
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    const query = new URLSearchParams();
+    if (type === 'read_access_token') {
+      headers['Authorization'] = `Bearer ${value.trim()}`;
+    } else {
+      query.set('api_key', value.trim());
+    }
+
+    const url = `${BASE_URL}/authentication?${query.toString()}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new Error('TMDB connection test timed out')), 10000);
+
+    const response = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (response.ok) {
+      return { success: true, message: 'Successfully authenticated with TMDB!' };
+    }
+    if (response.status === 401 || response.status === 403) {
+      return { success: false, message: 'Invalid TMDB credential. Check format and permissions.' };
+    }
+    return { success: false, message: `TMDB returned status HTTP ${response.status}` };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, message: `Connection error: ${msg}` };
+  }
+}
+
 async function fetchFromTMDB<T>(
   endpoint: string,
   params: Record<string, string | number> = {},
   signal?: AbortSignal
 ): Promise<T> {
-  const query = new URLSearchParams({
-    api_key: TMDB_API_KEY,
+  const creds = credentialStore.getCredentials();
+  if (!creds.tmdbValue) {
+    throw new MissingTmdbCredentialError();
+  }
+
+  const queryObj: Record<string, string> = {
     language: 'en-US',
     ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
-  });
+  };
 
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  };
+
+  if (creds.tmdbType === 'read_access_token') {
+    headers['Authorization'] = `Bearer ${creds.tmdbValue}`;
+  } else {
+    // API key parameter (v3 query auth exception)
+    queryObj['api_key'] = creds.tmdbValue;
+  }
+
+  const query = new URLSearchParams(queryObj);
   const url = `${BASE_URL}${endpoint}?${query.toString()}`;
 
-  if (cache.has(url)) {
-    return cache.get(url) as T;
+  // Cache key excludes credentials
+  const cleanCacheKey = `${endpoint}?${new URLSearchParams({
+    language: 'en-US',
+    ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
+  }).toString()}`;
+
+  if (cache.has(cleanCacheKey)) {
+    return cache.get(cleanCacheKey) as T;
   }
 
-  const response = await fetch(url, { signal });
-  if (!response.ok) {
-    throw new Error(`TMDB API Error: ${response.status} ${response.statusText}`);
-  }
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(new Error('TMDB request timed out after 15s')), 15000);
+  const combinedSignal = composeSignals([signal, timeoutController.signal]);
 
-  const data = await response.json();
-  cache.set(url, data);
-  return data;
+  try {
+    const response = await fetch(url, { headers, signal: combinedSignal });
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('Invalid TMDB credential. Please verify your token/key in Settings.');
+      }
+      if (response.status === 429) {
+        throw new Error('TMDB rate limit reached. Please wait a moment before retrying.');
+      }
+      throw new Error(`TMDB API Error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    cache.set(cleanCacheKey, data);
+    return data;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
-import { getSeriesKey, FRANCHISE_ALIASES } from '../constants/franchises';
-export { getSeriesKey, FRANCHISE_ALIASES };
+/**
+ * Applies a bounded rank jitter to an array of items.
+ * Keeps candidates near their original quality/popularity rank while
+ * introducing organic variety so the exact same options are not always shown.
+ */
+export function jitterSort<T>(items: T[], windowSize = 5): T[] {
+  if (items.length <= 1) return [...items];
+  return items
+    .map((item, index) => ({
+      item,
+      sortKey: index + Math.random() * windowSize,
+    }))
+    .sort((a, b) => a.sortKey - b.sortKey)
+    .map((entry) => entry.item);
+}
+
+/**
+ * Standard Fisher-Yates shuffle.
+ */
+export function shuffleArray<T>(items: T[]): T[] {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
 
 export interface CalibrationOptions {
   userRatings?: Record<number, UserRating>;
+  randomize?: boolean;
 }
 
 export async function getCalibrationMovies(
@@ -81,6 +263,8 @@ export async function getCalibrationMovies(
   page = 1,
   options?: CalibrationOptions
 ): Promise<{ movies: Movie[]; totalPages: number }> {
+  const shouldRandomize = options?.randomize ?? true;
+
   // Extract user-disliked genre IDs if user explicitly rated films <= 3/10
   const dislikedGenreIds = new Set<number>();
   if (options?.userRatings) {
@@ -114,18 +298,19 @@ export async function getCalibrationMovies(
 
   // Series deduplication helper: at most 1 film per franchise per 20-movie batch
   const deduplicateFranchises = (candidates: Movie[], limit = 30): Movie[] => {
-    // Sort so user-disliked genres are deprioritized to the back
-    const sorted = [...candidates].sort((a, b) => {
-      const aDisliked = a.genre_ids?.some((id) => dislikedGenreIds.has(id)) ? 1 : 0;
-      const bDisliked = b.genre_ids?.some((id) => dislikedGenreIds.has(id)) ? 1 : 0;
-      return aDisliked - bDisliked;
-    });
+    // Partition so user-disliked genres are strictly deprioritized to the back
+    const nonDisliked = candidates.filter((m) => !m.genre_ids?.some((id) => dislikedGenreIds.has(id)));
+    const disliked = candidates.filter((m) => m.genre_ids?.some((id) => dislikedGenreIds.has(id)));
+
+    const ordered = shouldRandomize
+      ? [...jitterSort(nonDisliked, 5), ...jitterSort(disliked, 5)]
+      : [...nonDisliked, ...disliked];
 
     const seenSeries = new Set<string>();
     const seenIds = new Set<number>();
     const result: Movie[] = [];
 
-    for (const movie of sorted) {
+    for (const movie of ordered) {
       if (seenIds.has(movie.id)) continue;
       const seriesKey = getSeriesKey(movie.id, movie.title);
       if (seenSeries.has(seriesKey)) continue;
@@ -173,12 +358,13 @@ export async function getCalibrationMovies(
 
     for (let pIdx = 0; pIdx < pillarCandidates.length; pIdx++) {
       const candidates = pillarCandidates[pIdx];
-      // Deprioritize user disliked genres
-      const sorted = [...candidates].sort((a, b) => {
-        const aDisliked = a.genre_ids?.some((id) => dislikedGenreIds.has(id)) ? 1 : 0;
-        const bDisliked = b.genre_ids?.some((id) => dislikedGenreIds.has(id)) ? 1 : 0;
-        return aDisliked - bDisliked;
-      });
+      // Deprioritize user disliked genres while lightly randomizing preferred candidates
+      const nonDisliked = candidates.filter((m) => !m.genre_ids?.some((id) => dislikedGenreIds.has(id)));
+      const disliked = candidates.filter((m) => m.genre_ids?.some((id) => dislikedGenreIds.has(id)));
+
+      const sorted = shouldRandomize
+        ? [...jitterSort(nonDisliked, 6), ...jitterSort(disliked, 6)]
+        : [...nonDisliked, ...disliked];
 
       for (const movie of sorted) {
         if (seenIds.has(movie.id)) continue;
@@ -200,7 +386,8 @@ export async function getCalibrationMovies(
     // Interleave 4 from each pillar into a balanced 20-movie batch
     const finalBatch: Movie[] = [];
     for (let slot = 0; slot < 4; slot++) {
-      for (let pIdx = 0; pIdx < 5; pIdx++) {
+      const pillarOrder = shouldRandomize ? shuffleArray([0, 1, 2, 3, 4]) : [0, 1, 2, 3, 4];
+      for (const pIdx of pillarOrder) {
         if (pillarSelections[pIdx][slot]) {
           finalBatch.push(pillarSelections[pIdx][slot]);
         }
@@ -208,7 +395,8 @@ export async function getCalibrationMovies(
     }
 
     // Fill remaining buffer up to 30 movies from leftover candidates for immediate rated replacement
-    for (const leftover of leftoverCandidates) {
+    const leftoverToProcess = shouldRandomize ? jitterSort(leftoverCandidates, 6) : leftoverCandidates;
+    for (const leftover of leftoverToProcess) {
       if (finalBatch.length >= 30) break;
       if (seenIds.has(leftover.id)) continue;
       const seriesKey = getSeriesKey(leftover.id, leftover.title);
@@ -327,10 +515,14 @@ export async function searchMovies(
   return { movies, totalPages: data.total_pages || 1 };
 }
 
-export async function getMovieDetails(movieId: number): Promise<Movie> {
-  const data = await fetchFromTMDB<any>(`/movie/${movieId}`, {
-    append_to_response: 'credits,videos,keywords,similar',
-  });
+export async function getMovieDetails(movieId: number, signal?: AbortSignal): Promise<Movie> {
+  const data = await fetchFromTMDB<any>(
+    `/movie/${movieId}`,
+    {
+      append_to_response: 'credits,videos,keywords,similar',
+    },
+    signal
+  );
 
   const director = data.credits?.crew?.find((c: any) => c.job === 'Director')?.name;
   const cast = (data.credits?.cast || []).slice(0, 5).map((c: any) => c.name);
@@ -357,6 +549,42 @@ export async function getMovieDetails(movieId: number): Promise<Movie> {
     trailer_key: trailer,
     imdb_id: data.imdb_id,
   };
+}
+
+/**
+ * Resolve a movie by its external ID (e.g. IMDb tt-id) via TMDB /find endpoint.
+ * Returns the first movie result or null if not found.
+ */
+export async function findMovieByExternalId(
+  externalId: string,
+  source: string = 'imdb_id',
+  signal?: AbortSignal
+): Promise<Movie | null> {
+  try {
+    const data = await fetchFromTMDB<{ movie_results: any[] }>(
+      `/find/${externalId}`,
+      { external_source: source },
+      signal
+    );
+    const results = data.movie_results || [];
+    if (results.length === 0) return null;
+    const m = results[0];
+    return {
+      id: m.id,
+      title: m.title,
+      original_title: m.original_title,
+      overview: m.overview,
+      poster_path: m.poster_path,
+      backdrop_path: m.backdrop_path,
+      release_date: m.release_date || '',
+      vote_average: m.vote_average,
+      vote_count: m.vote_count,
+      genre_ids: m.genre_ids || [],
+      genres: (m.genre_ids || []).map((gid: number) => ({ id: gid, name: GENRE_MAP[gid] || 'Other' })),
+    };
+  } catch {
+    return null;
+  }
 }
 
 // Era date range mapping (e.g., '70s' -> 1970-01-01 to 1979-12-31)
@@ -456,7 +684,8 @@ export interface CandidateRecommendationOptions {
 }
 
 export async function getCandidateRecommendationPool(
-  options: CandidateRecommendationOptions = {}
+  options: CandidateRecommendationOptions = {},
+  signal?: AbortSignal
 ): Promise<Movie[]> {
   const {
     seedMovieIds = [],
@@ -470,8 +699,8 @@ export async function getCandidateRecommendationPool(
   // 1. Fetch recommendations & similar movies for top seeds
   const seedPromises = seedMovieIds.slice(0, 4).map(async (id) => {
     try {
-      const recs = await fetchFromTMDB<{ results: any[] }>(`/movie/${id}/recommendations`);
-      const similar = await fetchFromTMDB<{ results: any[] }>(`/movie/${id}/similar`);
+      const recs = await fetchFromTMDB<{ results: any[] }>(`/movie/${id}/recommendations`, {}, signal);
+      const similar = await fetchFromTMDB<{ results: any[] }>(`/movie/${id}/similar`, {}, signal);
       return [...(recs.results || []), ...(similar.results || [])];
     } catch {
       return [];
@@ -484,17 +713,17 @@ export async function getCandidateRecommendationPool(
       sort_by: 'vote_average.desc',
       'vote_count.gte': 800,
       page: 1,
-    })
+    }, signal)
       .then((d) => d.results || [])
       .catch(() => []),
     fetchFromTMDB<{ results: any[] }>('/discover/movie', {
       sort_by: 'popularity.desc',
       'vote_count.gte': 1500,
       page: 1,
-    })
+    }, signal)
       .then((d) => d.results || [])
       .catch(() => []),
-    fetchFromTMDB<{ results: any[] }>('/trending/movie/week')
+    fetchFromTMDB<{ results: any[] }>('/trending/movie/week', {}, signal)
       .then((d) => d.results || [])
       .catch(() => []),
   ];
@@ -524,7 +753,7 @@ export async function getCandidateRecommendationPool(
             sort_by: 'vote_average.desc',
             'vote_count.gte': 300,
             page: 1,
-          })
+          }, signal)
             .then((d) => d.results || [])
             .catch(() => [])
         );
@@ -537,7 +766,7 @@ export async function getCandidateRecommendationPool(
             sort_by: 'popularity.desc',
             'vote_count.gte': 400,
             page: 1,
-          })
+          }, signal)
             .then((d) => d.results || [])
             .catch(() => [])
         );
@@ -552,7 +781,7 @@ export async function getCandidateRecommendationPool(
               sort_by: 'vote_average.desc',
               'vote_count.gte': 150,
               page: 1,
-            })
+            }, signal)
               .then((d) => d.results || [])
               .catch(() => [])
           );
@@ -570,7 +799,7 @@ export async function getCandidateRecommendationPool(
         sort_by: 'vote_average.desc',
         'vote_count.gte': 600,
         page: 1,
-      })
+      }, signal)
         .then((d) => d.results || [])
         .catch(() => [])
     );
@@ -580,7 +809,7 @@ export async function getCandidateRecommendationPool(
         sort_by: 'popularity.desc',
         'vote_count.gte': 1000,
         page: 1,
-      })
+      }, signal)
         .then((d) => d.results || [])
         .catch(() => [])
     );
@@ -593,7 +822,7 @@ export async function getCandidateRecommendationPool(
         sort_by: 'vote_average.desc',
         'vote_count.gte': 250,
         page: 1,
-      })
+      }, signal)
         .then((d) => d.results || [])
         .catch(() => [])
     );
@@ -664,12 +893,10 @@ export async function getCandidateRecommendationPool(
   return Array.from(poolMap.values());
 }
 
-// In-memory cache for fast repeated hydration
-const hydrationCache = new Map<string, Movie | null>();
-
 export async function hydrateMovieByTitleAndYear(
   title: string,
-  year?: string
+  year?: string,
+  signal?: AbortSignal
 ): Promise<Movie | null> {
   const cleanTitle = title.trim();
   if (!cleanTitle) return null;
@@ -693,7 +920,7 @@ export async function hydrateMovieByTitleAndYear(
       }
     }
 
-    let data = await fetchFromTMDB<{ results: any[] }>('/search/movie', params);
+    let data = await fetchFromTMDB<{ results: any[] }>('/search/movie', params, signal);
 
     // If no results found with primary_release_year, retry search without year constraint
     if ((!data.results || data.results.length === 0) && params.primary_release_year) {
@@ -702,7 +929,7 @@ export async function hydrateMovieByTitleAndYear(
         include_adult: 'false',
         page: 1,
       };
-      data = await fetchFromTMDB<{ results: any[] }>('/search/movie', fallbackParams);
+      data = await fetchFromTMDB<{ results: any[] }>('/search/movie', fallbackParams, signal);
     }
 
     if (!data.results || data.results.length === 0) {
@@ -720,7 +947,7 @@ export async function hydrateMovieByTitleAndYear(
     // Resolve full movie details (director, trailer, cast, runtime, keywords)
     let fullMovie: Movie;
     try {
-      fullMovie = await getMovieDetails(topResult.id);
+      fullMovie = await getMovieDetails(topResult.id, signal);
     } catch {
       fullMovie = {
         id: topResult.id,
@@ -743,6 +970,7 @@ export async function hydrateMovieByTitleAndYear(
     hydrationCache.set(cacheKey, fullMovie);
     return fullMovie;
   } catch (err) {
+    if ((err as any)?.name === 'AbortError') throw err;
     console.warn(`Hydration failed for "${title}" (${year}):`, err);
     hydrationCache.set(cacheKey, null);
     return null;
@@ -750,12 +978,13 @@ export async function hydrateMovieByTitleAndYear(
 }
 
 export async function hydrateBatch(
-  movies: { title: string; year?: string }[]
+  movies: { title: string; year?: string }[],
+  signal?: AbortSignal
 ): Promise<Movie[]> {
   if (!movies || movies.length === 0) return [];
 
   const results = await Promise.allSettled(
-    movies.map((m) => hydrateMovieByTitleAndYear(m.title, m.year))
+    movies.map((m) => hydrateMovieByTitleAndYear(m.title, m.year, signal))
   );
 
   const hydratedMovies: Movie[] = [];
@@ -775,12 +1004,13 @@ export async function hydrateBatch(
 }
 
 export async function hydrateBatchWithDiscoveries<T extends { title: string; year?: string }>(
-  items: T[]
+  items: T[],
+  signal?: AbortSignal
 ): Promise<{ item: T; movie: Movie }[]> {
   if (!items || items.length === 0) return [];
 
   const results = await Promise.allSettled(
-    items.map((it) => hydrateMovieByTitleAndYear(it.title, it.year))
+    items.map((it) => hydrateMovieByTitleAndYear(it.title, it.year, signal))
   );
 
   const paired: { item: T; movie: Movie }[] = [];
