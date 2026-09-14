@@ -1,0 +1,48 @@
+name: CI / Production Verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Typecheck, Lint, Test & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Secret Scan (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+
+      - name: TypeScript Check
+        run: npm run typecheck
+
+      - name: ESLint Check
+        run: npm run lint
+
+      - name: Run Vitest Suite with Coverage
+        run: npm run test:coverage
+
+      - name: Production Build
+        run: npm run build
+
+      - name: Audit Build Artifacts for Secrets
+        run: |
+          if grep -E -r "(AIza[0-9A-Za-z_-]{35}|sk-or-v1-[0-9a-f]{64})" dist/; then
+            echo "CRITICAL: Detected exposed secret pattern in dist/ build output!"
+            exit 1
+          fi
+          echo "dist/ build artifact successfully passed secret scanning."
