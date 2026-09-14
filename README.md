@@ -1,232 +1,174 @@
-# CineMatch AI — Technical Architecture & Documentation
+# CineMatch AI — Architecture & Documentation
 
-CineMatch AI is an AI-first movie recommendation and ranking application built with **React**, **TypeScript**, **Vite**, and **Tailwind CSS**. It combines real-time movie metadata from **The Movie Database (TMDB)** with a **Modular AI Service Architecture** (Google Gemini, OpenRouter, and Local Heuristic Engine) to synthesize personalized, ranked recommendations based on a 1–10 rating scale.
+**Version:** 1.1.0 (Standalone Architecture Revision)  
+**Platform Targets:** Modern Web (Desktop/Mobile) & Android (Capacitor Native Shell)  
+
+CineMatch AI is an AI-first movie recommendation and taste discovery application built with **React 19**, **TypeScript**, **Vite**, and **Tailwind CSS**. It combines real-time movie metadata from **The Movie Database (TMDB)** with a **Modular AI Service Architecture** (Google Gemini, OpenRouter, and an autonomous Local Heuristic Engine) to synthesize personalized, ranked recommendations based on a fine-grained 1–10 rating scale.
 
 ---
 
-## 1. System Architecture & Data Flow
+## 1. System Architecture & Zero-Backend Model
+
+CineMatch operates on a **strict standalone client-to-API model**:
+- **Zero Hosted Backend:** There is no server, proxy, database, or analytics collector.
+- **Direct Client-to-API Calls:** Requests to TMDB, Google Gemini, and OpenRouter originate directly from the user's browser or native Capacitor webview.
+- **BYOK (Bring Your Own Key):** Users configure their own TMDB credential and optional cloud AI keys.
+- **Zero-Key Local Engine:** Users without AI keys can use the built-in **Local Smart Engine**, which performs multi-factor heuristic ranking completely offline.
 
 ```mermaid
 flowchart TD
-    subgraph Client [Browser / Client Layer]
-        UI[React UI: Taste Calibration / Feed / Modals]
-        Store[(LocalStorage Persistence)]
+    subgraph Client [Browser / Capacitor Native Shell]
+        UI[React 19 UI: Taste Calibration / Feed / Modals]
+        Store[(LocalStorage Schema v2: Ratings & Watchlist)]
+        Creds[(Session Memory: Heap-Only Credential Store)]
     end
 
-    subgraph TMDB_Layer [TMDB API Service]
-        TMDB_API[TMDB REST API v3]
-        Cache[In-Memory Request Cache]
-        Pooler[Candidate Pool Generator]
+    subgraph TMDB_Service [The Movie Database API]
+        TMDB_API[TMDB REST API v3 / v4]
+        LRU[Bounded LRU Cache max:250]
+        Pooler[Candidate Pool Discovery]
     end
 
-    subgraph AI_Layer [AI Service Layer (Adapter Pattern)]
-        Manager[AIServiceManager]
-        Gemini[Gemini Provider (2.5 / 2.0 / 1.5 Flash)]
+    subgraph AI_Layer [AI Orchestrator & Providers]
+        Manager[aiManager]
+        Gemini[Gemini Provider v1beta]
         OpenRouter[OpenRouter Provider]
-        Local[Local Heuristic / Vector Engine]
+        Local[Local Heuristic Engine]
     end
 
-    UI -->|1. User Rates 1-10| Store
+    UI -->|1. Rates 1-10| Store
     UI -->|2. Request Recommendations| Pooler
-    Pooler -->|3. Fetch Seeds, Trending & Top Critiques| TMDB_API
-    Pooler -->|4. Unrated Candidates Pool (30-40 films)| Manager
+    Creds -.->|Read Bearer/API Key| TMDB_API
+    Pooler -->|3. Discover Seeds & Trending| TMDB_API
+    Pooler -->|4. 30-40 Unrated Candidate Films| Manager
     Store -->|5. User Taste Profile Vector| Manager
-    Manager -->|6. Dispatch Prompt| Gemini
-    Manager -->|6b. Dispatch Prompt| OpenRouter
-    Manager -->|6c. Fallback / Zero-Key| Local
-    Gemini -->|7. Structured JSON Rankings + Justifications| UI
-    OpenRouter -->|7. Structured JSON Rankings + Justifications| UI
+    Creds -.->|Header Auth| Gemini
+    Creds -.->|Header Auth| OpenRouter
+    Manager -->|6a. Dispatch| Gemini
+    Manager -->|6b. Dispatch| OpenRouter
+    Manager -->|6c. Autonomous Fallback| Local
+    Gemini -->|7. Structured JSON Rankings| UI
+    OpenRouter -->|7. Structured JSON Rankings| UI
     Local -->|7. Multi-Factor Scored Rankings| UI
 ```
 
 ---
 
-## 2. Data Storage & Persistence (Where & What is Saved)
+## 2. Security & Credential Management Architecture
 
-All application data is persisted client-side in the browser's **`localStorage`**. No external database or backend server is required to test or run the app.
+### A. Zero Secrets in Source Code or Web Disk
+CineMatch contains **zero hardcoded API keys or tokens**. All credentials are user-supplied and handled under platform-specific confidentiality models:
 
-### Storage Keys & Data Schemas
+1. **Web Platform (Browser):**
+   - **Heap-Only Storage:** API keys (TMDB, Google Gemini, OpenRouter) are held exclusively in the JavaScript runtime heap (`credentialStore`).
+   - **Never Persisted to Browser Storage:** Keys are **never** written to `localStorage`, `sessionStorage`, `IndexedDB`, Web Workers, cookies, or logs.
+   - **Session Purge:** Reloading or closing the browser tab immediately clears all credentials from memory.
 
-#### A. User Ratings (`cinematch_user_ratings_v1`)
-Stores all movies rated by the user (keyed by TMDB Movie ID).
-```typescript
-Record<number, {
-  movieId: number;          // e.g. 27205
-  title: string;            // e.g. "Inception"
-  rating: number;           // Integer 1 to 10
-  posterPath: string | null;// e.g. "/x270mI37v4.jpg"
-  year?: string;            // e.g. "2010"
-  genres: string[];         // e.g. ["Action", "Sci-Fi", "Adventure"]
-  director?: string;        // e.g. "Christopher Nolan"
-  keywords?: string[];      // e.g. ["dream", "subconscious", "heist"]
-  ratedAt: number;          // Unix timestamp (ms)
-}>
-```
+2. **Android Platform (Capacitor Native Shell):**
+   - **Hardware-Backed AES-256-GCM Encryption:** When "Remember on this device" is enabled (default ON on Android), credentials are encrypted using platform AES-256-GCM with a non-exportable hardware key in Android Keystore (`com.cinematch.app.credentials.v1`).
+   - **Crash-Safe Platform Storage:** Encrypted payloads are written atomically via Android platform `AtomicFile` inside `Context.getNoBackupFilesDir()`.
+   - **Cloud Backup & Share Exclusion:** `android:allowBackup="false"` and restrictive FileProvider configuration ensure the vault is never synced to Google Drive or exposed via external shares.
+   - **Independent Preference & Full Revocation:** Disabling the switch or clicking Forget immediately purges the encrypted snapshot and Keystore alias from the device while preserving current session usability.
 
-#### B. AI & Discovery Settings (`cinematch_ai_settings_v1`)
-Stores the user's active AI provider, API keys, selected models, and preference filters.
-```typescript
-{
-  activeProvider: "gemini" | "openrouter" | "local";
-  geminiApiKey: string;        // Encrypted/stored locally only
-  geminiModel: string;         // e.g. "gemini-2.5-flash"
-  openRouterApiKey: string;
-  openRouterModel: string;     // e.g. "deepseek/deepseek-r1:free"
-  serendipityLevel: number;    // 0 (Safe Bets) to 100 (Wildcard Exploration)
-  selectedVibes: string[];     // e.g. ["Mind-bending", "Slow-burn"]
-  preferredEras: string[];     // e.g. ["90s", "2010s"]
-}
-```
-
-#### C. Watchlist (`cinematch_watchlist_v1`)
-Array of bookmarked TMDB movie IDs: `number[]`.
+3. **Confidentiality Protocols:**
+   - **URL Redaction:** TMDB requests automatically redact API keys in logs and diagnostics via `redactTmdbUrl`.
+   - **Header Authentication:** Gemini keys pass via the `x-goog-api-key` header (never in URL query strings). OpenRouter keys pass via `Authorization: Bearer <key>`.
+   - **Decrypted Once on Startup:** Credentials decrypt once upon application launch into memory; no decryption overhead per API request.
 
 ---
 
-## 3. Communication with AI (Request & Response Payloads)
+## 3. Data Storage Schema (v2)
 
-### A. When is AI Called?
-1. **On-Demand:** When the user clicks **"Re-Rank with AI"** or **"View Your Ranked List"**.
-2. **Tab Switch:** When navigating to the *Top Ranked* tab if no recommendations exist for current ratings.
-3. **Parameter Shift:** When adjusting the Serendipity slider or Vibe filters and requesting a refresh.
-4. **Test Connection:** When clicking "Test Connection" in Settings (sends a minimal 1-token test payload).
+User taste profile data is persisted in browser `localStorage` using versioned keys with automatic schema migration and fallback handling for `QuotaExceededError`:
 
-*(Note: AI is **never** invoked on every rating click to keep the UI instant and conserve free API limits).*
-
----
-
-### B. What Information is Sent to the AI? (Prompt Shape)
-
-The app formats the user's ratings and the candidate pool into a compact structured prompt sent via HTTP `POST` to the Google Gemini API endpoint:
-`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={API_KEY}`
-
-#### Example Request Payload:
-```json
-{
-  "contents": [
-    {
-      "parts": [
-        {
-          "text": "You are Cinephile AI, an expert cinematic curator...\n\nUser Profile:\n[\n  {\n    \"title\": \"Arrival\",\n    \"user_rating\": \"10/10\",\n    \"genres\": [\"Drama\", \"Sci-Fi\", \"Mystery\"],\n    \"director\": \"Denis Villeneuve\",\n    \"year\": \"2016\"\n  },\n  {\n    \"title\": \"Sicario\",\n    \"user_rating\": \"9/10\",\n    \"genres\": [\"Action\", \"Crime\", \"Thriller\"],\n    \"director\": \"Denis Villeneuve\",\n    \"year\": \"2015\"\n  },\n  {\n    \"title\": \"Ant-Man\",\n    \"user_rating\": \"3/10\",\n    \"genres\": [\"Action\", \"Comedy\"],\n    \"director\": \"Peyton Reed\",\n    \"year\": \"2015\"\n  }\n]\n\nSerendipity Setting: 75% (Hidden Gems: Branching outside usual comfort zones with high-quality under-the-radar cinema)\nUser Vibe Filters: Mind-bending, High Tension\nUser Era Preferences: Any\n\nCandidate Pool:\n[\n  {\n    \"id\": 335984,\n    \"title\": \"Blade Runner 2049\",\n    \"year\": \"2017\",\n    \"genres\": [\"Sci-Fi\", \"Drama\"],\n    \"tmdb_rating\": 7.6,\n    \"overview\": \"Thirty years after the events of the first film, a new blade runner...\"\n  },\n  {\n    \"id\": 77,\n    \"title\": \"Memento\",\n    \"year\": \"2000\",\n    \"genres\": [\"Mystery\", \"Thriller\"],\n    \"tmdb_rating\": 8.2,\n    \"overview\": \"A man with short-term memory loss attempts to track down his wife's murderer...\"\n  }\n]\n\nInstructions:\n1. Select and rank the best 15-20 films in order of personalized recommendation.\n2. Output strictly valid JSON matching the schema."
-        }
-      ]
-    }
-  ],
-  "generationConfig": {
-    "responseMimeType": "application/json",
-    "temperature": 0.7
-  }
-}
-```
+| Storage Key | Schema Type | Description |
+| :--- | :--- | :--- |
+| `cinematch_user_ratings_v2` | `Record<number, UserRating>` | User's rated movies, ratings (1–10), genres, director, timestamp. |
+| `cinematch_watchlist_v2` | `number[]` | Array of bookmarked TMDB movie IDs. |
+| `cinematch_watchlist_movies_v2` | `Record<number, Movie>` | Cached metadata for bookmarked movies for instant display. |
+| `cinematch_ai_settings_v2` | `AISettings` | Non-sensitive preferences: active provider, model name, serendipity level, vibes, eras. *(Contains no secrets)*. |
+| `cinematch_cached_recs_v2` | `CachedRecommendations` | Last successful recommendations with timestamp and provider metadata. |
 
 ---
 
-### C. What Information is Received from the AI? (Response Shape)
+## 4. Recommendation Engines
 
-The AI responds with a clean JSON object containing ranked candidate IDs, match scores, custom cinephile reasoning, serendipity badges, and highlight tags:
+### 1. Google Gemini AI Provider
+- **Models:** `gemini-3.8-flash` (recommended), `gemini-3.7-flash`, `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-2.5-pro`.
+- **Mechanism:** Sends structured prompts containing the candidate pool and user taste profile; returns JSON rankings with contextual rationales.
+- **Resilience:** Strips markdown code blocks, enforces 20s timeout, and validates schema.
 
-```json
-{
-  "rankings": [
-    {
-      "id": 335984,
-      "score": 98,
-      "reason": "Denis Villeneuve's meditative sci-fi atmosphere directly echoes your 10/10 rating for Arrival, featuring high-tension sound design and existential pacing.",
-      "serendipityType": "director_match",
-      "highlightTags": ["Denis Villeneuve", "Philosophical Sci-Fi", "Atmospheric"]
-    },
-    {
-      "id": 77,
-      "score": 93,
-      "reason": "Intricate nonlinear mystery with intense psychological tension, matching your love for cerebral, high-stakes narratives.",
-      "serendipityType": "thematic_gem",
-      "highlightTags": ["Mind-Bending", "Neo-Noir", "Psychological"]
-    }
-  ]
-}
-```
+### 2. OpenRouter AI Provider
+- **Models:** `deepseek/deepseek-r1:free`, `meta-llama/llama-3.3-70b-instruct:free`, `google/gemini-2.0-flash-exp:free`, `mistralai/mistral-small-24b-instruct-2501:free`.
+- **Resilience:** Automatically strips DeepSeek R1 `<think>...</think>` tags and parses structured JSON.
+
+### 3. Local Smart Engine (Zero-Key Heuristic)
+- **Zero External API Calls:** Runs entirely in client JavaScript.
+- **Scoring Dimensions:**
+  - Genre Affinity: Weighted by user rating strength ($+3.0$ for 10/10, $-4.0$ for $\le 3/10$).
+  - Director Match: $+15$ point boost for directors rated $\ge 8$.
+  - Popularity & Quality: Log-scaled vote count and vote average.
+  - Serendipity Temperature: Injects controlled variance based on the Serendipity slider.
+  - Score Clamping: Clamped strictly in the $[45, 99]$ interval.
 
 ---
 
-## 4. TMDB Candidate Pooling & Algorithm Mechanics
+## 5. Mobile Ergonomics & Native Android (Capacitor)
 
-Before calling the AI, the app constructs a relevant candidate pool:
-1. **Seed Extraction:** Extracts the user's top-rated films ($\ge 7/10$).
-2. **TMDB Graph Queries:** Fetches `/movie/{id}/recommendations` and `/movie/{id}/similar` for those seeds.
-3. **Discovery Queries:** Queries `/discover/movie` sorted by `vote_average` and `popularity` with high vote-count thresholds ($\ge 800$ votes).
-4. **Deduplication & Filter:** Excludes all films the user has already rated or marked as seen.
-5. **Candidate Batch:** Limits the candidate pool to the top 30–40 high-signal candidates for the AI to rank.
-
----
-
-## 5. Local Heuristic Engine (Zero-Config Fallback)
-
-If no API key is provided or network limits are exceeded, the app automatically runs the **`LocalProvider`** client-side engine:
-
-$$\text{Score}(M) = 50 + \sum_{g} w_g \cdot \text{GenreAffinity}(g) + 20 \cdot \text{DirectorAffinity}(d) + (\text{TMDB Rating} - 6.5) \cdot 4 + E_{\text{serendipity}} - P_{\text{negative}}$$
-
-* **Negative Suppression ($P_{\text{negative}}$):** Movies rated $\le 3/10$ heavily penalize their associated genres and directors.
-* **Serendipity Boost ($E_{\text{serendipity}}$):** When the serendipity slider is turned up, highly-rated critically acclaimed films in genres outside the user's primary comfort zone receive discovery score boosts.
+- **Touch Targets:** Dual-row rating controls with $\ge 44\text{--}48\text{dp}$ touch targets for mobile accessibility.
+- **Haptic Feedback:** `@capacitor/haptics` triggers light impact ticks on rating and clear actions.
+- **Safe Area Insets:** Layout adapts dynamically to navigation bars and camera notches via `env(safe-area-inset-bottom)`.
+- **Hardware Back Button:** Dismisses open modals first; double-taps on root feed to exit cleanly.
+- **Native Sharing:** Seamless native share dialogs on Android using `@capacitor/share` with Web Share fallback.
 
 ---
 
-## 6. Project Structure
+## 6. Development & Testing
 
-```
-movie-recom/
-├── src/
-│   ├── components/
-│   │   ├── DiscoveryFilters.tsx     # Serendipity dial & Vibe chips
-│   │   ├── MovieDetailsModal.tsx    # Trailers, cast, keywords & metadata
-│   │   ├── MyRatings.tsx            # Ratings manager & taste analytics
-│   │   ├── Navbar.tsx               # Desktop header & AI status
-│   │   ├── MobileBottomNav.tsx      # Mobile bottom tab-bar
-│   │   ├── RankedFeed.tsx           # Ranked recommendation list (#1..#N)
-│   │   ├── RatingControl.tsx        # 1-10 interactive rating strip
-│   │   ├── SettingsModal.tsx        # AI Provider & model configuration
-│   │   ├── TasteCalibration.tsx     # Iconic films onboarding grid
-│   │   └── CsvImportModal.tsx       # IMDb/Letterboxd CSV importer
-│   ├── services/
-│   │   ├── ai/
-│   │   │   ├── types.ts             # IAIProvider interface
-│   │   │   ├── aiManager.ts         # Service factory & fallback manager
-│   │   │   ├── geminiProvider.ts    # Google Gemini 2.5 / 2.0 / 1.5 adapter
-│   │   │   ├── openRouterProvider.ts# OpenRouter adapter
-│   │   │   └── localProvider.ts     # Client-side heuristic vector engine
-│   │   └── tmdb.ts                  # TMDB client, caching, endpoints
-│   ├── store/
-│   │   └── useMovieStore.tsx        # React Context & LocalStorage store
-│   ├── types/
-│   │   └── index.ts                 # Central TypeScript interfaces
-│   ├── App.tsx                      # App router & layout
-│   ├── main.tsx                     # Entry point
-│   └── index.css                    # Tailwind CSS v4 styling & animations
-├── index.html                       # HTML5 template with mobile meta tags
-├── package.json
-├── tsconfig.json
-└── vite.config.ts
-```
+### Prerequisites
+- Node.js `v20+` (tested on `v22.15.0`)
+- npm `v10+`
 
----
-
-## 7. Future Mobile Deployment (Capacitor)
-
-The codebase is built touch-first with standard mobile touch targets, safe area insets, and bottom navigation. To convert this web application into a native **iOS** or **Android** app:
-
+### Setup & Commands
 ```bash
-# 1. Build the production web bundle
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
+
+# Run TypeScript typecheck
+npm run typecheck
+
+# Run ESLint check
+npm run lint
+
+# Run automated tests
+npm test
+
+# Run test coverage
+npm run test:coverage
+
+# Build web production bundle
 npm run build
-
-# 2. Add Capacitor
-npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/ios
-npx cap init "CineMatch AI" "com.cinematch.app" --web-dir dist
-
-# 3. Add platforms and sync
-npx cap add android
-npx cap add ios
-npx cap sync
-
-# 4. Open in Android Studio or Xcode
-npx cap open android
-npx cap open ios
 ```
+
+### Android Development
+```bash
+# Build and sync assets to Capacitor
+npm run build
+npx cap sync android
+
+# Open Android Studio
+npx cap open android
+```
+
+---
+
+## 7. Documentation Index
+
+- [Production Readiness Audit](docs/production-readiness.md): Detailed requirement-by-requirement audit, test inventory, and unresolved external risks.
+- [Release Verification Report](docs/verification-report.md): Execution outputs, benchmark measurements, bundle breakdown, and evaluation matrices.
+- [Production Release Runbook](docs/release-runbook.md): Step-by-step deployment guide for Web and Capacitor Android.
+- [Android Remember Credentials Specification (v1.1)](docs/android-remember-credentials-spec.md): Architectural and security specification for persistent encrypted credentials on Android.
+- [Android Remember Credentials Verification Report](docs/android-remember-credentials-verification.md): Technical verification report, binary delta analysis (+9.49 KiB), test matrix, and release gates.
