@@ -5,6 +5,16 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import App from './App';
 import './index.css';
 
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { runStorageMigration } from './services/storage';
+import { credentialCoordinator } from './services/credentialCoordinator';
+
+// Run storage migration (sanitizes stored secrets from v1 into session memory)
+runStorageMigration();
+
+// Single idempotent startup restoration for Android Keystore credentials (no-op on web)
+credentialCoordinator.initialize();
+
 if (Capacitor.isNativePlatform()) {
   StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
   StatusBar.setBackgroundColor({ color: '#121c17' }).catch(() => {});
@@ -12,7 +22,9 @@ if (Capacitor.isNativePlatform()) {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 );
 

@@ -1,15 +1,12 @@
 import React, { useState } from 'react';
 import {
-  Star,
   Film,
-  SlidersHorizontal,
   Search,
   Download,
   Upload,
   BarChart3,
   TrendingUp,
   User,
-  Sparkles,
   Trash2,
   Bookmark,
 } from 'lucide-react';
@@ -17,14 +14,17 @@ import { useMovieStore } from '../store/useMovieStore';
 import { IMAGE_BASE_URL } from '../services/tmdb';
 import { RatingControl } from './RatingControl';
 import { ShareButton } from './ShareButton';
-import { Movie } from '../types';
+import { generateRatingsCsv } from '../services/csvService';
+import { Capacitor } from '@capacitor/core';
+import { Share } from '@capacitor/share';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 
 interface MyRatingsProps {
   onOpenCsvModal: () => void;
 }
 
 export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
-  const { ratings, watchlist, setRating, removeRating, tasteStats, setSelectedMovieForModal, setActiveTab, clearAllData } = useMovieStore();
+  const { ratings, watchlist, setRating, removeRating, tasteStats, setSelectedMovieForModal, setActiveTab, clearAllData, showToast } = useMovieStore();
   const [filterTier, setFilterTier] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'recent' | 'rating-desc' | 'rating-asc'>('recent');
@@ -52,20 +52,46 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
     return b.ratedAt - a.ratedAt; // recent
   });
 
-  const exportRatingsToCsv = () => {
+  const exportRatingsToCsv = async () => {
     if (ratingsList.length === 0) return;
-    const headers = ['Movie ID', 'Title', 'Year', 'Rating', 'Genres', 'Director', 'Rated At'];
-    const rows = ratingsList.map((r) => [
-      r.movieId,
-      `"${r.title.replace(/"/g, '""')}"`,
-      r.year || '',
-      r.rating,
-      `"${r.genres.join(', ')}"`,
-      `"${(r.director || '').replace(/"/g, '""')}"`,
-      new Date(r.ratedAt).toISOString(),
-    ]);
+    const csvContent = generateRatingsCsv(ratings);
 
-    const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
+    if (Capacitor.isNativePlatform()) {
+      const fileName = `cinematch_ratings_${new Date().toISOString().slice(0, 10)}.csv`;
+      let fileUri: string | null = null;
+      try {
+        const writeResult = await Filesystem.writeFile({
+          path: fileName,
+          data: csvContent,
+          directory: Directory.Cache,
+          encoding: Encoding.UTF8,
+        });
+        fileUri = writeResult.uri;
+        await Share.share({
+          title: 'CineMatch Ratings Export',
+          url: fileUri,
+          dialogTitle: 'Export CineMatch Ratings CSV',
+        });
+        showToast('Ratings exported successfully!');
+      } catch {
+        // User cancelled, dismissed share sheet, or operation was interrupted.
+        // Do NOT fall through to web download on native platforms!
+      } finally {
+        if (fileUri) {
+          try {
+            await Filesystem.deleteFile({
+              path: fileName,
+              directory: Directory.Cache,
+            });
+          } catch {
+            // Non-fatal cache cleanup
+          }
+        }
+      }
+      return;
+    }
+
+    // Web download fallback
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -74,6 +100,8 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('Ratings CSV downloaded!');
   };
 
   return (

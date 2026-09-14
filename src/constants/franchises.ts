@@ -550,25 +550,58 @@ export const FRANCHISE_ALIASES: FranchiseRule[] = [
   },
 ];
 
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Normalizes title strings by:
+ * - Converting to lower case
+ * - Stripping diacritics / accents (e.g. folie à deux -> folie a deux)
+ * - Standardizing apostrophes/quotes
+ */
+export function normalizeForMatching(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/['’]/g, '');
+}
+
+/**
+ * Checks whether a normalized pattern matches the normalized title
+ * using word boundary/token boundary constraints to avoid substring false positives
+ * (e.g. "thor" must not match "author", "ted" must not match "united").
+ */
+export function matchesFranchiseAlias(normalizedTitle: string, rawAlias: string): boolean {
+  const normalizedAlias = normalizeForMatching(rawAlias).trim();
+  if (!normalizedAlias) return false;
+
+  const escaped = escapeRegExp(normalizedAlias);
+  // Match as an isolated token sequence surrounded by non-alphanumeric boundaries or string edges
+  const regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');
+  return regex.test(normalizedTitle);
+}
+
 /**
  * Fast synchronous series identification.
- * 1. Checks specific curated franchise rules.
+ * 1. Checks specific curated franchise rules with token-aware matching.
  * 2. Applies intelligent title stemming to automatically catch sequels,
  *    subtitles, Roman numerals, and volume/chapter tags with 0 network overhead.
  */
 export function getSeriesKey(movieId: number, title: string): string {
-  const lower = title.toLowerCase().trim();
+  const normalized = normalizeForMatching(title).trim();
 
   // 1. Check curated franchise alias dictionary
   for (const f of FRANCHISE_ALIASES) {
-    if (f.match.some((m) => lower.includes(m))) {
+    if (f.match.some((m) => matchesFranchiseAlias(normalized, m))) {
       return f.key;
     }
   }
 
   // 2. Intelligent Title Stemmer:
   // Strip leading articles (The, A, An)
-  let clean = lower.replace(/^(the|a|an)\s+/i, '').trim();
+  let clean = normalized.replace(/^(the|a|an)\s+/i, '').trim();
 
   // Strip subtitle dividers (:, -, —, –, |)
   if (clean.includes(':')) clean = clean.split(':')[0].trim();
@@ -585,5 +618,5 @@ export function getSeriesKey(movieId: number, title: string): string {
   // Strip trailing punctuation
   clean = clean.replace(/[^\w\s]/gi, '').trim();
 
-  return `stem:${clean || lower}`;
+  return `stem:${clean || normalized}`;
 }

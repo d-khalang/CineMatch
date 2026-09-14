@@ -9,9 +9,6 @@ import {
   Star,
   Film,
   Sparkles,
-  Calendar,
-  Clock,
-  ArrowRight,
 } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
 import { IMAGE_BASE_URL } from '../services/tmdb';

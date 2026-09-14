@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
 import { getCalibrationMovies, searchMovies, CALIBRATION_CATEGORIES, IMAGE_BASE_URL } from '../services/tmdb';
+import { credentialStore } from '../services/credentialStore';
 import { Movie } from '../types';
 import { RatingControl } from './RatingControl';
 import { ShareButton } from './ShareButton';
@@ -98,6 +99,16 @@ export const TasteCalibration: React.FC = () => {
   useEffect(() => {
     fetchCategoryMovies('all', 1, false);
   }, [fetchCategoryMovies]);
+
+  // Re-fetch calibration movies if credentials become available after initial mount
+  useEffect(() => {
+    const unsubscribe = credentialStore.subscribe(() => {
+      if (credentialStore.hasTmdb() && movies.length === 0 && !isLoading) {
+        fetchCategoryMovies(activeCategory, 1, false);
+      }
+    });
+    return unsubscribe;
+  }, [fetchCategoryMovies, activeCategory, movies.length, isLoading]);
 
   // Real-time search effect with 400ms debounce and AbortController request cancellation
   useEffect(() => {

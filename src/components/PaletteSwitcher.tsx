@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Palette, Type, Check, X, Sparkles, Sliders } from 'lucide-react';
+import { Palette, Type, Check, X } from 'lucide-react';
 
 export interface PaletteOption {
   id: string;
@@ -114,21 +114,21 @@ interface PaletteSwitcherProps {
 
 export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: controlledOpen, onClose: controlledClose }) => {
   const [isOpen, setIsOpen] = useState<boolean>(false);
-  const [activePalette, setActivePalette] = useState<string>('maple');
-  const [activeFont, setActiveFont] = useState<string>('bricolage');
+  const [activePalette, setActivePalette] = useState<string>(() => {
+    return localStorage.getItem('cinematch-palette') || 'maple';
+  });
+  const [activeFont, setActiveFont] = useState<string>(() => {
+    return localStorage.getItem('cinematch-font') || 'bricolage';
+  });
 
   const showModal = controlledOpen !== undefined ? controlledOpen : isOpen;
   const handleClose = controlledClose !== undefined ? controlledClose : () => setIsOpen(false);
 
-  // Load saved preferences on mount
+  // Synchronize DOM with preferences on mount/change
   useEffect(() => {
-    const savedPalette = localStorage.getItem('cinematch-palette') || 'maple';
-    const savedFont = localStorage.getItem('cinematch-font') || 'bricolage';
-    setActivePalette(savedPalette);
-    setActiveFont(savedFont);
-    document.documentElement.setAttribute('data-palette', savedPalette);
-    document.documentElement.setAttribute('data-font', savedFont);
-  }, []);
+    document.documentElement.setAttribute('data-palette', activePalette);
+    document.documentElement.setAttribute('data-font', activeFont);
+  }, [activePalette, activeFont]);
 
   const handleSelectPalette = (paletteId: string) => {
     setActivePalette(paletteId);

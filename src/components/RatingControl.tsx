@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { EyeOff, Star, Check } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 interface RatingControlProps {
   currentRating?: number;
@@ -15,6 +17,22 @@ export const RatingControl: React.FC<RatingControlProps> = ({
   compact = false,
 }) => {
   const [hoveredRating, setHoveredRating] = useState<number | null>(null);
+
+  const triggerHaptic = () => {
+    if (Capacitor.isNativePlatform()) {
+      Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+    }
+  };
+
+  const handleRate = (score: number) => {
+    triggerHaptic();
+    onRate(score);
+  };
+
+  const handleClear = () => {
+    triggerHaptic();
+    onClear();
+  };
 
   const getRatingColor = (score: number, isSelected: boolean) => {
     if (!isSelected && hoveredRating === null) {
@@ -54,11 +72,9 @@ export const RatingControl: React.FC<RatingControlProps> = ({
       case 6:
         return 'Decent';
       case 7:
-        return 'Good';
       case 8:
         return 'Great';
       case 9:
-        return 'Phenomenal';
       case 10:
         return 'Masterpiece';
       default:
@@ -87,27 +103,36 @@ export const RatingControl: React.FC<RatingControlProps> = ({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onClear();
+                handleClear();
               }}
-              className="text-[11px] text-slate-400 hover:text-rose-400 flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)]"
+              className="text-[11px] text-slate-400 hover:text-rose-400 flex items-center gap-1 transition-colors px-2 py-1 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)]"
               title="Reset rating"
+              aria-label="Reset rating"
             >
-              <EyeOff className="w-3 h-3" />
+              <EyeOff className="w-3.5 h-3.5" />
               Reset
             </button>
           )}
         </div>
 
-        {/* 1-10 Touch/Click Strip */}
-        <div className="grid grid-cols-10 gap-1 w-full" onClick={(e) => e.stopPropagation()}>
+        {/* 1-10 Touch Strip: 2 rows on mobile (>=44px touch targets) and 1 row on tablet/desktop */}
+        <div
+          className="grid grid-cols-5 sm:grid-cols-10 gap-1.5 w-full"
+          onClick={(e) => e.stopPropagation()}
+          role="radiogroup"
+          aria-label="Movie rating from 1 to 10"
+        >
           {Array.from({ length: 10 }, (_, i) => i + 1).map((val) => {
             const isSelected = currentRating === val;
             return (
               <button
                 key={val}
                 type="button"
-                onClick={() => onRate(val)}
-                className={`h-7 flex items-center justify-center text-xs font-semibold rounded transition-all duration-150 border ${getRatingColor(
+                role="radio"
+                aria-checked={isSelected}
+                aria-label={`Rate ${val} out of 10: ${getRatingLabel(val)}`}
+                onClick={() => handleRate(val)}
+                className={`h-10 sm:h-8 min-w-[38px] flex items-center justify-center text-xs font-bold rounded-lg transition-all duration-150 border focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:outline-none ${getRatingColor(
                   val,
                   isSelected
                 )}`}
@@ -137,12 +162,13 @@ export const RatingControl: React.FC<RatingControlProps> = ({
 
         <button
           type="button"
-          onClick={onClear}
-          className={`text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors border ${
+          onClick={handleClear}
+          className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors border ${
             currentRating
               ? 'text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 border-[var(--border-subtle)] hover:border-rose-900/50'
               : 'text-slate-500 bg-[var(--bg-surface)] border-[var(--border-subtle)]'
           }`}
+          aria-label="Clear rating"
         >
           <EyeOff className="w-3.5 h-3.5" />
           {currentRating ? "Haven't seen / Clear" : "Haven't seen"}
@@ -150,23 +176,30 @@ export const RatingControl: React.FC<RatingControlProps> = ({
       </div>
 
       {/* 1-10 Button Bar */}
-      <div className="grid grid-cols-10 gap-1.5 sm:gap-2">
+      <div
+        className="grid grid-cols-5 sm:grid-cols-10 gap-2"
+        role="radiogroup"
+        aria-label="Select your rating from 1 to 10"
+      >
         {Array.from({ length: 10 }, (_, i) => i + 1).map((val) => {
           const isSelected = currentRating === val;
           return (
             <button
               key={val}
               type="button"
+              role="radio"
+              aria-checked={isSelected}
+              aria-label={`Rate ${val} out of 10: ${getRatingLabel(val)}`}
               onMouseEnter={() => setHoveredRating(val)}
               onMouseLeave={() => setHoveredRating(null)}
-              onClick={() => onRate(val)}
-              className={`h-11 flex flex-col items-center justify-center rounded-lg transition-all duration-150 border active:scale-95 ${getRatingColor(
+              onClick={() => handleRate(val)}
+              className={`h-12 flex flex-col items-center justify-center rounded-xl transition-all duration-150 border active:scale-95 focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:outline-none ${getRatingColor(
                 val,
                 isSelected
               )}`}
             >
               <span className="text-sm font-bold">{val}</span>
-              {isSelected && <Check className="w-2.5 h-2.5 -mt-0.5" />}
+              {isSelected && <Check className="w-3 h-3 -mt-0.5" />}
             </button>
           );
         })}
@@ -174,7 +207,7 @@ export const RatingControl: React.FC<RatingControlProps> = ({
 
       {/* Guidance Labels */}
       <div className="flex justify-between text-[11px] text-slate-400 px-1 font-medium">
-        <span>1-3: Poor / Disliked</span>
+        <span>1-3: Disliked</span>
         <span>5-6: Decent</span>
         <span>7-8: Great</span>
         <span className="text-[var(--accent-secondary)] font-bold">9-10: Masterpiece</span>

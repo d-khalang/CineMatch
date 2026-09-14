@@ -11,7 +11,6 @@ import {
   AlertCircle,
   Clapperboard,
   SlidersHorizontal,
-  CheckCircle2,
 } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
 import { IMAGE_BASE_URL } from '../services/tmdb';
@@ -44,8 +43,9 @@ export const RankedFeed: React.FC = () => {
 
   // Clean up timers on unmount
   useEffect(() => {
+    const timers = pendingTimersRef.current;
     return () => {
-      Object.values(pendingTimersRef.current).forEach((t) => clearTimeout(t));
+      Object.values(timers).forEach((t) => clearTimeout(t));
     };
   }, []);
 
@@ -89,12 +89,31 @@ export const RankedFeed: React.FC = () => {
     (rec) => !ratings[rec.movie.id] || Boolean(pendingRemovalIds[rec.movie.id])
   );
 
+  const profileSig = Object.entries(ratings)
+    .map(([id, r]) => `${id}:${r.rating}`)
+    .sort()
+    .join(',');
+  const autoAttemptedProfileRef = useRef<string | null>(null);
+
   useEffect(() => {
-    // If we have ratings but no recommendations yet, auto-generate
-    if (recommendations.length === 0 && ratedCount >= 1 && !isGeneratingRecs) {
+    // If we have ratings and no recommendations yet, auto-generate ONLY ONCE per profile signature
+    // and never continuously retry if generation errored or returned empty.
+    if (
+      recommendations.length === 0 &&
+      ratedCount >= 1 &&
+      !isGeneratingRecs &&
+      !recommendationError &&
+      autoAttemptedProfileRef.current !== profileSig
+    ) {
+      autoAttemptedProfileRef.current = profileSig;
       generateRankings();
     }
-  }, [ratedCount, recommendations.length, generateRankings, isGeneratingRecs]);
+  }, [ratedCount, recommendations.length, generateRankings, isGeneratingRecs, recommendationError, profileSig]);
+
+  const handleManualGenerate = () => {
+    autoAttemptedProfileRef.current = profileSig;
+    generateRankings();
+  };
 
   const getRankBadgeStyle = (rank: number) => {
     if (rank === 1) {
@@ -220,11 +239,20 @@ export const RankedFeed: React.FC = () => {
 
       {/* Notification / Error alert if any */}
       {recommendationError && (
-        <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-800/60 text-amber-200 text-xs flex items-start gap-2.5">
-          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-          <div>
-            <span className="font-bold">AI Status:</span> {recommendationError}. Using local fallback engine for uninterrupted ranking.
+        <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-800/60 text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold">AI Status:</span> {recommendationError}
+            </div>
           </div>
+          <button
+            onClick={handleManualGenerate}
+            disabled={isGeneratingRecs}
+            className="px-3 py-1.5 rounded-lg bg-amber-700 hover:bg-amber-600 text-white font-semibold text-xs shrink-0 self-start sm:self-auto cursor-pointer disabled:opacity-50 transition-colors"
+          >
+            Retry Generation
+          </button>
         </div>
       )}
 
@@ -243,10 +271,11 @@ export const RankedFeed: React.FC = () => {
               : 'Click below to compute your personalized recommendations.'}
           </p>
           <button
-            onClick={generateRankings}
-            className="btn-tactile btn-tactile-primary px-6 py-3 text-sm font-bold shadow-lg"
+            onClick={handleManualGenerate}
+            disabled={isGeneratingRecs}
+            className="btn-tactile btn-tactile-primary px-6 py-3 text-sm font-bold shadow-lg disabled:opacity-50"
           >
-            Generate AI Rankings
+            {recommendations.length > 0 ? 'Discover Next Batch' : 'Generate AI Rankings'}
           </button>
         </div>
       ) : (

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Play, Star, Calendar, Clock, Bookmark, BookmarkCheck, ExternalLink, Film, User, Tag, Sparkles } from 'lucide-react';
 import { Movie } from '../types';
-import { getMovieDetails, BACKDROP_BASE_URL, IMAGE_BASE_URL } from '../services/tmdb';
+import { getMovieDetails, BACKDROP_BASE_URL } from '../services/tmdb';
 import { useMovieStore } from '../store/useMovieStore';
 import { RatingControl } from './RatingControl';
 import { ShareButton } from './ShareButton';
@@ -10,7 +10,6 @@ export const MovieDetailsModal: React.FC = () => {
   const { selectedMovieForModal, setSelectedMovieForModal, ratings, setRating, removeRating, watchlist, toggleWatchlist } = useMovieStore();
   const [movieDetails, setMovieDetails] = useState<Movie | null>(null);
   const [showTrailer, setShowTrailer] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   useEffect(() => {
     if (!selectedMovieForModal) {
@@ -20,7 +19,6 @@ export const MovieDetailsModal: React.FC = () => {
     }
 
     let isMounted = true;
-    setIsLoading(true);
 
     getMovieDetails(selectedMovieForModal.id)
       .then((details) => {
@@ -33,9 +31,6 @@ export const MovieDetailsModal: React.FC = () => {
         if (isMounted) {
           setMovieDetails(selectedMovieForModal);
         }
-      })
-      .finally(() => {
-        if (isMounted) setIsLoading(false);
       });
 
     return () => {
@@ -49,7 +44,6 @@ export const MovieDetailsModal: React.FC = () => {
   const userRating = ratings[movie.id]?.rating;
   const inWatchlist = watchlist.includes(movie.id);
   const backdropUrl = movie.backdrop_path ? `${BACKDROP_BASE_URL}${movie.backdrop_path}` : null;
-  const posterUrl = movie.poster_path ? `${IMAGE_BASE_URL}${movie.poster_path}` : null;
   const year = movie.release_date ? movie.release_date.slice(0, 4) : '';
 
   return (

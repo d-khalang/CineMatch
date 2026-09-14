@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle, Share2, X } from 'lucide-react';
+import { CheckCircle, X } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
 
 export const Toast: React.FC = () => {
