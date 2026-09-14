@@ -35,14 +35,19 @@ class AIServiceManager {
 
   async generateRecommendations(
     providerId: AIProviderId,
-    request: RecommendationRequest
+    request: RecommendationRequest,
+    signal?: AbortSignal
   ): Promise<AIGenerationResponse> {
+    if (signal?.aborted) {
+      throw new DOMException('Generation aborted by caller', 'AbortError');
+    }
+
     const provider = this.getProvider(providerId);
 
     // If Gemini or OpenRouter selected without key, fall back gracefully to Local
     if (providerId === 'gemini' && !request.apiKey?.trim()) {
       const local = this.getProvider('local');
-      const res = await local.generateRecommendations(request);
+      const res = await local.generateRecommendations(request, signal);
       return {
         recommendations: res.recommendations,
         usedProvider: 'Local Smart Engine (Configure Gemini API Key in Settings for AI synthesis)',
@@ -51,7 +56,7 @@ class AIServiceManager {
 
     if (providerId === 'openrouter' && !request.apiKey?.trim()) {
       const local = this.getProvider('local');
-      const res = await local.generateRecommendations(request);
+      const res = await local.generateRecommendations(request, signal);
       return {
         recommendations: res.recommendations,
         usedProvider: 'Local Smart Engine (Configure OpenRouter Key in Settings)',
@@ -59,22 +64,34 @@ class AIServiceManager {
     }
 
     try {
-      const result = await provider.generateRecommendations(request);
+      const result = await provider.generateRecommendations(request, signal);
       return {
         recommendations: result.recommendations,
         unconstrainedDiscoveries: result.unconstrainedDiscoveries,
         tasteAnalysis: result.tasteAnalysis,
         usedProvider: provider.name,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      // Cancellation must not trigger local fallback or show an error
+      const isAbort =
+        signal?.aborted ||
+        (err instanceof DOMException && err.name === 'AbortError') ||
+        (err instanceof Error && err.name === 'AbortError');
+
+      if (isAbort) {
+        throw err;
+      }
+
       console.warn(`Provider ${provider.name} failed:`, err);
-      // Fallback to local heuristic engine
+      const errMsg = err instanceof Error ? err.message : String(err);
+
+      // Graceful fallback to local heuristic engine on network/provider error
       const local = this.getProvider('local');
-      const fallbackRes = await local.generateRecommendations(request);
+      const fallbackRes = await local.generateRecommendations(request, signal);
       return {
         recommendations: fallbackRes.recommendations,
-        usedProvider: `Local Engine (Fallback: ${err.message || 'AI request failed'})`,
-        error: err.message,
+        usedProvider: `Local Engine (Fallback: ${errMsg || 'AI request failed'})`,
+        error: errMsg,
       };
     }
   }

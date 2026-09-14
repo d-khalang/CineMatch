@@ -29,6 +29,6 @@ export interface IAIProvider {
   readonly name: string;
   readonly description: string;
   
-  generateRecommendations(request: RecommendationRequest): Promise<AIRecommendationResult>;
+  generateRecommendations(request: RecommendationRequest, signal?: AbortSignal): Promise<AIRecommendationResult>;
   testConnection(apiKey: string, model?: string): Promise<{ success: boolean; message: string }>;
 }

@@ -1,5 +1,6 @@
-import { IAIProvider, RecommendationRequest, AIRecommendationResult, UnconstrainedDiscovery } from './types';
-import { Recommendation, Movie } from '../../types';
+import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './types';
+import { Movie } from '../../types';
+import { validateAndSanitizeAIResponse } from './aiResponseValidator';
 
 export const OPENROUTER_AVAILABLE_MODELS = [
   { id: 'deepseek/deepseek-r1:free', name: 'DeepSeek R1 (Free)', tier: 'Free' },
@@ -7,6 +8,19 @@ export const OPENROUTER_AVAILABLE_MODELS = [
   { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash Exp (Free)', tier: 'Free' },
   { id: 'mistralai/mistral-small-24b-instruct-2501:free', name: 'Mistral Small 24B (Free)', tier: 'Free' },
 ];
+
+function composeSignals(signals: (AbortSignal | undefined)[]): AbortSignal {
+  const controller = new AbortController();
+  for (const s of signals) {
+    if (!s) continue;
+    if (s.aborted) {
+      controller.abort(s.reason);
+      return controller.signal;
+    }
+    s.addEventListener('abort', () => controller.abort(s.reason), { once: true });
+  }
+  return controller.signal;
+}
 
 export class OpenRouterProvider implements IAIProvider {
   readonly id = 'openrouter';
@@ -19,6 +33,9 @@ export class OpenRouterProvider implements IAIProvider {
     }
 
     try {
+      const timeoutController = new AbortController();
+      const timeout = setTimeout(() => timeoutController.abort(new Error('OpenRouter test timed out after 10s')), 10000);
+
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -31,7 +48,9 @@ export class OpenRouterProvider implements IAIProvider {
           model,
           messages: [{ role: 'user', content: 'Say CONNECTED in JSON: {"status": "CONNECTED"}' }],
         }),
+        signal: timeoutController.signal,
       });
+      clearTimeout(timeout);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -39,12 +58,13 @@ export class OpenRouterProvider implements IAIProvider {
       }
 
       return { success: true, message: `Successfully connected to OpenRouter (${model})!` };
-    } catch (err: any) {
-      return { success: false, message: `Network error: ${err.message}` };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, message: `Network error: ${msg}` };
     }
   }
 
-  async generateRecommendations(request: RecommendationRequest): Promise<AIRecommendationResult> {
+  async generateRecommendations(request: RecommendationRequest, signal?: AbortSignal): Promise<AIRecommendationResult> {
     const {
       userRatings,
       candidatePool,
@@ -55,137 +75,132 @@ export class OpenRouterProvider implements IAIProvider {
       model = 'deepseek/deepseek-r1:free',
     } = request;
 
-    if (!apiKey) {
+    if (!apiKey?.trim()) {
       throw new Error('OpenRouter API key is required.');
     }
 
-    const candidateMap = new Map<number, Movie>(candidatePool.map((m) => [m.id, m]));
+    const candidateMap = new Map<number, Movie>();
+    candidatePool.forEach((m) => candidateMap.set(m.id, m));
 
-    const userRatingsSummary = userRatings.map((r) => ({
+    const ratingsSummary = userRatings.map((r) => ({
       title: r.title,
       user_rating: `${r.rating}/10`,
       genres: r.genres,
-      director: r.director || 'Unknown',
+      director: r.director,
       year: r.year,
     }));
 
-    const candidatesSummary = candidatePool.slice(0, 30).map((m) => ({
+    const poolSummary = candidatePool.slice(0, 40).map((m) => ({
       id: m.id,
       title: m.title,
-      year: m.release_date ? m.release_date.slice(0, 4) : 'Unknown',
+      year: m.release_date?.slice(0, 4),
       genres: (m.genres || []).map((g) => g.name),
       tmdb_rating: m.vote_average,
-      overview: (m.overview || '').slice(0, 150),
     }));
 
-    const prompt = `You are Cinephile AI, an expert cinematic curator and film theorist.
-Analyze the user's movie ratings to deduce their underlying psychological and structural taste DNA (e.g. narrative pacing, claustrophobic tension, moral ambiguity).
+    const systemPrompt = `You are Cinephile AI, an expert cinematic curator.
+Recommend the top films for the user based on their ratings.
 
-Deliver:
-1. "unconstrained_discoveries": 5 to 8 films freely chosen from ANY era or genre in cinema history that transcend the user's explicit genres (e.g. recommending 12 Angry Men to an Inception fan due to ticking-clock psychological intensity).
-2. "pool_rankings": The top 8 to 12 selections from the provided TMDB candidate pool.
+User Profile:
+${JSON.stringify(ratingsSummary, null, 2)}
 
-User Ratings Profile:
-${JSON.stringify(userRatingsSummary)}
+Serendipity: ${serendipityLevel}%
+Vibes: ${selectedVibes.join(', ') || 'Any'}
+Eras: ${preferredEras.join(', ') || 'Any'}
 
-Serendipity Setting: ${serendipityLevel}%
-User Vibe Filters: ${selectedVibes.join(', ') || 'Any'}
-User Era Preferences: ${preferredEras.join(', ') || 'Any'}
+Candidate Pool:
+${JSON.stringify(poolSummary, null, 2)}
 
-TMDB Candidate Pool:
-${JSON.stringify(candidatesSummary)}
-
-Respond strictly in valid JSON with this exact schema:
+Output strictly valid JSON with this format:
 {
-  "taste_analysis": "Summary of underlying psychological & structural preferences...",
+  "taste_analysis": "2-sentence summary of user's taste.",
+  "pool_rankings": [
+    {
+      "id": 12345,
+      "score": 95,
+      "reason": "Personalized reason",
+      "serendipityType": "safe_bet",
+      "highlightTags": ["Tag1", "Tag2"]
+    }
+  ],
   "unconstrained_discoveries": [
     {
       "title": "Movie Title",
-      "year": "1995",
-      "score": 96,
-      "reason": "Vivid 1-2 sentence cinephile explanation linking to their psychological DNA...",
-      "highlightTags": ["Claustrophobic Tension", "Psychological Stakes"]
-    }
-  ],
-  "pool_rankings": [
-    {
-      "id": 123,
-      "score": 94,
-      "reason": "Why this movie fits",
-      "serendipityType": "thematic_gem",
-      "highlightTags": ["Atmospheric", "Sci-Fi"]
+      "year": "1994",
+      "score": 90,
+      "reason": "Reason",
+      "highlightTags": ["Discovery"]
     }
   ]
 }`;
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey.trim()}`,
-        'HTTP-Referer': 'https://cinematch.ai',
-        'X-Title': 'CineMatch AI',
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7,
-      }),
-    });
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(() => timeoutController.abort(new Error('OpenRouter request timed out after 25s')), 25000);
+    const combinedSignal = composeSignals([signal, timeoutController.signal]);
 
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(`OpenRouter error: ${err.error?.message || response.statusText}`);
-    }
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey.trim()}`,
+          'HTTP-Referer': 'https://cinematch.ai',
+          'X-Title': 'CineMatch AI',
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: 'system',
+              content: 'You are an AI film recommendation engine. Output strictly valid JSON and no other text.',
+            },
+            {
+              role: 'user',
+              content: systemPrompt,
+            },
+          ],
+        }),
+        signal: combinedSignal,
+      });
 
-    const data = await response.json();
-    const rawContent = data.choices?.[0]?.message?.content || '';
-
-    // Extract JSON block
-    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('Invalid JSON format received from OpenRouter model.');
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    const poolRecommendations: Recommendation[] = [];
-    const poolItems = parsed.pool_rankings || parsed.rankings || [];
-
-    poolItems.forEach((item: any, idx: number) => {
-      const movie = candidateMap.get(Number(item.id));
-      if (movie) {
-        poolRecommendations.push({
-          movie,
-          score: Math.min(99, Math.max(50, Number(item.score) || 85)),
-          rank: idx + 1,
-          reason: item.reason || 'Curated to align with your cinematic tastes.',
-          serendipityType: item.serendipityType || 'thematic_gem',
-          highlightTags: Array.isArray(item.highlightTags) ? item.highlightTags : ['Recommended'],
-        });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`OpenRouter API error: ${errorData.error?.message || response.statusText}`);
       }
-    });
 
-    const unconstrainedDiscoveries: UnconstrainedDiscovery[] = (
-      parsed.unconstrained_discoveries || []
-    )
-      .map((item: any) => ({
-        title: String(item.title || '').trim(),
-        year: item.year ? String(item.year).trim() : undefined,
-        score: Math.min(99, Math.max(50, Number(item.score) || 92)),
-        reason:
-          item.reason ||
-          'A cross-genre cinephile discovery matching your psychological and structural taste DNA.',
-        highlightTags:
-          Array.isArray(item.highlightTags) && item.highlightTags.length > 0
-            ? item.highlightTags
-            : ['AI Discovery', 'Cross-Genre'],
-      }))
-      .filter((d: UnconstrainedDiscovery) => Boolean(d.title));
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content;
 
-    return {
-      recommendations: poolRecommendations,
-      unconstrainedDiscoveries,
-      tasteAnalysis: parsed.taste_analysis,
-    };
+      if (!content) {
+        throw new Error('Empty response from OpenRouter model.');
+      }
+
+      // Strip DeepSeek R1 <think>...</think> reasoning wrappers
+      const withoutThinking = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+      // Clean markdown fences
+      const cleanJson = withoutThinking
+        .replace(/^```json/im, '')
+        .replace(/^```/im, '')
+        .replace(/```$/im, '')
+        .trim();
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(cleanJson);
+      } catch {
+        // Fallback: search for first { and last }
+        const start = cleanJson.indexOf('{');
+        const end = cleanJson.lastIndexOf('}');
+        if (start !== -1 && end !== -1 && end > start) {
+          parsed = JSON.parse(cleanJson.slice(start, end + 1));
+        } else {
+          throw new Error('Failed to parse structured JSON from OpenRouter.');
+        }
+      }
+      return validateAndSanitizeAIResponse(parsed, candidateMap);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }

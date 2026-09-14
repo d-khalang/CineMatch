@@ -10,7 +10,11 @@ export class LocalProvider implements IAIProvider {
     return { success: true, message: 'Local Heuristic Engine is always ready.' };
   }
 
-  async generateRecommendations(request: RecommendationRequest): Promise<AIRecommendationResult> {
+  async generateRecommendations(request: RecommendationRequest, signal?: AbortSignal): Promise<AIRecommendationResult> {
+    if (signal?.aborted) {
+      throw new DOMException('Generation aborted', 'AbortError');
+    }
+
     const { userRatings, candidatePool, serendipityLevel = 30, selectedVibes = [], preferredEras = [] } = request;
 
     if (!userRatings || userRatings.length === 0) {
@@ -32,12 +36,9 @@ export class LocalProvider implements IAIProvider {
     const keywordAffinities = new Map<string, number>();
     const negativeGenres = new Set<string>();
 
-    let totalWeight = 0;
-
     userRatings.forEach((r) => {
       // Centered around 5.5: 10 is +4.5, 1 is -4.5
       const weight = (r.rating - 5.5) / 4.5;
-      totalWeight += Math.abs(weight);
 
       // Genre affinities
       r.genres.forEach((g) => {
