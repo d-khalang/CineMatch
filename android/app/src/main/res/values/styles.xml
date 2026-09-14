@@ -27,6 +27,7 @@
     </style>
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
         <item name="android:background">@color/cinematch_dark</item>
         <item name="android:windowBackground">@color/cinematch_dark</item>
         <item name="android:statusBarColor">@color/cinematch_dark</item>

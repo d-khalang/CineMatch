@@ -8,14 +8,15 @@ const config: CapacitorConfig = {
     androidScheme: 'https',
   },
   plugins: {
-    SystemBars: {
-      insetsHandling: 'disable',
-      style: 'DARK',
-      hidden: false,
-    },
     StatusBar: {
       style: 'DARK',
       backgroundColor: '#121c17',
+    },
+    SplashScreen: {
+      launchShowDuration: 1500,
+      launchAutoHide: true,
+      backgroundColor: '#121c17',
+      showSpinner: false,
     },
   },
 };
