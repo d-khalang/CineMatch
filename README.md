@@ -1,19 +1,113 @@
-# CineMatch AI — Architecture & Documentation
+# CineMatch AI 🎬✨
 
-**Version:** 1.1.0 (Standalone Architecture Revision)  
-**Platform Targets:** Modern Web (Desktop/Mobile) & Android (Capacitor Native Shell)  
+[![React](https://img.shields.io/badge/React-19.2-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x%20%2F%206.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Vite](https://img.shields.io/badge/Vite-8.x-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.x-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
+[![Capacitor](https://img.shields.io/badge/Capacitor-8.x-119EFF?logo=capacitor&logoColor=white)](https://capacitorjs.com/)
+[![Vitest](https://img.shields.io/badge/Tests-138%20Passed-22C55E?logo=vitest&logoColor=white)](https://vitest.dev/)
+[![TMDB](https://img.shields.io/badge/Data-The%20Movie%20Database-01B4E4?logo=themoviedatabase&logoColor=white)](https://www.themoviedb.org/)
 
-CineMatch AI is an AI-first movie recommendation and taste discovery application built with **React 19**, **TypeScript**, **Vite**, and **Tailwind CSS**. It combines real-time movie metadata from **The Movie Database (TMDB)** with a **Modular AI Service Architecture** (Google Gemini, OpenRouter, and an autonomous Local Heuristic Engine) to synthesize personalized, ranked recommendations based on a fine-grained 1–10 rating scale.
+**CineMatch AI** is a private, client-first movie recommendation platform and cinephile taste profiler. Combining rich movie metadata from **The Movie Database (TMDB)** with a **Modular AI Engine** (Google Gemini, OpenRouter, or a 100% offline Local Heuristic Engine), CineMatch analyzes your personal taste profile across a 1–10 grading scale to generate hyper-personalized, context-aware film recommendations.
+
+Built with a **zero-hosted-backend philosophy**, CineMatch operates under a **Bring-Your-Own-Key (BYOK)** model: user credentials and movie ratings never touch third-party servers, keeping your movie data completely in your own hands.
 
 ---
 
-## 1. System Architecture & Zero-Backend Model
+## 📸 App Showcase
 
-CineMatch operates on a **strict standalone client-to-API model**:
-- **Zero Hosted Backend:** There is no server, proxy, database, or analytics collector.
-- **Direct Client-to-API Calls:** Requests to TMDB, Google Gemini, and OpenRouter originate directly from the user's browser or native Capacitor webview.
-- **BYOK (Bring Your Own Key):** Users configure their own TMDB credential and optional cloud AI keys.
-- **Zero-Key Local Engine:** Users without AI keys can use the built-in **Local Smart Engine**, which performs multi-factor heuristic ranking completely offline.
+<p align="center">
+  <img src="docs/screenshots/cinematch-recommendations.png" alt="Top Ranked AI Recommendations" width="100%" />
+  <br />
+  <em>Top Ranked AI Recommendations featuring match scoring, cross-genre psychological taste synthesis, and dynamic serendipity calibration.</em>
+</p>
+
+<table width="100%">
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/cinematch-calibration.png" alt="Taste Calibration Grid" width="100%" />
+      <br />
+      <b>Taste Calibration Grid</b>
+      <br />
+      <em>Grade iconic films on a 1–10 scale across curated pillars (Mind-Benders, Masterpieces, Blockbusters, Crime).</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/cinematch-movie-detail.png" alt="Movie Details & Trailer Modal" width="100%" />
+      <br />
+      <b>Rich Movie Details</b>
+      <br />
+      <em>Cinematic backdrop modal with synopses, director credits, cast info, trailers, and instant rating actions.</em>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/cinematch-library.png" alt="My Ratings & Taste Profile" width="100%" />
+      <br />
+      <b>Taste Profile & Library</b>
+      <br />
+      <em>Deep cinephile analytics, average scores, favorite directors, top genres, and CSV import/export.</em>
+    </td>
+    <td width="50%" align="center">
+      <img src="docs/screenshots/cinematch-settings.png" alt="BYOK & AI Engine Settings" width="100%" />
+      <br />
+      <b>Modular AI Engine (BYOK)</b>
+      <br />
+      <em>Zero-custody session credentials with direct access to Gemini, OpenRouter, or the offline Local Engine.</em>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/screenshots/cinematch-mobile.png" alt="Mobile Ergonomics & Responsive Experience" width="40%" />
+  <br />
+  <em>Responsive mobile UI with safe area notch handling, haptic rating feedback, and fluid bottom navigation.</em>
+</p>
+
+---
+
+## 🌟 Key Features
+
+### 🎯 1. Nuanced 1–10 Taste Calibration
+- **Beyond Binary Thumbs:** Replace crude "like/dislike" or coarse 5-star ratings with a fine-grained 1–10 scale, distinguishing casual watches (6/10) from all-time masterpieces (10/10).
+- **Curated Archetype Pillars:** Rapidly onboard with curated category filters: *All-Time Masterpieces*, *Mind-Benders & Sci-Fi*, *Thrillers & Crime*, *Epic Blockbusters*, *Indie & Cult Classics*, and *Heartfelt & Comedy*.
+- **Intelligent Deduplication:** Automatic franchise clustering prevents candidate feeds from being overrun by long-running series sequels.
+
+### 🧠 2. Modular Multi-Provider AI Architecture
+- **Google Gemini (v1beta):** Direct native integration with `gemini-3.8-flash` (default & recommended), `gemini-3.7-flash`, `gemini-2.5-flash`, and `gemini-2.5-pro`. Delivers structured psychological taste profiles and contextual rationales for every recommendation.
+- **OpenRouter Cloud:** Tap into verified free models including `openrouter/free` (Free Models Router), `google/gemma-4-31b-it:free`, `nvidia/nemotron-3.5-lightning:free`, and others, plus **Custom Model** entry for any model ID (free models require `:free` suffix, paid models supported with your own API key; includes automatic `<think>` tag stripping).
+- **Local Smart Engine (Zero-Key Mode):** Don't have an AI API key? CineMatch includes an autonomous, client-side heuristic engine that scores candidates using multi-factor vector math completely offline.
+
+### 🎛️ 3. Serendipity & Exploration Controls
+- **Serendipity Temperature Slider:** Adjust discovery from **0% (Safe Bets)** to **100% (Wildcard Discoveries)** to control how far outside your comfort zone the algorithm ventures.
+- **Categorized Recommendation Badges:** Visual tags highlight *Safe Bets*, *Director Matches*, *Thematic Gems*, and *Wildcard Discoveries*.
+- **Mood & Era Filtering:** Narrow recommendations down by vibe (*Mind-bending*, *Dark & Gritty*, *Atmospheric*, *Visually Stunning*, *Slow-burn*) and era (*70s*, *80s*, *90s*, *2000s*, *2010s*, *2020s*).
+
+### 📚 4. Comprehensive Library, Watchlist & Data Portability
+- **Taste Analytics:** Real-time breakdown of your rating distribution, overall average score, top directors, and dominant genres.
+- **Watchlist Sync:** Seamlessly bookmark discovered films for later viewing.
+- **CSV & Letterboxd Interoperability:** Export your entire rating library to CSV or import existing Letterboxd/IMDb exports with fuzzy title matching and release year verification.
+
+### 🎨 5. Bespoke Cinephile Themes & Typography
+- Choose from curated film-stock colorways via the Palette Switcher:
+  - **Autumn Maple & Moss:** Earthy forest greens and crimson accents.
+  - **Criterion Noir & Gold:** Archival black, champagne gold, and vintage charcoal.
+  - **A24 Midnight Velvet:** Midnight plum and vibrant neon accents.
+  - **MUBI Scandi Cyan:** Minimalist Nordic arctic navy and ice blue.
+  - **Celluloid 35mm:** Kodak analog warmth and vintage amber.
+  - **Neo-Noir Slate:** Tailored obsidian and electric indigo.
+
+### 📱 6. Mobile & Android Native Ergonomics (Capacitor)
+- Native Android shell powered by **Capacitor 8**.
+- Haptic tactile feedback on ratings via `@capacitor/haptics`.
+- Dynamic notch and system navigation bar awareness via CSS safe-area insets.
+- Hardware back-button hierarchical navigation (closes active modals before exiting).
+- System-level native share sheet integration.
+
+---
+
+## 🏗️ Technical Architecture
+
+CineMatch is built on a **pure client-to-API architecture** with zero intermediary servers:
 
 ```mermaid
 flowchart TD
@@ -40,7 +134,7 @@ flowchart TD
     UI -->|2. Request Recommendations| Pooler
     Creds -.->|Read Bearer/API Key| TMDB_API
     Pooler -->|3. Discover Seeds & Trending| TMDB_API
-    Pooler -->|4. 30-40 Unrated Candidate Films| Manager
+    Pooler -->|4. 30-40 Candidate Films| Manager
     Store -->|5. User Taste Profile Vector| Manager
     Creds -.->|Header Auth| Gemini
     Creds -.->|Header Auth| OpenRouter
@@ -54,121 +148,120 @@ flowchart TD
 
 ---
 
-## 2. Security & Credential Management Architecture
+## 🔒 Security & Privacy Model
 
-### A. Zero Secrets in Source Code or Web Disk
-CineMatch contains **zero hardcoded API keys or tokens**. All credentials are user-supplied and handled under platform-specific confidentiality models:
+CineMatch adheres to strict zero-knowledge principles:
 
-1. **Web Platform (Browser):**
-   - **Heap-Only Storage:** API keys (TMDB, Google Gemini, OpenRouter) are held exclusively in the JavaScript runtime heap (`credentialStore`).
-   - **Never Persisted to Browser Storage:** Keys are **never** written to `localStorage`, `sessionStorage`, `IndexedDB`, Web Workers, cookies, or logs.
-   - **Session Purge:** Reloading or closing the browser tab immediately clears all credentials from memory.
-
-2. **Android Platform (Capacitor Native Shell):**
-   - **Hardware-Backed AES-256-GCM Encryption:** When "Remember on this device" is enabled (default ON on Android), credentials are encrypted using platform AES-256-GCM with a non-exportable hardware key in Android Keystore (`com.cinematch.app.credentials.v1`).
-   - **Crash-Safe Platform Storage:** Encrypted payloads are written atomically via Android platform `AtomicFile` inside `Context.getNoBackupFilesDir()`.
-   - **Cloud Backup & Share Exclusion:** `android:allowBackup="false"` and restrictive FileProvider configuration ensure the vault is never synced to Google Drive or exposed via external shares.
-   - **Independent Preference & Full Revocation:** Disabling the switch or clicking Forget immediately purges the encrypted snapshot and Keystore alias from the device while preserving current session usability.
-
-3. **Confidentiality Protocols:**
-   - **URL Redaction:** TMDB requests automatically redact API keys in logs and diagnostics via `redactTmdbUrl`.
-   - **Header Authentication:** Gemini keys pass via the `x-goog-api-key` header (never in URL query strings). OpenRouter keys pass via `Authorization: Bearer <key>`.
-   - **Decrypted Once on Startup:** Credentials decrypt once upon application launch into memory; no decryption overhead per API request.
+1. **Web Environment (Zero Disk Secrets):**
+   - API keys (TMDB, Gemini, OpenRouter) are held strictly in JavaScript heap runtime memory.
+   - Credentials are **never** written to `localStorage`, `sessionStorage`, `IndexedDB`, cookies, or analytics.
+   - Closing or reloading the tab immediately flushes keys from memory.
+2. **Android Environment (Hardware-Backed Keystore):**
+   - On native Android, users may opt to "Remember on this device".
+   - Keys are encrypted with **AES-256-GCM** using a non-exportable hardware key held in the **Android Keystore** (`com.cinematch.app.credentials.v1`).
+   - Cloud backup is strictly disabled (`android:allowBackup="false"`), preventing keys from syncing to Google Drive or external shares.
+3. **Transport Hygiene:**
+   - Keys are transmitted directly from your device to the API provider.
+   - Gemini authentication uses request headers (`x-goog-api-key`), OpenRouter uses `Authorization: Bearer`, and TMDB URLs redact secrets in logs.
 
 ---
 
-## 3. Data Storage Schema (v2)
+## 💾 Local Storage Schema (v2)
 
-User taste profile data is persisted in browser `localStorage` using versioned keys with automatic schema migration and fallback handling for `QuotaExceededError`:
+User taste data persists locally in browser `localStorage` with versioned isolation and storage quota resilience:
 
-| Storage Key | Schema Type | Description |
+| Storage Key | Type | Description |
 | :--- | :--- | :--- |
-| `cinematch_user_ratings_v2` | `Record<number, UserRating>` | User's rated movies, ratings (1–10), genres, director, timestamp. |
-| `cinematch_watchlist_v2` | `number[]` | Array of bookmarked TMDB movie IDs. |
-| `cinematch_watchlist_movies_v2` | `Record<number, Movie>` | Cached metadata for bookmarked movies for instant display. |
-| `cinematch_ai_settings_v2` | `AISettings` | Non-sensitive preferences: active provider, model name, serendipity level, vibes, eras. *(Contains no secrets)*. |
-| `cinematch_cached_recs_v2` | `CachedRecommendations` | Last successful recommendations with timestamp and provider metadata. |
+| `cinematch_user_ratings_v2` | `Record<number, UserRating>` | User rated movies with 1–10 scores, director, genres, and timestamps. |
+| `cinematch_watchlist_v2` | `number[]` | Bookmarked TMDB film IDs. |
+| `cinematch_watchlist_movies_v2` | `Record<number, Movie>` | Cached metadata for instant watchlist rendering without re-fetching. |
+| `cinematch_ai_settings_v2` | `AISettings` | Active provider, model ID, serendipity level, selected vibes, and era filters *(contains no secrets)*. |
+| `cinematch_cached_recs_v2` | `CachedRecommendations` | Most recent recommendation run, timestamp, and AI taste analysis. |
 
 ---
 
-## 4. Recommendation Engines
+## 🧮 Local Heuristic Scoring Engine (Offline)
 
-### 1. Google Gemini AI Provider
-- **Models:** `gemini-3.8-flash` (recommended), `gemini-3.7-flash`, `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-2.5-pro`.
-- **Mechanism:** Sends structured prompts containing the candidate pool and user taste profile; returns JSON rankings with contextual rationales.
-- **Resilience:** Strips markdown code blocks, enforces 20s timeout, and validates schema.
+When running without an AI key, CineMatch employs a deterministic multi-dimensional scoring formula:
 
-### 2. OpenRouter AI Provider
-- **Models:** `deepseek/deepseek-r1:free`, `meta-llama/llama-3.3-70b-instruct:free`, `google/gemini-2.0-flash-exp:free`, `mistralai/mistral-small-24b-instruct-2501:free`.
-- **Resilience:** Automatically strips DeepSeek R1 `<think>...</think>` tags and parses structured JSON.
+$$\text{FinalScore} = \text{clamp}\left(\text{Base} + S_{\text{genre}} + S_{\text{director}} + S_{\text{quality}} + \Delta_{\text{serendipity}},\, 45,\, 99\right)$$
 
-### 3. Local Smart Engine (Zero-Key Heuristic)
-- **Zero External API Calls:** Runs entirely in client JavaScript.
-- **Scoring Dimensions:**
-  - Genre Affinity: Weighted by user rating strength ($+3.0$ for 10/10, $-4.0$ for $\le 3/10$).
-  - Director Match: $+15$ point boost for directors rated $\ge 8$.
-  - Popularity & Quality: Log-scaled vote count and vote average.
-  - Serendipity Temperature: Injects controlled variance based on the Serendipity slider.
-  - Score Clamping: Clamped strictly in the $[45, 99]$ interval.
+- **Genre Affinity ($S_{\text{genre}}$):** Weighted sum over overlapping genres. Films matching a $10/10$ rated genre receive $+3.0$ per match; films sharing genres rated $\le 3/10$ receive a $-4.0$ penalty.
+- **Director Synergy ($S_{\text{director}}$):** $+15$ bonus points when a candidate is directed by an auteur with an average user score $\ge 8.0/10$.
+- **Quality & Popularity ($S_{\text{quality}}$):** Log-scaled weighting of TMDB vote average and vote count.
+- **Serendipity Variance ($\Delta_{\text{serendipity}}$):** Controlled pseudo-random jitter scaled by the user's Serendipity slider percentage.
 
 ---
 
-## 5. Mobile Ergonomics & Native Android (Capacitor)
-
-- **Touch Targets:** Dual-row rating controls with $\ge 44\text{--}48\text{dp}$ touch targets for mobile accessibility.
-- **Haptic Feedback:** `@capacitor/haptics` triggers light impact ticks on rating and clear actions.
-- **Safe Area Insets:** Layout adapts dynamically to navigation bars and camera notches via `env(safe-area-inset-bottom)`.
-- **Hardware Back Button:** Dismisses open modals first; double-taps on root feed to exit cleanly.
-- **Native Sharing:** Seamless native share dialogs on Android using `@capacitor/share` with Web Share fallback.
-
----
-
-## 6. Development & Testing
+## 🛠️ Development & Setup
 
 ### Prerequisites
-- Node.js `v20+` (tested on `v22.15.0`)
-- npm `v10+`
+- **Node.js:** `v20+` (LTS recommended)
+- **npm:** `v10+`
+- **TMDB Account:** Free API Read Access Token or API Key from [themoviedb.org](https://www.themoviedb.org/settings/api)
 
-### Setup & Commands
+### 1. Clone & Install
 ```bash
+git clone https://github.com/d-khalang/CineMatch.git
+cd CineMatch
+
 # Install dependencies
 npm install
+```
 
-# Run development server
+### 2. Start Development Server
+```bash
 npm run dev
+```
+Open your browser at `http://localhost:5173`. Open **Settings** (gear icon) to enter your TMDB credential and optional AI key.
 
-# Run TypeScript typecheck
+### 3. Verification & Quality Gates
+```bash
+# Typecheck TypeScript
 npm run typecheck
 
-# Run ESLint check
+# Run ESLint
 npm run lint
 
-# Run automated tests
+# Run all 138 unit & integration tests with Vitest & MSW
 npm test
 
 # Run test coverage
 npm run test:coverage
 
-# Build web production bundle
+# Build optimized production bundle
 npm run build
 ```
 
-### Android Development
+### 4. Android Native Development (Capacitor)
 ```bash
-# Build and sync assets to Capacitor
+# Build the web bundle and sync assets to Android platform
 npm run build
 npx cap sync android
 
-# Open Android Studio
-npx cap open android
+# Open project in Android Studio
+npm run cap:open
+
+# Run directly on a connected device / emulator
+npm run cap:run
 ```
 
 ---
 
-## 7. Documentation Index
+## 🧪 Tech Stack
 
-- [Production Readiness Audit](docs/production-readiness.md): Detailed requirement-by-requirement audit, test inventory, and unresolved external risks.
-- [Release Verification Report](docs/verification-report.md): Execution outputs, benchmark measurements, bundle breakdown, and evaluation matrices.
-- [Production Release Runbook](docs/release-runbook.md): Step-by-step deployment guide for Web and Capacitor Android.
-- [Android Remember Credentials Specification (v1.1)](docs/android-remember-credentials-spec.md): Architectural and security specification for persistent encrypted credentials on Android.
-- [Android Remember Credentials Verification Report](docs/android-remember-credentials-verification.md): Technical verification report, binary delta analysis (+9.49 KiB), test matrix, and release gates.
+- **Framework:** [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
+- **Build Tool:** [Vite 8](https://vitejs.dev/)
+- **Styling:** [Tailwind CSS 4](https://tailwindcss.com/)
+- **Native Runtime:** [Capacitor 8](https://capacitorjs.com/) (Haptics, App, Share, Filesystem, Keyboard)
+- **Icons:** [Lucide React](https://lucide.dev/)
+- **CSV Engine:** [PapaParse](https://www.papaparse.com/)
+- **Testing:** [Vitest](https://vitest.dev/) + [React Testing Library](https://testing-library.com/) + [MSW (Mock Service Worker)](https://mswjs.io/)
+- **APIs:** [The Movie Database (TMDB)](https://www.themoviedb.org/) · [Google Gemini](https://ai.google.dev/) · [OpenRouter](https://openrouter.ai/)
+
+---
+
+## 📄 License & Attribution
+
+- Released under the [MIT License](LICENSE).
+- Movie metadata and imagery provided by [The Movie Database (TMDB)](https://www.themoviedb.org/). This product uses the TMDB API but is not endorsed or certified by TMDB.
