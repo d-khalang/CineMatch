@@ -2,12 +2,34 @@ import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './ty
 import { Movie } from '../../types';
 import { validateAndSanitizeAIResponse } from './aiResponseValidator';
 
+export const OPENROUTER_DEFAULT_MODEL = 'openrouter/free';
+
+export const DEPRECATED_OPENROUTER_MODELS = new Set([
+  'deepseek/deepseek-r1:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'google/gemini-2.0-flash-exp:free',
+  'mistralai/mistral-small-24b-instruct-2501:free',
+]);
+
 export const OPENROUTER_AVAILABLE_MODELS = [
-  { id: 'deepseek/deepseek-r1:free', name: 'DeepSeek R1 (Free)', tier: 'Free' },
-  { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Meta Llama 3.3 70B (Free)', tier: 'Free' },
-  { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash Exp (Free)', tier: 'Free' },
-  { id: 'mistralai/mistral-small-24b-instruct-2501:free', name: 'Mistral Small 24B (Free)', tier: 'Free' },
+  { id: 'openrouter/free', name: 'Free Models Router (Auto Best Free)', tier: 'Free' },
+  { id: 'google/gemma-4-31b-it:free', name: 'Google Gemma 4 31B (Free)', tier: 'Free' },
+  { id: 'google/gemma-4-26b-a4b-it:free', name: 'Google Gemma 4 26B (Free)', tier: 'Free' },
+  { id: 'nvidia/nemotron-3.5-lightning:free', name: 'NVIDIA Nemotron 3.5 Lightning (Free)', tier: 'Free' },
+  { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', name: 'NVIDIA Nemotron 3 Ultra (Free)', tier: 'Free' },
+  { id: 'liquid/lfm-2.5-2.6b:free', name: 'LiquidAI LFM 2.5 2.6B (Free)', tier: 'Free' },
+  { id: 'thinkingmachines/inkling:free', name: 'Thinking Machines Inkling (Free)', tier: 'Free' },
+  { id: 'cohere/north-mini-code:free', name: 'Cohere North Mini Code (Free)', tier: 'Free' },
 ];
+
+export function sanitizeOpenRouterModel(model?: string): string {
+  if (!model || typeof model !== 'string') return OPENROUTER_DEFAULT_MODEL;
+  const trimmed = model.trim();
+  if (!trimmed || DEPRECATED_OPENROUTER_MODELS.has(trimmed)) {
+    return OPENROUTER_DEFAULT_MODEL;
+  }
+  return trimmed;
+}
 
 function composeSignals(signals: (AbortSignal | undefined)[]): AbortSignal {
   const controller = new AbortController();
@@ -27,10 +49,12 @@ export class OpenRouterProvider implements IAIProvider {
   readonly name = 'OpenRouter AI (Free & Multi-Model)';
   readonly description = 'Access open source and multi-provider AI models with OpenRouter';
 
-  async testConnection(apiKey: string, model = 'deepseek/deepseek-r1:free'): Promise<{ success: boolean; message: string }> {
+  async testConnection(apiKey: string, model: string = OPENROUTER_DEFAULT_MODEL): Promise<{ success: boolean; message: string }> {
     if (!apiKey?.trim()) {
       return { success: false, message: 'OpenRouter API key is required.' };
     }
+
+    const targetModel = model?.trim() || OPENROUTER_DEFAULT_MODEL;
 
     try {
       const timeoutController = new AbortController();
@@ -45,7 +69,7 @@ export class OpenRouterProvider implements IAIProvider {
           'X-Title': 'CineMatch AI',
         },
         body: JSON.stringify({
-          model,
+          model: targetModel,
           messages: [{ role: 'user', content: 'Say CONNECTED in JSON: {"status": "CONNECTED"}' }],
         }),
         signal: timeoutController.signal,
@@ -57,7 +81,7 @@ export class OpenRouterProvider implements IAIProvider {
         return { success: false, message: `OpenRouter Error: ${errorData.error?.message || response.statusText}` };
       }
 
-      return { success: true, message: `Successfully connected to OpenRouter (${model})!` };
+      return { success: true, message: `Successfully connected to OpenRouter (${targetModel})!` };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { success: false, message: `Network error: ${msg}` };
@@ -72,12 +96,14 @@ export class OpenRouterProvider implements IAIProvider {
       selectedVibes = [],
       preferredEras = [],
       apiKey,
-      model = 'deepseek/deepseek-r1:free',
+      model = OPENROUTER_DEFAULT_MODEL,
     } = request;
 
     if (!apiKey?.trim()) {
       throw new Error('OpenRouter API key is required.');
     }
+
+    const targetModel = model?.trim() || OPENROUTER_DEFAULT_MODEL;
 
     const candidateMap = new Map<number, Movie>();
     candidatePool.forEach((m) => candidateMap.set(m.id, m));
@@ -148,7 +174,7 @@ Output strictly valid JSON with this format:
           'X-Title': 'CineMatch AI',
         },
         body: JSON.stringify({
-          model,
+          model: targetModel,
           messages: [
             {
               role: 'system',

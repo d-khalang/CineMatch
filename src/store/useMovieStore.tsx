@@ -16,13 +16,14 @@ import {
   subscribeStorageStatus,
   hasUnsavedStorageChanges,
 } from '../services/storage';
+import { OPENROUTER_DEFAULT_MODEL, sanitizeOpenRouterModel } from '../services/ai/openRouterProvider';
 
 const DEFAULT_SETTINGS: AISettings = {
   activeProvider: 'gemini',
   geminiApiKey: '',
   geminiModel: 'gemini-3.8-flash',
   openRouterApiKey: '',
-  openRouterModel: 'deepseek/deepseek-r1:free',
+  openRouterModel: OPENROUTER_DEFAULT_MODEL,
   serendipityLevel: 40,
   selectedVibes: [],
   preferredEras: [],
@@ -213,7 +214,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           ...DEFAULT_SETTINGS,
           activeProvider: parsed.activeProvider || 'gemini',
           geminiModel: parsed.geminiModel || 'gemini-3.8-flash',
-          openRouterModel: parsed.openRouterModel || 'deepseek/deepseek-r1:free',
+          openRouterModel: sanitizeOpenRouterModel(parsed.openRouterModel),
           serendipityLevel: typeof parsed.serendipityLevel === 'number' ? parsed.serendipityLevel : 40,
           selectedVibes: Array.isArray(parsed.selectedVibes) ? parsed.selectedVibes : [],
           preferredEras: Array.isArray(parsed.preferredEras) ? parsed.preferredEras : [],

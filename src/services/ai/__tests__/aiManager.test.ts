@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { aiManager } from '../aiManager';
 import { Movie, UserRating } from '../../../types';
 
@@ -68,5 +68,26 @@ describe('aiManager Orchestrator and Fallback', () => {
         controller.signal
       )
     ).rejects.toThrow();
+  });
+
+  it('falls back to Local Smart Engine with error details when OpenRouter encounters a wrong custom model error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: 'Not Found',
+      json: async () => ({ error: { message: "Model 'invalid/bad-model' does not exist" } }),
+    }));
+
+    const res = await aiManager.generateRecommendations('openrouter', {
+      userRatings,
+      candidatePool,
+      serendipityLevel: 30,
+      apiKey: 'sk-or-test-key',
+      model: 'invalid/bad-model',
+    });
+
+    expect(res.usedProvider).toContain('Local Engine (Fallback');
+    expect(res.error).toContain("Model 'invalid/bad-model' does not exist");
+    expect(res.recommendations.length).toBeGreaterThan(0);
   });
 });

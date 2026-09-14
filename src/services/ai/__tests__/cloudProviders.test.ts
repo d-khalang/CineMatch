@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GeminiProvider, GEMINI_AVAILABLE_MODELS } from '../geminiProvider';
-import { OpenRouterProvider } from '../openRouterProvider';
+import {
+  OpenRouterProvider,
+  OPENROUTER_DEFAULT_MODEL,
+  OPENROUTER_AVAILABLE_MODELS,
+  DEPRECATED_OPENROUTER_MODELS,
+  sanitizeOpenRouterModel,
+} from '../openRouterProvider';
 
 describe('Cloud AI Providers Connection & Validation', () => {
   beforeEach(() => {
@@ -240,15 +246,214 @@ describe('Cloud AI Providers Connection & Validation', () => {
       expect(options.headers['Authorization']).toBe('Bearer sk-or-v1-testkey123');
     });
 
-    it('handles network / timeout errors gracefully', async () => {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockRejectedValue(new Error('Network request failed'))
-      );
+    it('defaults to openrouter/free when model is not specified or empty', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: '{"status": "CONNECTED"}' } }],
+        }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
 
-      const result = await provider.testConnection('valid-looking-key');
+      await provider.testConnection('sk-test-key');
+      const [, options] = fetchMock.mock.calls[0];
+      const payload = JSON.parse(options.body);
+      expect(payload.model).toBe('openrouter/free');
+      expect(OPENROUTER_DEFAULT_MODEL).toBe('openrouter/free');
+
+      // Also when passing empty whitespace
+      await provider.testConnection('sk-test-key', '   ');
+      const [, secondOptions] = fetchMock.mock.calls[1];
+      const secondPayload = JSON.parse(secondOptions.body);
+      expect(secondPayload.model).toBe('openrouter/free');
+    });
+
+    it('supports custom model names in testConnection', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: '{"status": "CONNECTED"}' } }],
+        }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const customModel = 'meta-llama/llama-3.3-70b-instruct:free';
+      const result = await provider.testConnection('sk-test-key', customModel);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain(customModel);
+      const [, options] = fetchMock.mock.calls[0];
+      const payload = JSON.parse(options.body);
+      expect(payload.model).toBe(customModel);
+    });
+
+    it('handles wrong custom model name in testConnection with descriptive API error', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        json: async () => ({
+          error: {
+            message: "No endpoints found for model 'invalid/nonexistent-model:free'. Please check model ID or availability.",
+            code: 404,
+          },
+        }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await provider.testConnection('sk-test-key', 'invalid/nonexistent-model:free');
       expect(result.success).toBe(false);
-      expect(result.message).toContain('Network request failed');
+      expect(result.message).toBe(
+        "OpenRouter Error: No endpoints found for model 'invalid/nonexistent-model:free'. Please check model ID or availability."
+      );
+    });
+
+    it('handles wrong custom model name fallback when API returns no json body', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: async () => {
+          throw new Error('Not JSON');
+        },
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await provider.testConnection('sk-test-key', 'bad-model-slug');
+      expect(result.success).toBe(false);
+      expect(result.message).toBe('OpenRouter Error: Bad Request');
+    });
+
+    it('handles wrong custom model name in generateRecommendations by throwing descriptive error', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        json: async () => ({
+          error: {
+            message: "Model 'meta-llama/wrong-model' does not exist",
+          },
+        }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(
+        provider.generateRecommendations({
+          apiKey: 'sk-test-key',
+          model: 'meta-llama/wrong-model',
+          userRatings: [
+            {
+              movieId: 1,
+              title: 'Movie 1',
+              rating: 8,
+              posterPath: null,
+              genres: ['Action'],
+              ratedAt: Date.now(),
+            },
+          ],
+          candidatePool: [
+            {
+              id: 10,
+              title: 'Candidate 10',
+              overview: 'Overview 10',
+              release_date: '2020-01-01',
+              vote_average: 8.0,
+              vote_count: 100,
+              poster_path: null,
+              backdrop_path: null,
+              genres: [{ id: 28, name: 'Action' }],
+            },
+          ],
+          serendipityLevel: 30,
+        })
+      ).rejects.toThrow("OpenRouter API error: Model 'meta-llama/wrong-model' does not exist");
+    });
+
+    it('strips <think> reasoning tags and parses clean JSON from models', async () => {
+      const rawJson = JSON.stringify({
+        taste_analysis: 'User likes fast-paced action.',
+        pool_rankings: [
+          {
+            id: 10,
+            score: 95,
+            reason: 'Great action match',
+            serendipityType: 'safe_bet',
+            highlightTags: ['Action'],
+          },
+        ],
+        unconstrained_discoveries: [],
+      });
+
+      const contentWithThink = `<think>
+Analyzing user ratings...
+Movie 1 has action.
+Candidate 10 is an action film.
+</think>
+\`\`\`json
+${rawJson}
+\`\`\``;
+
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: contentWithThink } }],
+        }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const res = await provider.generateRecommendations({
+        apiKey: 'sk-test-key',
+        model: 'openrouter/free',
+        userRatings: [
+          {
+            movieId: 1,
+            title: 'Movie 1',
+            rating: 8,
+            posterPath: null,
+            genres: ['Action'],
+            ratedAt: Date.now(),
+          },
+        ],
+        candidatePool: [
+          {
+            id: 10,
+            title: 'Candidate 10',
+            overview: 'Overview 10',
+            release_date: '2020-01-01',
+            vote_average: 8.0,
+            vote_count: 100,
+            poster_path: null,
+            backdrop_path: null,
+            genres: [{ id: 28, name: 'Action' }],
+          },
+        ],
+        serendipityLevel: 30,
+      });
+
+      expect(res.tasteAnalysis).toBe('User likes fast-paced action.');
+      expect(res.recommendations.length).toBe(1);
+      expect(res.recommendations[0].movie.title).toBe('Candidate 10');
+    });
+
+    describe('sanitizeOpenRouterModel', () => {
+      it('replaces deprecated dead models with default openrouter/free', () => {
+        expect(sanitizeOpenRouterModel('deepseek/deepseek-r1:free')).toBe('openrouter/free');
+        expect(sanitizeOpenRouterModel('meta-llama/llama-3.3-70b-instruct:free')).toBe('openrouter/free');
+        expect(sanitizeOpenRouterModel('google/gemini-2.0-flash-exp:free')).toBe('openrouter/free');
+        expect(sanitizeOpenRouterModel('mistralai/mistral-small-24b-instruct-2501:free')).toBe('openrouter/free');
+      });
+
+      it('defaults undefined, null, or empty string to openrouter/free', () => {
+        expect(sanitizeOpenRouterModel(undefined)).toBe('openrouter/free');
+        expect(sanitizeOpenRouterModel('')).toBe('openrouter/free');
+        expect(sanitizeOpenRouterModel('   ')).toBe('openrouter/free');
+      });
+
+      it('preserves valid custom model IDs and trims extra whitespace', () => {
+        expect(sanitizeOpenRouterModel('google/gemma-4-31b-it:free')).toBe('google/gemma-4-31b-it:free');
+        expect(sanitizeOpenRouterModel('openai/gpt-4o')).toBe('openai/gpt-4o');
+        expect(sanitizeOpenRouterModel('  anthropic/claude-3.5-sonnet  ')).toBe('anthropic/claude-3.5-sonnet');
+      });
     });
   });
 });

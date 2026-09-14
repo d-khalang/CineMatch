@@ -1,4 +1,5 @@
 import { UserRating, Movie, AISettings, Recommendation } from '../types';
+import { sanitizeOpenRouterModel } from './ai/openRouterProvider';
 
 export const STORAGE_VERSION = 2;
 
@@ -211,7 +212,7 @@ export const runStorageMigration = (): { migrated: boolean; secretsStripped: boo
         const sanitizedSettings: Partial<AISettings> = {
           activeProvider: parsed.activeProvider || 'gemini',
           geminiModel: parsed.geminiModel || 'gemini-3.8-flash',
-          openRouterModel: parsed.openRouterModel || 'deepseek/deepseek-r1:free',
+          openRouterModel: sanitizeOpenRouterModel(parsed.openRouterModel),
           serendipityLevel: typeof parsed.serendipityLevel === 'number' ? parsed.serendipityLevel : 40,
           selectedVibes: Array.isArray(parsed.selectedVibes) ? parsed.selectedVibes : [],
           preferredEras: Array.isArray(parsed.preferredEras) ? parsed.preferredEras : [],

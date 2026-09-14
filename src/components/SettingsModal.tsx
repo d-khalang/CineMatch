@@ -16,12 +16,18 @@ import {
 import { useMovieStore } from '../store/useMovieStore';
 import { aiManager } from '../services/ai/aiManager';
 import { GEMINI_AVAILABLE_MODELS } from '../services/ai/geminiProvider';
-import { OPENROUTER_AVAILABLE_MODELS } from '../services/ai/openRouterProvider';
+import {
+  OPENROUTER_AVAILABLE_MODELS,
+  OPENROUTER_DEFAULT_MODEL,
+  sanitizeOpenRouterModel,
+} from '../services/ai/openRouterProvider';
 import { testTmdbConnection } from '../services/tmdb';
 import { credentialStore, TmdbCredentialType } from '../services/credentialStore';
 import { isVaultSupported } from '../services/nativeCredentialVault';
 import { credentialCoordinator } from '../services/credentialCoordinator';
 import { AIProviderId } from '../types';
+
+const CUSTOM_OPENROUTER_OPTION = '__custom__';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -33,8 +39,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const [provider, setProvider] = useState<AIProviderId>(aiSettings.activeProvider);
   const [geminiModel, setGeminiModel] = useState<string>(aiSettings.geminiModel || 'gemini-3.8-flash');
-  const [openRouterModel, setOpenRouterModel] = useState<string>(
-    aiSettings.openRouterModel || 'deepseek/deepseek-r1:free'
+
+  const initialOpenRouterModel = sanitizeOpenRouterModel(aiSettings.openRouterModel);
+  const isInitialCustomOpenRouter = !OPENROUTER_AVAILABLE_MODELS.some(
+    (m) => m.id === initialOpenRouterModel
+  );
+
+  const [openRouterModel, setOpenRouterModel] = useState<string>(initialOpenRouterModel);
+  const [isCustomOpenRouterModel, setIsCustomOpenRouterModel] = useState<boolean>(
+    isInitialCustomOpenRouter
+  );
+  const [customOpenRouterModelInput, setCustomOpenRouterModelInput] = useState<string>(
+    isInitialCustomOpenRouter ? initialOpenRouterModel : ''
   );
 
   // In-memory credentials state
@@ -84,7 +100,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setOpenRouterKey(creds.openRouterApiKey);
       setProvider(aiSettings.activeProvider);
       setGeminiModel(aiSettings.geminiModel || 'gemini-3.8-flash');
-      setOpenRouterModel(aiSettings.openRouterModel || 'deepseek/deepseek-r1:free');
+      const activeModel = sanitizeOpenRouterModel(aiSettings.openRouterModel);
+      const isCustom = !OPENROUTER_AVAILABLE_MODELS.some((m) => m.id === activeModel);
+      setOpenRouterModel(activeModel);
+      setIsCustomOpenRouterModel(isCustom);
+      setCustomOpenRouterModelInput(isCustom ? activeModel : '');
       setRememberOnDevice(coord.rememberEnabled);
       setTmdbTesting({ loading: false });
       setAiTesting({ loading: false });
@@ -125,9 +145,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setAiTesting({ loading: false });
   };
 
-  const handleOpenRouterModelChange = (m: string) => {
-    setOpenRouterModel(m);
+  const handleOpenRouterSelectChange = (val: string) => {
     setAiTesting({ loading: false });
+    if (val === CUSTOM_OPENROUTER_OPTION) {
+      setIsCustomOpenRouterModel(true);
+      const current = customOpenRouterModelInput.trim();
+      setOpenRouterModel(current || OPENROUTER_DEFAULT_MODEL);
+    } else {
+      setIsCustomOpenRouterModel(false);
+      setOpenRouterModel(val);
+    }
+  };
+
+  const handleCustomOpenRouterModelChange = (val: string) => {
+    setCustomOpenRouterModelInput(val);
+    setOpenRouterModel(val.trim() || OPENROUTER_DEFAULT_MODEL);
+    setAiTesting({ loading: false });
+  };
+
+  const handleAppendFreeSuffix = () => {
+    const current = customOpenRouterModelInput.trim();
+    if (current && !current.endsWith(':free')) {
+      const updated = `${current}:free`;
+      setCustomOpenRouterModelInput(updated);
+      setOpenRouterModel(updated);
+      setAiTesting({ loading: false });
+    }
   };
 
   const handleTestTmdb = async () => {
@@ -163,7 +206,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setAiTesting({ loading: true });
     const version = credentialStore.getVersion();
     const activeProviderObj = aiManager.getProvider(provider);
-    const model = provider === 'gemini' ? geminiModel : openRouterModel;
+    const rawModel = provider === 'gemini' ? geminiModel : openRouterModel;
+    const model =
+      provider === 'openrouter' && isCustomOpenRouterModel
+        ? customOpenRouterModelInput.trim() || OPENROUTER_DEFAULT_MODEL
+        : rawModel;
 
     const statusKey: 'gemini' | 'openRouter' = provider === 'openrouter' ? 'openRouter' : 'gemini';
     try {
@@ -208,11 +255,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         rememberOnDevice,
       });
 
+      const resolvedOpenRouterModel = isCustomOpenRouterModel
+        ? customOpenRouterModelInput.trim() || OPENROUTER_DEFAULT_MODEL
+        : openRouterModel || OPENROUTER_DEFAULT_MODEL;
+
       // 2. Commit non-secret preferences to persistent store
       updateAISettings({
         activeProvider: provider,
         geminiModel,
-        openRouterModel,
+        openRouterModel: resolvedOpenRouterModel,
       });
 
       if (!res.success) {
@@ -489,7 +540,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 }`}
               >
                 <span className="font-semibold block text-xs">OpenRouter</span>
-                <span className="text-[10px] text-slate-400">DeepSeek / Llama</span>
+                <span className="text-[10px] text-slate-400">Free & Custom</span>
               </button>
             </div>
 
@@ -607,10 +658,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </div>
 
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">Model Selection</label>
+                  <label htmlFor="openrouter-model-select" className="text-xs text-slate-400 block mb-1">Model Selection</label>
                   <select
-                    value={openRouterModel}
-                    onChange={(e) => handleOpenRouterModelChange(e.target.value)}
+                    id="openrouter-model-select"
+                    aria-label="OpenRouter Model"
+                    value={isCustomOpenRouterModel ? CUSTOM_OPENROUTER_OPTION : openRouterModel}
+                    onChange={(e) => handleOpenRouterSelectChange(e.target.value)}
                     className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[var(--accent-primary)]"
                   >
                     {OPENROUTER_AVAILABLE_MODELS.map((m) => (
@@ -618,7 +671,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                         {m.name}
                       </option>
                     ))}
+                    <option value={CUSTOM_OPENROUTER_OPTION}>Custom Model (Type below)...</option>
                   </select>
+
+                  {isCustomOpenRouterModel && (
+                    <div className="mt-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label htmlFor="custom-openrouter-model-input" className="text-[11px] font-medium text-slate-300">
+                          Custom Model ID
+                        </label>
+                        {customOpenRouterModelInput.trim() &&
+                          !customOpenRouterModelInput.trim().endsWith(':free') &&
+                          customOpenRouterModelInput.trim() !== 'openrouter/free' && (
+                            <button
+                              type="button"
+                              onClick={handleAppendFreeSuffix}
+                              className="text-[11px] text-[var(--accent-primary)] hover:underline inline-flex items-center gap-1 font-medium transition-colors"
+                            >
+                              + Add :free suffix
+                            </button>
+                          )}
+                      </div>
+                      <input
+                        id="custom-openrouter-model-input"
+                        aria-label="Custom OpenRouter Model ID"
+                        type="text"
+                        value={customOpenRouterModelInput}
+                        onChange={(e) => handleCustomOpenRouterModelChange(e.target.value)}
+                        placeholder="e.g. meta-llama/llama-3.3-70b-instruct:free or openai/gpt-4o"
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-[var(--accent-primary)] font-mono"
+                      />
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        Tip: Free models on OpenRouter require the <code className="text-emerald-400 bg-white/5 px-1 py-0.5 rounded">:free</code> suffix (or use <code className="text-emerald-400 bg-white/5 px-1 py-0.5 rounded">openrouter/free</code>). Paid models do not require a suffix.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
