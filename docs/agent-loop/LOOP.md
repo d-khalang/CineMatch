@@ -67,6 +67,21 @@ When the rework PR merges, the Coordinator closes the original PR and marks both
 5. Keep each lane at one or two `Todo` issues, in dependency order.
 6. Post the cycle comment on the milestone issue.
 
+## State and resume
+
+Durable loop state lives in Linear, never in a session. Every cycle comment on the milestone issue ends with a state line:
+
+`State: merges N | attempts CIN-x 1, CIN-y 2 | lane A CIN-x | lane B idle | Claude: coordinator + reviewer`
+
+To resume in a new Coordinator session: read this file, `docs/vision.md`, and the latest milestone comments. Then start one worker per lane from the main checkout (they stop when the session that started them ends):
+
+```bash
+AGY_BASE_BRANCH=agents/integration AGY_WORK_ROOT="$TEMP/cinematch-agy-a" node automation/linear-antigravity/worker.mjs --watch
+AGY_DISPATCH_LABEL=antigravity-ready-b AGY_BASE_BRANCH=agents/integration AGY_WORK_ROOT="$TEMP/cinematch-agy-b" node automation/linear-antigravity/worker.mjs --watch
+```
+
+A check failure that one line fixes may be fixed directly by the Coordinator in the worker's retained workspace, as long as it reruns the checks before pushing. Workers now attempt up to two repair passes on their own first.
+
 ## Constraints that bind every role
 
 - Client-first and BYOK. No application backend, proxy or shared credential.
