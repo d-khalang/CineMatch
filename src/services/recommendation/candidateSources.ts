@@ -147,15 +147,31 @@ export function selectWeightedSeeds(
     return [...ratings];
   }
 
-  const minTime = Math.min(...ratings.map((r) => r.ratedAt || 0));
-  const maxTime = Math.max(...ratings.map((r) => r.ratedAt || 0));
-  const timeSpan = maxTime - minTime;
+  const ratingsWithTime = ratings.filter(
+    (r): r is UserRating & { ratedAt: number } => typeof r.ratedAt === 'number' && Number.isFinite(r.ratedAt)
+  );
+
+  let minTime = 0;
+  let timeSpan = 0;
+  if (ratingsWithTime.length > 0) {
+    minTime = ratingsWithTime.reduce(
+      (min, r) => (r.ratedAt < min ? r.ratedAt : min),
+      ratingsWithTime[0].ratedAt
+    );
+    const maxTime = ratingsWithTime.reduce(
+      (max, r) => (r.ratedAt > max ? r.ratedAt : max),
+      ratingsWithTime[0].ratedAt
+    );
+    timeSpan = maxTime - minTime;
+  }
 
   const pool = ratings.map((r) => {
     // Rating factor: 7 -> 1, 8 -> 2, 9 -> 3, 10 -> 4
     const ratingWeight = Math.max(1, r.rating - 6);
-    // Recency factor: 0.5 (oldest) to 1.0 (newest)
-    const recencyWeight = timeSpan > 0 ? 0.5 + 0.5 * (((r.ratedAt || 0) - minTime) / timeSpan) : 1;
+    // Recency factor: 0.5 (oldest) to 1.0 (newest); ignore ratings without ratedAt (recencyWeight = 1)
+    const hasRatedAt = typeof r.ratedAt === 'number' && Number.isFinite(r.ratedAt);
+    const recencyWeight =
+      hasRatedAt && timeSpan > 0 ? 0.5 + 0.5 * ((r.ratedAt - minTime) / timeSpan) : 1;
     return {
       rating: r,
       weight: ratingWeight * recencyWeight,
@@ -205,7 +221,9 @@ export function getTopUserGenreIds(
     nameToId.set(name.toLowerCase(), Number(idStr));
   }
 
-  for (const r of userRatings) {
+  const likedRatings = userRatings.filter((r) => r.rating >= 7);
+
+  for (const r of likedRatings) {
     for (const g of r.genres || []) {
       const id = typeof g === 'number' ? g : nameToId.get(String(g).trim().toLowerCase());
       if (id !== undefined) {
@@ -216,7 +234,7 @@ export function getTopUserGenreIds(
   }
 
   const sortedGenres = Array.from(genreStats.entries())
-    .sort((a, b) => b[1].count - a[1].count || b[1].sum / b[1].count - a[1].sum / a[1].count)
+    .sort((a, b) => b[1].sum - a[1].sum || b[1].count - a[1].count)
     .map(([id]) => id);
 
   if (fallbackGenres) {
@@ -275,69 +293,7 @@ export async function generateCandidates(
     return res || [];
   };
 
-  // 1. Seed Graph: choose seeds from ratings >= 7
-  const eligibleRatings = ratingsList.filter((r) => r.rating >= 7);
-  const requestedSeedCount = options.seedCount ?? 8;
-  const targetSeedCount = Math.min(eligibleRatings.length, requestedSeedCount);
-
-  let chosenSeedIds: number[] = [];
-  if (eligibleRatings.length > 0) {
-    const chosenSeeds = selectWeightedSeeds(eligibleRatings, targetSeedCount, options.randomFn);
-    chosenSeedIds = chosenSeeds.map((r) => r.movieId);
-  } else if (options.seedMovieIds && options.seedMovieIds.length > 0) {
-    chosenSeedIds = options.seedMovieIds.slice(0, requestedSeedCount);
-  }
-
-  const seedGraphPromises: Promise<any[]>[] = [];
-  for (const id of chosenSeedIds) {
-    seedGraphPromises.push(safeFetch(`/movie/${id}/recommendations`, { page: 1 }));
-    seedGraphPromises.push(safeFetch(`/movie/${id}/recommendations`, { page: 2 }));
-    seedGraphPromises.push(safeFetch(`/movie/${id}/similar`, { page: 1 }));
-    seedGraphPromises.push(safeFetch(`/movie/${id}/similar`, { page: 2 }));
-  }
-
-  // 2. Hidden Gems: /discover/movie in top 3 user genres
-  const topGenreIds = getTopUserGenreIds(ratingsList, options.genres);
-  const hiddenGemPromises: Promise<any[]>[] = [];
-  for (const gid of topGenreIds) {
-    hiddenGemPromises.push(
-      safeFetch('/discover/movie', {
-        with_genres: String(gid),
-        'vote_average.gte': 7,
-        'vote_count.gte': 50,
-        'vote_count.lte': 800,
-        sort_by: 'vote_average.desc',
-        page: 1,
-      })
-    );
-    hiddenGemPromises.push(
-      safeFetch('/discover/movie', {
-        with_genres: String(gid),
-        'vote_average.gte': 7,
-        'vote_count.gte': 50,
-        'vote_count.lte': 800,
-        sort_by: 'vote_average.desc',
-        page: 2,
-      })
-    );
-  }
-
-  // 3. Acclaimed Baseline: base discover, eras, and vibes
-  const baselinePromises: Promise<any[]>[] = [
-    safeFetch('/discover/movie', {
-      sort_by: 'vote_average.desc',
-      'vote_count.gte': 800,
-      page: 1,
-    }),
-    safeFetch('/discover/movie', {
-      sort_by: 'popularity.desc',
-      'vote_count.gte': 1500,
-      page: 1,
-    }),
-    safeFetch('/trending/movie/week', {}),
-  ];
-
-  // Era-targeted baseline queries
+  // 1. Era-targeted queries (guaranteed budget first)
   const preferredEras = options.preferredEras || [];
   const selectedVibes = options.selectedVibes || [];
 
@@ -349,11 +305,12 @@ export async function generateCandidates(
     new Set(selectedVibes.flatMap((v) => VIBE_KEYWORD_MAP[v.trim().toLowerCase()] || []))
   );
 
+  const eraQueryTasks: Array<() => Promise<any[]>> = [];
   if (preferredEras.length > 0) {
     preferredEras.slice(0, 4).forEach((era) => {
       const range = getEraDateRange(era);
       if (range) {
-        baselinePromises.push(
+        eraQueryTasks.push(() =>
           safeFetch('/discover/movie', {
             'primary_release_date.gte': range.gte,
             'primary_release_date.lte': range.lte,
@@ -362,7 +319,7 @@ export async function generateCandidates(
             page: 1,
           })
         );
-        baselinePromises.push(
+        eraQueryTasks.push(() =>
           safeFetch('/discover/movie', {
             'primary_release_date.gte': range.gte,
             'primary_release_date.lte': range.lte,
@@ -372,7 +329,7 @@ export async function generateCandidates(
           })
         );
         if (withGenresParam) {
-          baselinePromises.push(
+          eraQueryTasks.push(() =>
             safeFetch('/discover/movie', {
               'primary_release_date.gte': range.gte,
               'primary_release_date.lte': range.lte,
@@ -387,9 +344,10 @@ export async function generateCandidates(
     });
   }
 
-  // Vibe-targeted baseline queries
+  // 2. Vibe-targeted queries (guaranteed budget first)
+  const vibeQueryTasks: Array<() => Promise<any[]>> = [];
   if (withGenresParam) {
-    baselinePromises.push(
+    vibeQueryTasks.push(() =>
       safeFetch('/discover/movie', {
         with_genres: withGenresParam,
         sort_by: 'vote_average.desc',
@@ -397,7 +355,7 @@ export async function generateCandidates(
         page: 1,
       })
     );
-    baselinePromises.push(
+    vibeQueryTasks.push(() =>
       safeFetch('/discover/movie', {
         with_genres: withGenresParam,
         sort_by: 'popularity.desc',
@@ -408,7 +366,7 @@ export async function generateCandidates(
   }
 
   if (keywordIds.length > 0) {
-    baselinePromises.push(
+    vibeQueryTasks.push(() =>
       safeFetch('/discover/movie', {
         with_keywords: keywordIds.join('|'),
         sort_by: 'vote_average.desc',
@@ -417,6 +375,97 @@ export async function generateCandidates(
       })
     );
   }
+
+  // 3. Hidden Gems: /discover/movie in top 3 user genres (guaranteed budget first)
+  const topGenreIds = getTopUserGenreIds(ratingsList, options.genres);
+  const hiddenGemQueryTasks: Array<() => Promise<any[]>> = [];
+  for (const gid of topGenreIds) {
+    hiddenGemQueryTasks.push(() =>
+      safeFetch('/discover/movie', {
+        with_genres: String(gid),
+        'vote_average.gte': 7,
+        'vote_count.gte': 50,
+        'vote_count.lte': 800,
+        sort_by: 'vote_average.desc',
+        page: 1,
+      })
+    );
+    hiddenGemQueryTasks.push(() =>
+      safeFetch('/discover/movie', {
+        with_genres: String(gid),
+        'vote_average.gte': 7,
+        'vote_count.gte': 50,
+        'vote_count.lte': 800,
+        sort_by: 'vote_average.desc',
+        page: 2,
+      })
+    );
+  }
+
+  // 4. Acclaimed Baseline base queries
+  const baseQueryTasks: Array<() => Promise<any[]>> = [
+    () =>
+      safeFetch('/discover/movie', {
+        sort_by: 'vote_average.desc',
+        'vote_count.gte': 800,
+        page: 1,
+      }),
+    () =>
+      safeFetch('/discover/movie', {
+        sort_by: 'popularity.desc',
+        'vote_count.gte': 1500,
+        page: 1,
+      }),
+    () => safeFetch('/trending/movie/week', {}),
+  ];
+
+  // Budget reservation per source:
+  // Era, vibe, and hidden gems are guaranteed budget first, followed by the 3 base queries.
+  const reserved =
+    eraQueryTasks.length +
+    vibeQueryTasks.length +
+    hiddenGemQueryTasks.length +
+    baseQueryTasks.length;
+
+  // 5. Seed Graph: remainder of the 45-request budget
+  const eligibleRatings = ratingsList.filter((r) => r.rating >= 7);
+  const requestedSeedCount = options.seedCount ?? 8;
+  const targetSeedCount = Math.min(eligibleRatings.length, requestedSeedCount);
+
+  let chosenSeedIds: number[] = [];
+  if (eligibleRatings.length > 0) {
+    const chosenSeeds = selectWeightedSeeds(eligibleRatings, targetSeedCount, options.randomFn);
+    chosenSeedIds = chosenSeeds.map((r) => r.movieId);
+  } else if (options.seedMovieIds && options.seedMovieIds.length > 0) {
+    chosenSeedIds = options.seedMovieIds.slice(0, requestedSeedCount);
+  }
+
+  const seedRequests = Math.min(chosenSeedIds.length * 4, Math.max(0, 45 - reserved));
+
+  // Dropping page 2 before dropping seeds
+  const seedPage1Tasks: Array<() => Promise<any[]>> = [];
+  for (const id of chosenSeedIds) {
+    seedPage1Tasks.push(() => safeFetch(`/movie/${id}/recommendations`, { page: 1 }));
+    seedPage1Tasks.push(() => safeFetch(`/movie/${id}/similar`, { page: 1 }));
+  }
+
+  const seedPage2Tasks: Array<() => Promise<any[]>> = [];
+  for (const id of chosenSeedIds) {
+    seedPage2Tasks.push(() => safeFetch(`/movie/${id}/recommendations`, { page: 2 }));
+    seedPage2Tasks.push(() => safeFetch(`/movie/${id}/similar`, { page: 2 }));
+  }
+
+  const allSeedTasks = [...seedPage1Tasks, ...seedPage2Tasks];
+  const seedQueryTasks = allSeedTasks.slice(0, seedRequests);
+
+  // Guaranteed budget promises first: era, vibe, hidden-gem, base, then seed queries
+  const eraPromises = eraQueryTasks.map((t) => t());
+  const vibePromises = vibeQueryTasks.map((t) => t());
+  const hiddenGemPromises = hiddenGemQueryTasks.map((t) => t());
+  const basePromises = baseQueryTasks.map((t) => t());
+  const seedGraphPromises = seedQueryTasks.map((t) => t());
+
+  const baselinePromises = [...basePromises, ...eraPromises, ...vibePromises];
 
   // Execute all scheduled tasks with concurrency and ceiling limits
   const [seedGraphArrays, hiddenGemArrays, baselineArrays] = await Promise.all([

@@ -94,6 +94,49 @@ describe('candidateSources module', () => {
       // High+new rating has weight (4 * 1.0 = 4.0) vs low+old (1 * 0.5 = 0.5), ratio 8:1
       expect(highNewFirstCount).toBeGreaterThan(70);
     });
+
+    it('ignores ratings without ratedAt in recency weighting instead of treating them as 0', () => {
+      const withoutTime = {
+        movieId: 1,
+        title: 'No Time',
+        rating: 10,
+        posterPath: null,
+        genres: [],
+      } as unknown as UserRating;
+      const oldWithTime: UserRating = {
+        movieId: 2,
+        title: 'Old',
+        rating: 10,
+        posterPath: null,
+        genres: [],
+        ratedAt: 1000,
+      };
+      const newWithTime: UserRating = {
+        movieId: 3,
+        title: 'New',
+        rating: 10,
+        posterPath: null,
+        genres: [],
+        ratedAt: 2000,
+      };
+
+      const items = [withoutTime, oldWithTime, newWithTime];
+      const selected = selectWeightedSeeds(items, 3);
+      expect(selected).toHaveLength(3);
+    });
+
+    it('uses reduce and handles large ratings arrays without call stack overflow', () => {
+      const largeFixture: UserRating[] = Array.from({ length: 150000 }, (_, i) => ({
+        movieId: i + 1,
+        title: `Movie ${i + 1}`,
+        rating: 8,
+        posterPath: null,
+        genres: [],
+        ratedAt: 1600000000000 + i * 1000,
+      }));
+
+      expect(() => selectWeightedSeeds(largeFixture, 5)).not.toThrow();
+    });
   });
 
   describe('getTopUserGenreIds', () => {
@@ -119,6 +162,23 @@ describe('candidateSources module', () => {
       ];
       const top = getTopUserGenreIds(ratings, [18, 878]);
       expect(top).toEqual([28, 18, 878]);
+    });
+
+    it('weights top genres by liked ratings (>= 7) and ignores ratings < 7', () => {
+      const ratings: UserRating[] = [
+        { movieId: 1, title: 'Bad Horror 1', rating: 2, posterPath: null, genres: ['Horror'], ratedAt: 100 },
+        { movieId: 2, title: 'Bad Horror 2', rating: 3, posterPath: null, genres: ['Horror'], ratedAt: 200 },
+        { movieId: 3, title: 'Bad Horror 3', rating: 4, posterPath: null, genres: ['Horror'], ratedAt: 300 },
+        { movieId: 4, title: 'Bad Horror 4', rating: 5, posterPath: null, genres: ['Horror'], ratedAt: 400 },
+        { movieId: 5, title: 'Great Drama', rating: 9, posterPath: null, genres: ['Drama'], ratedAt: 500 },
+        { movieId: 6, title: 'Great Sci-Fi', rating: 10, posterPath: null, genres: ['Sci-Fi'], ratedAt: 600 },
+      ];
+
+      const top = getTopUserGenreIds(ratings);
+      // Horror (27) must not be in top genres because all its ratings were < 7
+      expect(top).not.toContain(27);
+      expect(top).toContain(18); // Drama
+      expect(top).toContain(878); // Sci-Fi
     });
   });
 
@@ -159,7 +219,7 @@ describe('candidateSources module', () => {
       });
 
       controller.abort();
-      await expect(promise).rejects.toThrow();
+      await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
     });
   });
 
@@ -414,8 +474,10 @@ describe('candidateSources module', () => {
       let activeRequests = 0;
       let maxActiveRequests = 0;
       let totalRequests = 0;
+      const issuedUrls: string[] = [];
 
-      const trackRequest = async () => {
+      const trackRequest = async (urlStr: string) => {
+        issuedUrls.push(urlStr);
         activeRequests++;
         maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
         totalRequests++;
@@ -424,20 +486,20 @@ describe('candidateSources module', () => {
       };
 
       server.use(
-        http.get('https://api.themoviedb.org/3/movie/:id/recommendations', async () => {
-          await trackRequest();
+        http.get('https://api.themoviedb.org/3/movie/:id/recommendations', async ({ request }) => {
+          await trackRequest(request.url);
           return HttpResponse.json({ page: 1, results: [], total_pages: 1, total_results: 0 });
         }),
-        http.get('https://api.themoviedb.org/3/movie/:id/similar', async () => {
-          await trackRequest();
+        http.get('https://api.themoviedb.org/3/movie/:id/similar', async ({ request }) => {
+          await trackRequest(request.url);
           return HttpResponse.json({ page: 1, results: [], total_pages: 1, total_results: 0 });
         }),
-        http.get('https://api.themoviedb.org/3/discover/movie', async () => {
-          await trackRequest();
+        http.get('https://api.themoviedb.org/3/discover/movie', async ({ request }) => {
+          await trackRequest(request.url);
           return HttpResponse.json({ page: 1, results: [], total_pages: 1, total_results: 0 });
         }),
-        http.get('https://api.themoviedb.org/3/trending/movie/:timeWindow', async () => {
-          await trackRequest();
+        http.get('https://api.themoviedb.org/3/trending/movie/:timeWindow', async ({ request }) => {
+          await trackRequest(request.url);
           return HttpResponse.json({ page: 1, results: [], total_pages: 1, total_results: 0 });
         })
       );
@@ -451,6 +513,25 @@ describe('candidateSources module', () => {
 
       expect(maxActiveRequests).toBeLessThanOrEqual(6);
       expect(totalRequests).toBeLessThanOrEqual(45);
+
+      // Hidden gem requests (vote_count.lte=800): 3 top genres * 2 pages = 6 requests
+      const hiddenGemRequests = issuedUrls.filter((u) => u.includes('vote_count.lte=800'));
+      expect(hiddenGemRequests.length).toBe(6);
+
+      // Every era query was issued: 2 eras * 3 queries = 6 queries
+      const era80sQueries = issuedUrls.filter((u) => u.includes('1980-01-01'));
+      expect(era80sQueries).toHaveLength(3);
+      const era90sQueries = issuedUrls.filter((u) => u.includes('1990-01-01'));
+      expect(era90sQueries).toHaveLength(3);
+
+      // Every vibe query was issued: with_genres (2 queries) and with_keywords (1 query)
+      expect(
+        issuedUrls.some((u) => u.includes('vote_count.gte=600') && !u.includes('primary_release_date'))
+      ).toBe(true);
+      expect(
+        issuedUrls.some((u) => u.includes('vote_count.gte=1000') && !u.includes('primary_release_date'))
+      ).toBe(true);
+      expect(issuedUrls.some((u) => u.includes('with_keywords='))).toBe(true);
     });
 
     it('stops outstanding work and rejects with an AbortError when aborted', async () => {
@@ -458,6 +539,16 @@ describe('candidateSources module', () => {
       let requestsStarted = 0;
 
       server.use(
+        http.get('https://api.themoviedb.org/3/movie/:id/recommendations', async () => {
+          requestsStarted++;
+          await delay(50);
+          return HttpResponse.json({ page: 1, results: [], total_pages: 1, total_results: 0 });
+        }),
+        http.get('https://api.themoviedb.org/3/movie/:id/similar', async () => {
+          requestsStarted++;
+          await delay(50);
+          return HttpResponse.json({ page: 1, results: [], total_pages: 1, total_results: 0 });
+        }),
         http.get('https://api.themoviedb.org/3/discover/movie', async () => {
           requestsStarted++;
           await delay(50);
@@ -473,15 +564,22 @@ describe('candidateSources module', () => {
       // Pre-aborted signal
       const preAbortedController = new AbortController();
       preAbortedController.abort();
-      await expect(generateCandidates([], {}, preAbortedController.signal)).rejects.toThrow();
+      await expect(generateCandidates([], {}, preAbortedController.signal)).rejects.toMatchObject({
+        name: 'AbortError',
+      });
       expect(requestsStarted).toBe(0);
 
       // Mid-flight abort
       const fixture = create200RatingFixture();
       const generationPromise = generateCandidates(fixture, {}, controller.signal);
-      setTimeout(() => controller.abort(), 10);
+      await delay(10);
+      controller.abort();
+      const requestsAfterAbort = requestsStarted;
+      expect(requestsAfterAbort).toBeGreaterThan(0);
 
-      await expect(generationPromise).rejects.toThrow();
+      await expect(generationPromise).rejects.toMatchObject({ name: 'AbortError' });
+      await delay(100);
+      expect(requestsStarted).toBe(requestsAfterAbort);
     });
 
     it('does not fail the whole pool if an individual TMDB query fails', async () => {
@@ -538,6 +636,29 @@ describe('candidateSources module', () => {
 
     it('getCandidateRecommendationPool delegates to generateCandidates and preserves signature', async () => {
       server.use(
+        http.get('https://api.themoviedb.org/3/movie/:id/recommendations', () => {
+          return HttpResponse.json({
+            page: 1,
+            results: [
+              {
+                id: 888,
+                title: 'Seed Rec Film',
+                overview: 'Seed rec movie',
+                poster_path: '/p888.jpg',
+                backdrop_path: null,
+                release_date: '2021-01-01',
+                vote_average: 8.0,
+                vote_count: 300,
+                genre_ids: [18],
+              },
+            ],
+            total_pages: 1,
+            total_results: 1,
+          });
+        }),
+        http.get('https://api.themoviedb.org/3/movie/:id/similar', () => {
+          return HttpResponse.json({ page: 1, results: [], total_pages: 1, total_results: 0 });
+        }),
         http.get('https://api.themoviedb.org/3/discover/movie', () => {
           return HttpResponse.json({
             page: 1,
@@ -563,16 +684,36 @@ describe('candidateSources module', () => {
         })
       );
 
+      const userRatings: UserRating[] = [
+        {
+          movieId: 10,
+          title: 'Seed Film 10',
+          rating: 9,
+          posterPath: '/seed10.jpg',
+          genres: ['Drama'],
+          ratedAt: 1600000000000,
+        },
+      ];
+
       const pool = await getCandidateRecommendationPool({
-        seedMovieIds: [10],
+        userRatings,
+        seedCount: 1,
       });
 
       expect(Array.isArray(pool)).toBe(true);
-      expect(pool.length).toBeGreaterThan(0);
-      expect(pool[0].id).toBe(999);
-      expect(pool[0].title).toBe('Pool Candidate');
-      expect(pool[0].poster_path).toBe('/p999.jpg');
-      expect(Array.isArray(pool[0].genres)).toBe(true);
+      const poolIds = pool.map((m) => m.id);
+      expect(new Set(poolIds)).toEqual(new Set([888, 999]));
+
+      const movie999 = pool.find((m) => m.id === 999);
+      expect(movie999).toBeDefined();
+      expect(movie999?.title).toBe('Pool Candidate');
+      expect(movie999?.poster_path).toBe('/p999.jpg');
+      expect(Array.isArray(movie999?.genres)).toBe(true);
+
+      const movie888 = pool.find((m) => m.id === 888);
+      expect(movie888).toBeDefined();
+      expect(movie888?.title).toBe('Seed Rec Film');
+      expect(movie888?.poster_path).toBe('/p888.jpg');
     });
   });
 });
