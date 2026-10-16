@@ -42,6 +42,14 @@ Each loop milestone has a parent issue. The Coordinator posts one short comment 
 
 Every dispatched issue contains: Goal, Context and decision, Scope, Constraints, Acceptance criteria, Verification, Dependencies, Review focus. Sized for one Gemini run (well under 30 minutes). Two concurrently dispatched issues must not touch the same files.
 
+**Frozen acceptance tests** (adopted after M1: both large M1 issues needed three passes, and some tests were bent to fit the code). For logic issues, the Coordinator or a Sonnet agent first commits to `agents/integration`:
+- the interface stub, if it is new
+- the failing acceptance and fixture tests, including one end-to-end test across dependent modules
+
+The worker implements until those tests pass. It may add tests, but it must not edit or weaken the frozen ones. The PR description maps each acceptance criterion to the test that proves it. Parallel issues that share an interface get that interface frozen first.
+
+**Gemini runs without terminal commands.** A run where Gemini attempted a command is rejected by the worker, even when Gemini reports success. Issue text must never ask Gemini to run anything.
+
 ## Rework
 
 The worker cannot revise an existing PR. To send work back, the Coordinator creates a rework issue:
