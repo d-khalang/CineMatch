@@ -224,7 +224,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
               onClick={() => setFilterTier(tier.id)}
               className={`btn-tactile text-xs px-3 py-1.5 whitespace-nowrap transition-all border cursor-pointer ${
                 filterTier === tier.id
-                  ? 'btn-tactile-primary font-bold shadow-md'
+                  ? 'btn-tactile-primary font-bold'
                   : 'btn-tactile-secondary'
               }`}
             >
@@ -272,7 +272,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
           <p className="text-slate-400 text-sm">You have not rated any movies yet.</p>
           <button
             onClick={() => setActiveTab('calibration')}
-            className="btn-tactile btn-tactile-primary px-5 py-2.5 text-xs font-bold shadow-lg"
+            className="btn-tactile btn-tactile-primary px-5 py-2.5 text-xs font-bold"
           >
             Start in Taste Calibration
           </button>
@@ -322,7 +322,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
 
                   {/* Top Left: Rating Badge */}
                   <div className="absolute top-2 left-2 z-10 flex flex-col items-start gap-1">
-                    <div className="px-2 py-0.5 rounded-md bg-[var(--bg-surface)]/90 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-[var(--border-subtle)] shadow-md">
+                    <div className="px-2 py-0.5 rounded-md bg-[var(--bg-surface)]/90 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-[var(--border-subtle)]">
                       ★ {item.rating}/10
                     </div>
                   </div>

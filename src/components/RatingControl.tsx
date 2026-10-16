@@ -41,22 +41,22 @@ export const RatingControl: React.FC<RatingControlProps> = ({
 
     if (score <= 3) {
       return isSelected
-        ? 'bg-rose-600 text-white border-rose-500 shadow-lg shadow-rose-900/40 font-bold'
+        ? 'bg-rose-600 text-white border-rose-500 font-bold'
         : 'hover:bg-rose-600/30 text-rose-300 border-rose-800/40';
     }
     if (score <= 6) {
       return isSelected
-        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-900/40 font-bold'
+        ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
         : 'hover:bg-amber-500/30 text-amber-300 border-amber-800/40';
     }
     if (score <= 8) {
       return isSelected
-        ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-lg shadow-emerald-900/40 font-bold'
+        ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-bold'
         : 'hover:bg-emerald-500/30 text-emerald-300 border-emerald-800/40';
     }
     // 9-10 Masterpiece
     return isSelected
-      ? 'bg-[var(--accent-primary)] text-[var(--accent-text)] border-[var(--border-focus)] shadow-lg shadow-[var(--accent-glow)] font-bold scale-105'
+      ? 'bg-[var(--accent-primary)] text-[var(--accent-text)] border-[var(--border-focus)] font-bold'
       : 'hover:bg-[var(--accent-secondary-bg)] text-[var(--accent-secondary)] border-[var(--border-subtle)]';
   };
 

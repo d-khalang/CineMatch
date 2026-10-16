@@ -149,10 +149,10 @@ export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: contro
         <div className="fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-40">
           <button
             onClick={() => setIsOpen(true)}
-            className="group flex items-center gap-2 px-3.5 py-2.5 rounded-full bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-slate-200 hover:text-white border border-[var(--border-subtle)] hover:border-[var(--border-focus)] shadow-2xl backdrop-blur-md transition-all active:scale-95 cursor-pointer"
+            className="group flex items-center gap-2 px-3.5 py-2.5 rounded-full bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-slate-200 hover:text-white border border-[var(--border-subtle)] hover:border-[var(--border-focus)] shadow-md transition-all active:scale-95 cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus-visible:outline-none"
             title="Open Cinematic Palette & Font Studio"
           >
-            <div className="w-5 h-5 rounded-full flex items-center justify-center bg-[var(--accent-primary)] text-[var(--accent-text)] font-black shadow-sm">
+            <div className="w-5 h-5 rounded-full flex items-center justify-center bg-[var(--accent-primary)] text-[var(--accent-text)] font-black">
               <Palette className="w-3.5 h-3.5 fill-current" />
             </div>
             <span className="text-xs font-bold tracking-wide">Theme Studio</span>
@@ -170,7 +170,7 @@ export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: contro
           onClick={handleClose}
         >
           <div
-            className="relative w-full max-w-xl rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-2xl overflow-hidden my-auto max-h-[90vh] flex flex-col"
+            className="relative w-full max-w-xl rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-xl overflow-hidden my-auto max-h-[90vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Studio Header */}
@@ -221,7 +221,7 @@ export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: contro
                         onClick={() => handleSelectPalette(p.id)}
                         className={`group p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                           isSelected
-                            ? 'bg-[var(--bg-surface-elevated)] border-[var(--border-focus)] shadow-lg shadow-[var(--accent-glow)] ring-1 ring-[var(--border-focus)]'
+                            ? 'bg-[var(--bg-surface-elevated)] border-[var(--border-focus)]'
                             : 'bg-[var(--bg-surface-elevated)]/40 border-[var(--border-subtle)] hover:bg-[var(--bg-surface-elevated)] hover:border-[var(--border-focus)]'
                         }`}
                       >
@@ -231,7 +231,7 @@ export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: contro
                             {p.swatches.map((color, idx) => (
                               <div
                                 key={idx}
-                                className="w-5 h-5 rounded-full border-2 border-[var(--bg-surface)] shadow-sm"
+                                className="w-5 h-5 rounded-full border-2 border-[var(--bg-surface)]"
                                 style={{ backgroundColor: color }}
                               />
                             ))}
@@ -253,7 +253,7 @@ export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: contro
                         </div>
 
                         {isSelected && (
-                          <div className="w-6 h-6 rounded-full bg-[var(--accent-primary)] text-[var(--accent-text)] flex items-center justify-center shrink-0 shadow-md">
+                          <div className="w-6 h-6 rounded-full bg-[var(--accent-primary)] text-[var(--accent-text)] flex items-center justify-center shrink-0">
                             <Check className="w-3.5 h-3.5 stroke-[3]" />
                           </div>
                         )}
@@ -282,7 +282,7 @@ export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: contro
                         onClick={() => handleSelectFont(font.id)}
                         className={`group p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-2 ${
                           isSelected
-                            ? 'bg-[var(--bg-surface-elevated)] border-[var(--border-focus)] shadow-md ring-1 ring-[var(--border-focus)]'
+                            ? 'bg-[var(--bg-surface-elevated)] border-[var(--border-focus)]'
                             : 'bg-[var(--bg-surface-elevated)]/40 border-[var(--border-subtle)] hover:bg-[var(--bg-surface-elevated)] hover:border-[var(--border-focus)]'
                         }`}
                       >

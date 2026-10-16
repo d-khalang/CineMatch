@@ -264,7 +264,7 @@ export const Watchlist: React.FC = () => {
                 onClick={() => setSelectedGenre('all')}
                 className={`btn-tactile text-xs px-3 py-1 rounded-lg whitespace-nowrap transition-all cursor-pointer ${
                   selectedGenre === 'all'
-                    ? 'btn-tactile-primary shadow-sm'
+                    ? 'btn-tactile-primary'
                     : 'btn-tactile-secondary'
                 }`}
               >
@@ -280,7 +280,7 @@ export const Watchlist: React.FC = () => {
                     onClick={() => setSelectedGenre(genre)}
                     className={`btn-tactile text-xs px-2.5 py-1 rounded-lg whitespace-nowrap transition-all cursor-pointer ${
                       selectedGenre === genre
-                        ? 'btn-tactile-primary shadow-sm'
+                        ? 'btn-tactile-primary'
                         : 'btn-tactile-secondary'
                     }`}
                   >
@@ -296,7 +296,7 @@ export const Watchlist: React.FC = () => {
       {/* Main Watchlist Grid or Empty State */}
       {watchlist.length === 0 ? (
         <div className="text-center py-20 glass-panel rounded-3xl p-8 sm:p-12 space-y-6 max-w-2xl mx-auto border border-[var(--border-subtle)]">
-          <div className="w-20 h-20 mx-auto rounded-3xl palette-tag-secondary flex items-center justify-center shadow-2xl">
+          <div className="w-20 h-20 mx-auto rounded-3xl palette-tag-secondary flex items-center justify-center">
             <Bookmark className="w-10 h-10 text-[var(--accent-secondary)]" />
           </div>
 
@@ -312,7 +312,7 @@ export const Watchlist: React.FC = () => {
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
             <button
               onClick={() => setActiveTab('rankings')}
-              className="btn-tactile btn-tactile-primary w-full sm:w-auto px-6 py-2.5 text-xs font-bold shadow-lg"
+              className="btn-tactile btn-tactile-primary w-full sm:w-auto px-6 py-2.5 text-xs font-bold"
             >
               <Trophy className="w-4 h-4" />
               <span>Discover Ranked Movies</span>
@@ -381,7 +381,7 @@ export const Watchlist: React.FC = () => {
                         e.stopPropagation();
                         toggleWatchlist(movie);
                       }}
-                      className="p-1.5 rounded-lg bg-[var(--bg-surface)]/90 backdrop-blur-md text-[var(--accent-hover)] hover:text-rose-400 border border-[var(--border-subtle)] transition-all shadow-md cursor-pointer"
+                      className="p-1.5 rounded-lg bg-[var(--bg-surface)]/90 backdrop-blur-md text-[var(--accent-hover)] hover:text-rose-400 border border-[var(--border-subtle)] transition-all cursor-pointer"
                       title="Remove from Watchlist"
                     >
                       <BookmarkCheck className="w-3.5 h-3.5" />
@@ -397,7 +397,7 @@ export const Watchlist: React.FC = () => {
                   {/* Top Left Rating Badge */}
                   {movie.vote_average > 0 && (
                     <div className="absolute top-2 left-2 z-10">
-                      <span className="px-2 py-0.5 rounded-md bg-[var(--bg-surface)]/90 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-[var(--border-subtle)] shadow-md">
+                      <span className="px-2 py-0.5 rounded-md bg-[var(--bg-surface)]/90 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-[var(--border-subtle)]">
                         ★ {movie.vote_average.toFixed(1)}
                       </span>
                     </div>

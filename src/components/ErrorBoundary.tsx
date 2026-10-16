@@ -50,7 +50,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex items-center justify-center p-6 bg-[var(--bg-canvas,#121c17)] text-[var(--text-primary,#ffffff)]">
-          <div className="max-w-md w-full bg-[var(--bg-surface,#182620)] border border-[var(--border-subtle,#2a3f35)] rounded-2xl p-6 sm:p-8 space-y-5 shadow-2xl text-center">
+          <div className="max-w-md w-full bg-[var(--bg-surface,#182620)] border border-[var(--border-subtle,#2a3f35)] rounded-2xl p-6 sm:p-8 space-y-5 shadow-xl text-center">
             <div className="w-14 h-14 mx-auto rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center">
               <AlertTriangle className="w-8 h-8" />
             </div>

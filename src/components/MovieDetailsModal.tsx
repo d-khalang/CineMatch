@@ -52,7 +52,7 @@ export const MovieDetailsModal: React.FC = () => {
       onClick={() => setSelectedMovieForModal(null)}
     >
       <div
-        className="relative w-full max-w-3xl rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-2xl overflow-hidden my-auto"
+        className="relative w-full max-w-3xl rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-xl overflow-hidden my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close Button */}
@@ -82,7 +82,7 @@ export const MovieDetailsModal: React.FC = () => {
                   onClick={() => setShowTrailer(true)}
                   className="absolute inset-0 flex items-center justify-center group cursor-pointer"
                 >
-                  <div className="w-16 h-16 rounded-full bg-[var(--accent-primary)] text-[var(--accent-text)] flex items-center justify-center shadow-2xl shadow-[var(--accent-glow)] group-hover:scale-110 group-hover:bg-[var(--accent-hover)] transition-all border border-[var(--border-focus)]">
+                  <div className="w-16 h-16 rounded-full bg-[var(--accent-primary)] text-[var(--accent-text)] flex items-center justify-center group-hover:scale-105 group-hover:bg-[var(--accent-hover)] transition-all border border-[var(--border-focus)]">
                     <Play className="w-7 h-7 fill-current ml-1" />
                   </div>
                 </button>
