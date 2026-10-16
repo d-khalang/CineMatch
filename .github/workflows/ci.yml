@@ -2,9 +2,9 @@ name: CI / Production Verification
 
 on:
   push:
-    branches: [main]
+    branches: [main, agents/integration]
   pull_request:
-    branches: [main]
+    branches: [main, agents/integration]
 
 jobs:
   verify:
