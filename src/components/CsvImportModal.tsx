@@ -543,7 +543,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
             <button
               onClick={resolveImport}
               disabled={isProcessing}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-[var(--accent-text)] font-semibold text-xs transition-all disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-black font-semibold text-xs transition-all disabled:opacity-50"
             >
               {isProcessing ? (
                 <>
@@ -563,7 +563,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
           {importPhase === 'resolving' && (
             <button
               disabled
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] text-[var(--accent-text)] font-semibold text-xs opacity-50"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] text-black font-semibold text-xs opacity-50"
             >
               <Loader2 className="w-4 h-4 animate-spin" />
               Matching...
@@ -581,7 +581,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
               </button>
               <button
                 onClick={confirmImport}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-[var(--accent-text)] font-semibold text-xs transition-all"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-black font-semibold text-xs transition-all"
               >
                 <CheckCircle className="w-4 h-4" />
                 Confirm Import ({pendingRatings.length} Films)
@@ -596,7 +596,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                 handleClose();
                 generateRankings().catch(() => {});
               }}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-[var(--accent-text)] font-semibold text-xs transition-all"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-black font-semibold text-xs transition-all"
             >
               <CheckCircle className="w-4 h-4" />
               Done — Recalibrate AI Recommendations
