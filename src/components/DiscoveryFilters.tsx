@@ -46,7 +46,7 @@ export const DiscoveryFilters: React.FC = () => {
   const currentSerendipity = getSerendipityLabel(aiSettings.serendipityLevel);
 
   return (
-    <div className="glass-panel rounded-2xl p-5 sm:p-6 mb-8 border border-[var(--border-subtle)] shadow-xl space-y-6">
+    <div className="glass-panel rounded-2xl p-5 sm:p-6 mb-8 border border-[var(--border-subtle)] space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[var(--border-subtle)] pb-5">
         <div>
           <div className="flex items-center gap-2">
@@ -61,7 +61,7 @@ export const DiscoveryFilters: React.FC = () => {
         <button
           onClick={generateRankings}
           disabled={isGeneratingRecs}
-          className="btn-tactile btn-tactile-primary self-start md:self-auto px-5 py-2.5 text-xs font-bold shadow-lg disabled:opacity-50"
+          className="btn-tactile btn-tactile-primary self-start md:self-auto px-5 py-2.5 text-xs font-bold disabled:opacity-50"
         >
           <Sparkles className={`w-4 h-4 ${isGeneratingRecs ? 'animate-spin' : ''}`} />
           <span>{isGeneratingRecs ? 'Re-Ranking Taste Profile...' : 'Re-Rank with AI'}</span>
@@ -115,7 +115,7 @@ export const DiscoveryFilters: React.FC = () => {
                 onClick={() => toggleVibe(vibe)}
                 className={`btn-tactile text-xs px-3 py-1.5 transition-all cursor-pointer ${
                   isSelected
-                    ? 'btn-tactile-primary shadow-sm'
+                    ? 'btn-tactile-primary'
                     : 'btn-tactile-secondary'
                 }`}
               >
@@ -140,7 +140,7 @@ export const DiscoveryFilters: React.FC = () => {
                 onClick={() => toggleEra(era)}
                 className={`btn-tactile text-xs px-3 py-1.5 transition-all cursor-pointer ${
                   isSelected
-                    ? 'btn-tactile-primary shadow-sm'
+                    ? 'btn-tactile-primary'
                     : 'btn-tactile-secondary'
                 }`}
               >

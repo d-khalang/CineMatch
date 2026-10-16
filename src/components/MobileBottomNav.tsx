@@ -35,7 +35,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ onOpenSettings
               <div className="relative">
                 <Icon className={`w-5 h-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
                 {item.badge && (
-                  <span className="absolute -top-1.5 -right-2.5 px-1.5 py-0.2 bg-[var(--accent-primary)] text-white text-[9px] font-extrabold rounded-full shadow-sm">
+                  <span className="absolute -top-1.5 -right-2.5 px-1.5 py-0.2 bg-[var(--accent-primary)] text-white text-[9px] font-extrabold rounded-full">
                     {item.badge}
                   </span>
                 )}

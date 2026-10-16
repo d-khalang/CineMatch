@@ -7,12 +7,11 @@ interface CineMatchLogoProps {
 
 export const CineMatchLogo: React.FC<CineMatchLogoProps> = ({
   className = 'w-full h-full',
-  showGlow = true,
+  showGlow = false,
 }) => {
   const uniqueId = useId().replace(/:/g, '_');
   const screenGradId = `screen-grad-${uniqueId}`;
   const ambientBeamId = `ambient-beam-${uniqueId}`;
-  const glowFilterId = `screen-glow-${uniqueId}`;
 
   return (
     <svg
@@ -35,14 +34,6 @@ export const CineMatchLogo: React.FC<CineMatchLogoProps> = ({
           <stop offset="0%" stopColor="var(--accent-primary)" stopOpacity="0.35" />
           <stop offset="100%" stopColor="var(--accent-primary)" stopOpacity="0" />
         </linearGradient>
-
-        {/* Soft Ambient Glow */}
-        {showGlow && (
-          <filter id={glowFilterId} x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="3" result="blur" />
-            <feComposite in="SourceGraphic" in2="blur" operator="over" />
-          </filter>
-        )}
       </defs>
 
       {/* 1. Ambient Light Beam from Screen */}
@@ -58,9 +49,8 @@ export const CineMatchLogo: React.FC<CineMatchLogoProps> = ({
         fill="var(--bg-canvas)"
         stroke="var(--accent-secondary)"
         strokeWidth="2"
-        filter={showGlow ? `url(#${glowFilterId})` : undefined}
       />
-      {/* Screen Glowing Display */}
+      {/* Screen Display */}
       <rect x="21" y="13" width="58" height="32" rx="3.5" fill={`url(#${screenGradId})`} />
 
       {/* Minimal Star/Glint in Film Screen */}

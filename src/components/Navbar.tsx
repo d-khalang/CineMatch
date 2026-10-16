@@ -28,17 +28,16 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings, onOpenPalette })
 
   return (
     <header className="sticky top-0 z-40 w-full px-3 sm:px-6 pt-[max(0.5rem,env(safe-area-inset-top))] pb-1 sm:pt-3 transition-all duration-300">
-      <div className="max-w-7xl mx-auto rounded-full bg-[var(--bg-surface)]/85 backdrop-blur-2xl border border-[var(--border-subtle)] shadow-[0_8px_32px_rgba(0,0,0,0.36)] h-14 sm:h-16 px-3 sm:px-5 flex items-center justify-between gap-2 sm:gap-4 transition-all duration-300">
+      <div className="max-w-7xl mx-auto rounded-full bg-[var(--bg-surface)] border border-[var(--border-subtle)] h-14 sm:h-16 px-3 sm:px-5 flex items-center justify-between gap-2 sm:gap-4 transition-all duration-300">
         
         {/* 1. Logo & Brand (Organic, free-floating presentation without squircle box) */}
         <div
           onClick={() => setActiveTab('calibration')}
           className="flex items-center gap-2.5 sm:gap-3 cursor-pointer group select-none flex-shrink-0"
         >
-          {/* Free-standing logo with ambient backlight glow */}
+          {/* Free-standing logo */}
           <div className="w-8 h-8 sm:w-9 sm:h-9 relative flex items-center justify-center transition-transform duration-300 group-hover:scale-105">
-            <div className="absolute inset-0 bg-[var(--accent-primary)] opacity-20 blur-md rounded-full group-hover:opacity-40 transition-opacity" />
-            <CineMatchLogo className="w-full h-full relative z-10 drop-shadow-sm" />
+            <CineMatchLogo className="w-full h-full relative z-10" />
           </div>
 
           <div>
@@ -57,7 +56,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings, onOpenPalette })
         </div>
 
         {/* 2. Desktop Navigation Tabs (Visible on big screens with fluid pill tabs) */}
-        <nav className="hidden md:flex items-center gap-1 bg-black/25 p-1 rounded-full border border-white/5 shadow-inner">
+        <nav className="hidden md:flex items-center gap-1 bg-black/25 p-1 rounded-full border border-white/5">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -65,9 +64,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings, onOpenPalette })
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id as any)}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 cursor-pointer ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus-visible:outline-none ${
                   isActive
-                    ? 'bg-[var(--accent-primary)] text-[var(--accent-text)] shadow-[0_2px_12px_var(--accent-glow)]'
+                    ? 'bg-[var(--accent-primary)] text-[var(--accent-text)]'
                     : 'text-slate-400 hover:text-white hover:bg-white/5'
                 }`}
               >
@@ -95,7 +94,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings, onOpenPalette })
           {onOpenPalette && (
             <button
               onClick={onOpenPalette}
-              className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus-visible:outline-none"
               title="Change Color Palette & Typography"
               aria-label="Color Palette & Typography"
             >
@@ -106,13 +105,12 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings, onOpenPalette })
           {/* AI Engine & API Keys direct access */}
           <button
             onClick={onOpenSettings}
-            className="flex items-center gap-1.5 px-2 sm:px-2.5 h-8 sm:h-9 rounded-full text-xs text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-2 sm:px-2.5 h-8 sm:h-9 rounded-full text-xs text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus-visible:outline-none"
             title={`AI Engine & API Keys (${getProviderName()})`}
             aria-label="AI Engine & API Keys"
           >
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+              <span className="h-2 w-2 rounded-full bg-emerald-400" />
             </span>
             <Sparkles className="w-3.5 h-3.5 text-[var(--accent-primary)]" />
             <span className="hidden xl:inline text-[11px] font-medium text-slate-300">
@@ -123,7 +121,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings, onOpenPalette })
           {/* Settings direct access */}
           <button
             onClick={onOpenSettings}
-            className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+            className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus-visible:outline-none"
             title="App Settings & Data"
             aria-label="Settings"
           >

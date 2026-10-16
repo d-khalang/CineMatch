@@ -286,7 +286,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-xl max-h-[90dvh] flex flex-col rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-2xl overflow-hidden p-6 sm:p-8 space-y-5"
+        className="relative w-full max-w-xl max-h-[90dvh] flex flex-col rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-xl overflow-hidden p-6 sm:p-8 space-y-5"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -315,7 +315,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           {coordinatorState.deletionFailureWarning && (
             <div
               role="alert"
-              className="p-3.5 rounded-2xl bg-amber-950/80 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between gap-3 shadow-md"
+              className="p-3.5 rounded-2xl bg-amber-950/80 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between gap-3"
             >
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />

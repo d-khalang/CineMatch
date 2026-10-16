@@ -117,22 +117,22 @@ export const RankedFeed: React.FC = () => {
 
   const getRankBadgeStyle = (rank: number) => {
     if (rank === 1) {
-      return 'bg-[var(--accent-primary)] text-[var(--accent-text)] font-black shadow-lg shadow-[var(--accent-glow)] border-[var(--border-focus)]';
+      return 'bg-[var(--accent-primary)] text-[var(--accent-text)] font-black border border-[var(--border-focus)]';
     }
     if (rank === 2) {
-      return 'bg-[var(--bg-surface-elevated)] text-[var(--accent-secondary)] font-black shadow-md border-[var(--border-subtle)]';
+      return 'bg-[var(--bg-surface-elevated)] text-[var(--accent-secondary)] font-black border border-[var(--border-subtle)]';
     }
     if (rank === 3) {
-      return 'bg-[var(--bg-surface-hover)] text-slate-200 font-bold border-[var(--border-subtle)]';
+      return 'bg-[var(--bg-surface-hover)] text-slate-200 font-bold border border-[var(--border-subtle)]';
     }
-    return 'bg-[var(--bg-surface-elevated)] text-slate-400 font-bold border-[var(--border-subtle)]';
+    return 'bg-[var(--bg-surface-elevated)] text-slate-400 font-bold border border-[var(--border-subtle)]';
   };
 
   const getSerendipityBadge = (type: string) => {
     switch (type) {
       case 'ai_cinephile_discovery':
         return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] px-3 py-1 rounded-md palette-tag-primary font-bold shadow-md animate-pulse">
+          <span className="inline-flex items-center gap-1.5 text-[11px] px-3 py-1 rounded-md palette-tag-primary font-bold">
             <Sparkles className="w-3.5 h-3.5 text-inherit" />
             <span>🧠 AI Cinephile Discovery (Cross-Genre)</span>
           </span>
@@ -167,7 +167,7 @@ export const RankedFeed: React.FC = () => {
   if (ratedCount < 2) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-16 text-center space-y-6">
-        <div className="w-20 h-20 mx-auto rounded-3xl palette-tag-secondary flex items-center justify-center shadow-2xl">
+        <div className="w-20 h-20 mx-auto rounded-3xl palette-tag-secondary flex items-center justify-center">
           <Trophy className="w-10 h-10 text-[var(--accent-secondary)]" />
         </div>
         <div className="space-y-2">
@@ -178,7 +178,7 @@ export const RankedFeed: React.FC = () => {
         </div>
         <button
           onClick={() => setActiveTab('calibration')}
-          className="btn-tactile btn-tactile-primary px-6 py-3 text-sm font-bold shadow-xl mx-auto"
+          className="btn-tactile btn-tactile-primary px-6 py-3 text-sm font-bold mx-auto"
         >
           <SlidersHorizontal className="w-4 h-4" />
           Go to Taste Calibration Grid
@@ -215,7 +215,7 @@ export const RankedFeed: React.FC = () => {
 
       {/* AI Psychological Taste DNA card if available */}
       {aiTasteAnalysis && (
-        <div className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl glass-panel border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] shadow-xl relative overflow-hidden">
+        <div className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl glass-panel border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] relative overflow-hidden">
           <div className="flex items-start gap-3">
             <div className="p-2.5 rounded-xl palette-tag-secondary shrink-0">
               <Sparkles className="w-5 h-5 text-[var(--accent-secondary)]" />
@@ -273,7 +273,7 @@ export const RankedFeed: React.FC = () => {
           <button
             onClick={handleManualGenerate}
             disabled={isGeneratingRecs}
-            className="btn-tactile btn-tactile-primary px-6 py-3 text-sm font-bold shadow-lg disabled:opacity-50"
+            className="btn-tactile btn-tactile-primary px-6 py-3 text-sm font-bold disabled:opacity-50"
           >
             {recommendations.length > 0 ? 'Discover Next Batch' : 'Generate AI Rankings'}
           </button>
@@ -291,22 +291,22 @@ export const RankedFeed: React.FC = () => {
             return (
               <div
                 key={movie.id}
-                className={`group relative flex flex-col md:flex-row gap-4 sm:gap-6 rounded-2xl sm:rounded-3xl p-4 sm:p-5 glass-panel glass-panel-hover border transition-all duration-300 overflow-hidden ${
+                className={`group relative flex flex-col md:flex-row gap-4 sm:gap-6 rounded-2xl sm:rounded-3xl p-4 sm:p-5 glass-panel glass-panel-hover border transition-colors duration-200 overflow-hidden ${
                   isPendingRemoval
-                    ? 'animate-pulse-glow bg-[var(--bg-surface-elevated)]'
+                    ? 'bg-[var(--bg-surface-elevated)] border-[var(--border-subtle)]'
                     : serendipityType === 'ai_cinephile_discovery'
-                    ? 'border-[var(--border-focus)] shadow-lg shadow-[var(--accent-glow)] ring-1 ring-[var(--border-focus)]'
+                    ? 'border-[var(--border-focus)]'
                     : 'border-[var(--border-subtle)]'
                 }`}
               >
                 {/* Active Pending Grace Indicator Strip */}
                 {isPendingRemoval && (
-                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-[var(--accent-secondary)] via-[var(--accent-primary)] to-[var(--accent-hover)] animate-shimmer z-30 shadow-md" />
+                  <div className="absolute top-0 left-0 right-0 h-1 bg-[var(--accent-secondary)] z-30" />
                 )}
 
                 {/* Rank Number Badge */}
                 <div
-                  className={`absolute top-4 left-4 z-10 w-9 h-9 rounded-xl flex items-center justify-center text-sm border shadow-lg ${getRankBadgeStyle(
+                  className={`absolute top-4 left-4 z-10 w-9 h-9 rounded-xl flex items-center justify-center text-sm ${getRankBadgeStyle(
                     displayRank
                   )}`}
                 >
@@ -339,17 +339,17 @@ export const RankedFeed: React.FC = () => {
                           e.stopPropagation();
                           toggleWatchlist(movie);
                         }}
-                        className={`p-1.5 rounded-lg backdrop-blur-md border transition-all cursor-pointer ${
+                        className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
                           inWatchlist
-                            ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-hover)] border-[var(--border-focus)] shadow-md'
-                            : 'bg-[var(--bg-surface)]/80 text-slate-300 border-[var(--border-subtle)] hover:text-white'
+                            ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-hover)] border-[var(--border-focus)]'
+                            : 'bg-[var(--bg-surface)] text-slate-300 border-[var(--border-subtle)] hover:text-white'
                         }`}
                         title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
                       >
                         {inWatchlist ? <BookmarkCheck className="w-4 h-4 text-[var(--accent-hover)]" /> : <Bookmark className="w-4 h-4" />}
                       </button>
                       <ShareButton movie={movie} variant="icon" iconSize="w-4 h-4" />
-                      <div className="px-2.5 py-1 rounded-full bg-[var(--bg-surface)]/90 backdrop-blur-md text-xs font-bold text-[var(--accent-primary)] border border-[var(--border-focus)] shadow-md">
+                      <div className="px-2.5 py-1 rounded-full bg-[var(--bg-surface)] text-xs font-bold text-[var(--accent-primary)] border border-[var(--border-focus)]">
                         {score}% Match
                       </div>
                     </div>
@@ -432,7 +432,7 @@ export const RankedFeed: React.FC = () => {
 
                     {/* AI Explanation Box */}
                     <div
-                      className="p-3 sm:p-3.5 rounded-xl flex items-start gap-2.5 border border-[var(--border-subtle)] border-l-2 border-l-[var(--accent-primary)] bg-[var(--bg-surface-elevated)]/90 shadow-sm"
+                      className="p-3 sm:p-3.5 rounded-xl flex items-start gap-2.5 border border-[var(--border-subtle)] border-l-2 border-l-[var(--accent-primary)] bg-[var(--bg-surface-elevated)]/90"
                     >
                       <Sparkles
                         className="w-4 h-4 shrink-0 mt-0.5 text-[var(--accent-primary)]"
@@ -450,7 +450,7 @@ export const RankedFeed: React.FC = () => {
                   <div className="pt-2 border-t border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="w-full sm:max-w-md space-y-1">
                       {isPendingRemoval && (
-                        <div className="flex items-center justify-between text-[11px] text-white bg-[var(--bg-surface-elevated)] px-2.5 py-1.5 rounded-lg border border-[var(--border-focus)] shadow-lg shadow-[var(--accent-glow)]">
+                        <div className="flex items-center justify-between text-[11px] text-white bg-[var(--bg-surface-elevated)] px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)]">
                           <span className="font-bold flex items-center gap-1.5 text-[var(--accent-secondary)]">
                             ✓ Grade saved! Hiding soon...
                           </span>
