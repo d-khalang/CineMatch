@@ -111,6 +111,15 @@ export const handlers = [
     });
   }),
 
+  http.get('https://api.themoviedb.org/3/trending/movie/:timeWindow', () => {
+    return HttpResponse.json({
+      page: 1,
+      results: [],
+      total_pages: 1,
+      total_results: 0,
+    });
+  }),
+
   // Gemini Mock
   http.post('https://generativelanguage.googleapis.com/v1beta/models/:model', async () => {
     return HttpResponse.json({

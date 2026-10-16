@@ -1,6 +1,7 @@
 import { Movie, UserRating } from '../types';
 import { credentialStore, TmdbCredentialType } from './credentialStore';
 import { getSeriesKey, FRANCHISE_ALIASES } from '../constants/franchises';
+import { generateCandidates, CandidateOptions } from './recommendation/candidateSources';
 export { getSeriesKey, FRANCHISE_ALIASES };
 
 export class MissingTmdbCredentialError extends Error {
@@ -98,6 +99,9 @@ export const CALIBRATION_CATEGORIES = [
 const cache = new BoundedLRUMap<string, any>(250);
 const hydrationCache = new BoundedLRUMap<string, Movie | null>(250);
 export const failedMovieIds = new Set<number>();
+export function clearTmdbCache(): void {
+  cache.clear();
+}
 
 export function redactTmdbUrl(urlStr: string): string {
   try {
@@ -162,7 +166,7 @@ export async function testTmdbConnection(
   }
 }
 
-async function fetchFromTMDB<T>(
+export async function fetchFromTMDB<T>(
   endpoint: string,
   params: Record<string, string | number> = {},
   signal?: AbortSignal
@@ -674,223 +678,20 @@ export function getGenreIdsForVibes(vibes: string[]): number[] {
   return Array.from(genreSet);
 }
 
-export interface CandidateRecommendationOptions {
-  seedMovieIds?: number[];
-  genres?: number[];
-  minVoteAverage?: number;
-  excludeIds?: Set<number>;
-  preferredEras?: string[];
-  selectedVibes?: string[];
+export interface CandidateRecommendationOptions extends CandidateOptions {
+  userRatings?: UserRating[] | Record<number, UserRating>;
 }
 
 export async function getCandidateRecommendationPool(
   options: CandidateRecommendationOptions = {},
   signal?: AbortSignal
 ): Promise<Movie[]> {
-  const {
-    seedMovieIds = [],
-    genres = [],
-    minVoteAverage,
-    excludeIds = new Set(),
-    preferredEras = [],
-    selectedVibes = [],
-  } = options;
-
-  // 1. Fetch recommendations & similar movies for top seeds
-  const seedPromises = seedMovieIds.slice(0, 4).map(async (id) => {
-    try {
-      const recs = await fetchFromTMDB<{ results: any[] }>(`/movie/${id}/recommendations`, {}, signal);
-      const similar = await fetchFromTMDB<{ results: any[] }>(`/movie/${id}/similar`, {}, signal);
-      return [...(recs.results || []), ...(similar.results || [])];
-    } catch {
-      return [];
-    }
-  });
-
-  // 2. Discover trending & top critically rated movies as baseline
-  const baseDiscoverPromises = [
-    fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-      sort_by: 'vote_average.desc',
-      'vote_count.gte': 800,
-      page: 1,
-    }, signal)
-      .then((d) => d.results || [])
-      .catch(() => []),
-    fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-      sort_by: 'popularity.desc',
-      'vote_count.gte': 1500,
-      page: 1,
-    }, signal)
-      .then((d) => d.results || [])
-      .catch(() => []),
-    fetchFromTMDB<{ results: any[] }>('/trending/movie/week', {}, signal)
-      .then((d) => d.results || [])
-      .catch(() => []),
-  ];
-
-  // 3. Resolve Genre IDs and Keyword IDs for selected vibes
-  const vibeGenreIds = getGenreIdsForVibes(selectedVibes);
-  const targetGenreIds = Array.from(new Set([...vibeGenreIds, ...genres]));
-  const withGenresParam = targetGenreIds.length > 0 ? targetGenreIds.join('|') : undefined;
-
-  const keywordIds = Array.from(
-    new Set(
-      selectedVibes.flatMap((v) => VIBE_KEYWORD_MAP[v.trim().toLowerCase()] || [])
-    )
+  const candidates = await generateCandidates(
+    options.userRatings || [],
+    options,
+    signal
   );
-
-  // 4. Era-targeted Discover queries
-  const eraPromises: Promise<any[]>[] = [];
-  if (preferredEras.length > 0) {
-    preferredEras.slice(0, 4).forEach((era) => {
-      const range = getEraDateRange(era);
-      if (range) {
-        // High-rated in this era
-        eraPromises.push(
-          fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-            'primary_release_date.gte': range.gte,
-            'primary_release_date.lte': range.lte,
-            sort_by: 'vote_average.desc',
-            'vote_count.gte': 300,
-            page: 1,
-          }, signal)
-            .then((d) => d.results || [])
-            .catch(() => [])
-        );
-
-        // Popular in this era
-        eraPromises.push(
-          fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-            'primary_release_date.gte': range.gte,
-            'primary_release_date.lte': range.lte,
-            sort_by: 'popularity.desc',
-            'vote_count.gte': 400,
-            page: 1,
-          }, signal)
-            .then((d) => d.results || [])
-            .catch(() => [])
-        );
-
-        // Targeted Era + Vibe genre query
-        if (withGenresParam) {
-          eraPromises.push(
-            fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-              'primary_release_date.gte': range.gte,
-              'primary_release_date.lte': range.lte,
-              with_genres: withGenresParam,
-              sort_by: 'vote_average.desc',
-              'vote_count.gte': 150,
-              page: 1,
-            }, signal)
-              .then((d) => d.results || [])
-              .catch(() => [])
-          );
-        }
-      }
-    });
-  }
-
-  // 5. Vibe-targeted Discover queries (broad across all eras if vibes are selected)
-  const vibePromises: Promise<any[]>[] = [];
-  if (withGenresParam) {
-    vibePromises.push(
-      fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-        with_genres: withGenresParam,
-        sort_by: 'vote_average.desc',
-        'vote_count.gte': 600,
-        page: 1,
-      }, signal)
-        .then((d) => d.results || [])
-        .catch(() => [])
-    );
-    vibePromises.push(
-      fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-        with_genres: withGenresParam,
-        sort_by: 'popularity.desc',
-        'vote_count.gte': 1000,
-        page: 1,
-      }, signal)
-        .then((d) => d.results || [])
-        .catch(() => [])
-    );
-  }
-
-  if (keywordIds.length > 0) {
-    vibePromises.push(
-      fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-        with_keywords: keywordIds.join('|'),
-        sort_by: 'vote_average.desc',
-        'vote_count.gte': 250,
-        page: 1,
-      }, signal)
-        .then((d) => d.results || [])
-        .catch(() => [])
-    );
-  }
-
-  // Execute all queries concurrently
-  const [seedResultsArray, baseResultsArray, eraResultsArray, vibeResultsArray] = await Promise.all([
-    Promise.all(seedPromises),
-    Promise.all(baseDiscoverPromises),
-    Promise.all(eraPromises),
-    Promise.all(vibePromises),
-  ]);
-
-  const formatRawMovie = (m: any): Movie | null => {
-    if (!m || !m.id || !m.poster_path || excludeIds.has(m.id)) return null;
-    if (minVoteAverage && (m.vote_average || 0) < minVoteAverage) return null;
-    return {
-      id: m.id,
-      title: m.title,
-      overview: m.overview || '',
-      poster_path: m.poster_path,
-      backdrop_path: m.backdrop_path,
-      release_date: m.release_date || '',
-      vote_average: m.vote_average || 0,
-      vote_count: m.vote_count || 0,
-      genre_ids: m.genre_ids || [],
-      genres: (m.genre_ids || []).map((gid: number) => ({ id: gid, name: GENRE_MAP[gid] || 'Other' })),
-    };
-  };
-
-  const toMovieList = (rawList: any[]): Movie[] => {
-    const list: Movie[] = [];
-    const seen = new Set<number>();
-    for (const item of rawList) {
-      const formatted = formatRawMovie(item);
-      if (formatted && !seen.has(formatted.id)) {
-        seen.add(formatted.id);
-        list.push(formatted);
-      }
-    }
-    return list;
-  };
-
-  const seedList = toMovieList(seedResultsArray.flat());
-  const eraList = toMovieList(eraResultsArray.flat());
-  const vibeList = toMovieList(vibeResultsArray.flat());
-  const baseList = toMovieList(baseResultsArray.flat());
-
-  // 6. Blend candidates: interleave seed similarity, era-targeted, vibe-targeted, and base discoveries
-  const poolMap = new Map<number, Movie>();
-  const addMovie = (m: Movie) => {
-    if (!poolMap.has(m.id)) {
-      poolMap.set(m.id, m);
-    }
-  };
-
-  const streams = [seedList, eraList, vibeList, baseList].filter((s) => s.length > 0);
-  const maxLen = Math.max(0, ...streams.map((s) => s.length));
-
-  for (let i = 0; i < maxLen; i++) {
-    for (const stream of streams) {
-      if (i < stream.length) {
-        addMovie(stream[i]);
-      }
-    }
-  }
-
-  return Array.from(poolMap.values());
+  return candidates.map((c) => c.movie);
 }
 
 export async function hydrateMovieByTitleAndYear(

@@ -740,6 +740,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           excludeIds: ratedIds,
           preferredEras: aiSettings.preferredEras,
           selectedVibes: aiSettings.selectedVibes,
+          userRatings: userRatingsList,
         },
         controller.signal
       );
