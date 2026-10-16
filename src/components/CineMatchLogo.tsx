@@ -2,12 +2,10 @@ import React, { useId } from 'react';
 
 interface CineMatchLogoProps {
   className?: string;
-  showGlow?: boolean;
 }
 
 export const CineMatchLogo: React.FC<CineMatchLogoProps> = ({
   className = 'w-full h-full',
-  showGlow = false,
 }) => {
   const uniqueId = useId().replace(/:/g, '_');
   const screenGradId = `screen-grad-${uniqueId}`;
