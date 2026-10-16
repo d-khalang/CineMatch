@@ -55,6 +55,13 @@ describe('Recommendation Scoring Module', () => {
       expect(getDecade('20s')).toBe('2020s');
     });
 
+    it('parses 4-digit decade strings ending in s like 1990s', () => {
+      expect(getDecade('1990s')).toBe('1990s');
+      expect(getDecade('2000s')).toBe('2000s');
+      expect(getDecade('1980s')).toBe('1980s');
+      expect(getDecade('2020s')).toBe('2020s');
+    });
+
     it('returns null for invalid or missing inputs', () => {
       expect(getDecade(null)).toBeNull();
       expect(getDecade(undefined)).toBeNull();
@@ -200,6 +207,32 @@ describe('Recommendation Scoring Module', () => {
       expect(profile.usualDecades.size).toBe(0);
       expect(profile.genres.get('horror')!).toBeLessThan(0);
       expect(profile.genres.get('comedy')!).toBeLessThan(0);
+    });
+
+    it('clamps rating weights strictly to [-1, 1]', () => {
+      const ratings: UserRating[] = [
+        {
+          movieId: 1,
+          title: 'Extreme High Rating',
+          rating: 20, // (20 - 5.5) / 4.5 = 3.222, clamps to +1.0
+          posterPath: null,
+          genres: ['Action'],
+          ratedAt: Date.now(),
+        },
+        {
+          movieId: 2,
+          title: 'Extreme Low Rating',
+          rating: -10, // (-10 - 5.5) / 4.5 = -3.444, clamps to -1.0
+          posterPath: null,
+          genres: ['Comedy'],
+          ratedAt: Date.now(),
+        },
+      ];
+
+      const profile = buildTasteProfile(ratings);
+      expect(profile.genres.get('action')).toBe(1.0);
+      expect(profile.genres.get('comedy')).toBe(-1.0);
+      expect(profile.meanCenteredRating).toBe(0);
     });
   });
 
@@ -612,13 +645,121 @@ describe('Recommendation Scoring Module', () => {
       const scoreOnlyRun = maxSameDirectorRun(scoreOnlySorted);
       expect(scoreOnlyRun).toBe(5); // Nolan Sci-Fi 1 through 5 in a row!
 
+      // Measure max same-genre run in score-only sort
+      const maxSameGenreRun = (list: ScoredCandidate[]): number => {
+        let maxRun = 0;
+        let currentRun = 0;
+        let lastGenres: string[] = [];
+        for (const item of list) {
+          const itemGenres = (item.movie.genres || []).map((g) =>
+            (typeof g === 'string' ? g : g.name).toLowerCase()
+          );
+          const sharesGenre = itemGenres.some((g) => lastGenres.includes(g));
+          if (sharesGenre && itemGenres.length > 0) {
+            currentRun++;
+          } else {
+            currentRun = 1;
+            lastGenres = itemGenres;
+          }
+          if (currentRun > maxRun) maxRun = currentRun;
+        }
+        return maxRun;
+      };
+
+      const scoreOnlyGenreRun = maxSameGenreRun(scoreOnlySorted);
+      expect(scoreOnlyGenreRun).toBe(5); // Sci-Fi 1 through 5 in a row!
+
       // MMR sort with lambda 0.7
       const mmrSorted = rankBucketMMR(fixture, (c) => c.scores.relevance, 0.7);
       const mmrRun = maxSameDirectorRun(mmrSorted);
 
-      // MMR should measurably reduce the run length of the same director
+      // Full MMR compares each pick with ALL already-selected items. Once the 5 diverse films are
+      // exhausted, the 4 remaining Nolan films cannot be separated by anything, so the whole-list
+      // director run is 4. The old `<= 2` whole-list bound only held under the window-2 MMR
+      // (which forgot earlier picks) and is replaced by the assertions below.
       expect(mmrRun).toBeLessThan(scoreOnlyRun);
-      expect(mmrRun).toBeLessThanOrEqual(2);
+
+      // While diverse films remain (the first 6 slots: Nolan 1 plus the 5 diverse films), neither
+      // the same director nor the same genre may repeat back to back.
+      const diversePrefix = mmrSorted.slice(0, 6);
+      expect(maxSameDirectorRun(diversePrefix)).toBe(1);
+      expect(maxSameGenreRun(diversePrefix)).toBe(1);
+      expect(maxSameDirectorRun(diversePrefix)).toBeLessThan(scoreOnlyRun);
+      expect(maxSameGenreRun(diversePrefix)).toBeLessThan(scoreOnlyGenreRun);
+
+      // The tail is the exhausted Nolan block, not an interleaving artifact.
+      expect(mmrSorted.slice(6).map((c) => c.movie.director)).toEqual(
+        Array(4).fill('Christopher Nolan')
+      );
+    });
+
+    it('does not repeat the director within 3 positions while diverse items remain (comparison of lambda=1 against lambda=0.7)', () => {
+      // 3 items with Director Nolan having highest scores, followed by 4 items with diverse directors
+      const fixture: ScoredCandidate[] = [
+        {
+          ...createCandidate(1, 'Nolan Film 1', { director: 'Christopher Nolan', genres: [{ id: 1, name: 'Sci-Fi' }] }),
+          scores: { relevance: 0.99, novelty: 0.5, unexpectedness: 0.2, serendipity: 0.35 },
+          bucket: 'safe_bet',
+        },
+        {
+          ...createCandidate(2, 'Nolan Film 2', { director: 'Christopher Nolan', genres: [{ id: 2, name: 'Action' }] }),
+          scores: { relevance: 0.98, novelty: 0.5, unexpectedness: 0.2, serendipity: 0.35 },
+          bucket: 'safe_bet',
+        },
+        {
+          ...createCandidate(3, 'Nolan Film 3', { director: 'Christopher Nolan', genres: [{ id: 3, name: 'Drama' }] }),
+          scores: { relevance: 0.97, novelty: 0.5, unexpectedness: 0.2, serendipity: 0.35 },
+          bucket: 'safe_bet',
+        },
+        {
+          ...createCandidate(4, 'Tarantino Film', { director: 'Quentin Tarantino', genres: [{ id: 4, name: 'Crime' }] }),
+          scores: { relevance: 0.94, novelty: 0.5, unexpectedness: 0.2, serendipity: 0.35 },
+          bucket: 'safe_bet',
+        },
+        {
+          ...createCandidate(5, 'Miyazaki Film', { director: 'Hayao Miyazaki', genres: [{ id: 5, name: 'Animation' }] }),
+          scores: { relevance: 0.93, novelty: 0.5, unexpectedness: 0.2, serendipity: 0.35 },
+          bucket: 'safe_bet',
+        },
+        {
+          ...createCandidate(6, 'Bong Film', { director: 'Bong Joon-ho', genres: [{ id: 6, name: 'Thriller' }] }),
+          scores: { relevance: 0.92, novelty: 0.5, unexpectedness: 0.2, serendipity: 0.35 },
+          bucket: 'safe_bet',
+        },
+        {
+          ...createCandidate(7, 'Gerwig Film', { director: 'Greta Gerwig', genres: [{ id: 7, name: 'Comedy' }] }),
+          scores: { relevance: 0.91, novelty: 0.5, unexpectedness: 0.2, serendipity: 0.35 },
+          bucket: 'safe_bet',
+        },
+      ];
+
+      const mixAllSafe: BucketMix = { safe_bet: 1, stretch: 0, wildcard: 0 };
+
+      // Helper to check if any director repeats within maxDistance positions (i.e. distance <= maxDistance)
+      const hasDirectorRepeatWithin = (list: ScoredCandidate[], maxDistance = 3): boolean => {
+        for (let i = 0; i < list.length; i++) {
+          const dirA = list[i].movie.director;
+          if (!dirA) continue;
+          for (let j = i + 1; j <= Math.min(i + maxDistance, list.length - 1); j++) {
+            if (list[j].movie.director === dirA) {
+              return true;
+            }
+          }
+        }
+        return false;
+      };
+
+      // With lambda = 1 (pure score, no diversity penalty), Nolan repeats consecutively (within 3 positions)
+      const listLambda1 = buildRankedList(fixture, mixAllSafe, 6, 1.0);
+      expect(hasDirectorRepeatWithin(listLambda1, 3)).toBe(true);
+
+      // With lambda = 0.7, Nolan must not repeat within 3 positions while diverse items remain
+      const listLambda07 = buildRankedList(fixture, mixAllSafe, 6, 0.7);
+      expect(hasDirectorRepeatWithin(listLambda07, 3)).toBe(false);
+
+      // Verify the first 5 items under lambda=0.7 are all distinct directors
+      const directors = listLambda07.slice(0, 5).map((c) => c.movie.director);
+      expect(new Set(directors).size).toBe(5);
     });
   });
 
@@ -744,6 +885,126 @@ describe('Recommendation Scoring Module', () => {
       ranked.forEach((item, idx) => {
         expect(item.rank).toBe(idx + 1);
       });
+    });
+
+    it('when stretch runs short, fills from safe_bet before wildcard', () => {
+      // 10 safe, 1 stretch, 10 wildcard; size 10 with mix 10/50/40 targets 1 safe, 5 stretch, 4 wildcard.
+      // Stretch supply is 1, so the deficit of 4 is filled by the fallback order ['safe_bet', 'wildcard'].
+      // The top-5 rule alone would only require 3 safe bets, so the exact counts show the fill source.
+      const pool = generatePool(10, 1, 10);
+      const customMix: BucketMix = { safe_bet: 0.1, stretch: 0.5, wildcard: 0.4 };
+      const ranked = buildRankedList(pool, customMix, 10);
+
+      const count = (b: string) => ranked.filter((r) => r.bucket === b).length;
+      expect(ranked.length).toBe(10);
+      expect(count('stretch')).toBe(1); // all available stretches used
+      expect(count('safe_bet')).toBe(5); // 1 target + 4 filled from safe_bet
+      expect(count('wildcard')).toBe(4); // untouched target: wildcard did not supply the fill
+    });
+
+    describe('top-5 rule across serendipity levels and list sizes', () => {
+      const levels = [0, 30, 60, 100];
+      const sizes = [5, 10];
+
+      for (const level of levels) {
+        for (const size of sizes) {
+          it(`enforces at least min(3, safe supply) safe bets and min(1, stretch supply) stretches at level ${level} for size ${size}`, () => {
+            const pool = generatePool(15, 10, 5);
+            const mix = mixForSerendipityLevel(level);
+            const ranked = buildRankedList(pool, mix, size);
+
+            expect(ranked.length).toBe(size);
+
+            const top5 = ranked.slice(0, Math.min(5, size));
+            const safeCount = top5.filter((r) => r.bucket === 'safe_bet').length;
+            const stretchCount = top5.filter((r) => r.bucket === 'stretch').length;
+
+            expect(safeCount).toBeGreaterThanOrEqual(3);
+            expect(stretchCount).toBeGreaterThanOrEqual(1);
+          });
+        }
+      }
+
+      it('corrects level 100 at size 5 from STTWW to containing 3 safe bets and 1 stretch', () => {
+        const pool = generatePool(10, 10, 10);
+        const mix = mixForSerendipityLevel(100);
+        const ranked = buildRankedList(pool, mix, 5);
+
+        const top5 = ranked.slice(0, 5);
+        const safeCount = top5.filter((r) => r.bucket === 'safe_bet').length;
+        const stretchCount = top5.filter((r) => r.bucket === 'stretch').length;
+
+        expect(safeCount).toBe(3);
+        expect(stretchCount).toBe(1);
+      });
+
+      it('corrects level 30 at size 5 from SSTTW to containing 3 safe bets and 1 stretch', () => {
+        const pool = generatePool(10, 10, 10);
+        const mix = mixForSerendipityLevel(30);
+        const ranked = buildRankedList(pool, mix, 5);
+
+        const top5 = ranked.slice(0, 5);
+        const safeCount = top5.filter((r) => r.bucket === 'safe_bet').length;
+        const stretchCount = top5.filter((r) => r.bucket === 'stretch').length;
+
+        expect(safeCount).toBe(3);
+        expect(stretchCount).toBe(1);
+      });
+
+      it('respects supply constraint when safe supply < 3', () => {
+        const pool = generatePool(2, 5, 5); // only 2 safe bets available
+        const mix = mixForSerendipityLevel(30);
+        const ranked = buildRankedList(pool, mix, 5);
+
+        const top5 = ranked.slice(0, 5);
+        const safeCount = top5.filter((r) => r.bucket === 'safe_bet').length;
+        const stretchCount = top5.filter((r) => r.bucket === 'stretch').length;
+
+        expect(safeCount).toBe(2); // min(3, safe supply = 2)
+        expect(stretchCount).toBeGreaterThanOrEqual(1);
+      });
+
+      it('respects supply constraint when stretch supply < 1', () => {
+        const pool = generatePool(5, 0, 5); // 0 stretch available
+        const mix = mixForSerendipityLevel(30);
+        const ranked = buildRankedList(pool, mix, 5);
+
+        const top5 = ranked.slice(0, 5);
+        const safeCount = top5.filter((r) => r.bucket === 'safe_bet').length;
+        const stretchCount = top5.filter((r) => r.bucket === 'stretch').length;
+
+        expect(safeCount).toBeGreaterThanOrEqual(3);
+        expect(stretchCount).toBe(0); // min(1, stretch supply = 0)
+      });
+    });
+
+    it('guards mix shares with negative, NaN, and non-finite values and renormalizes', () => {
+      const pool = generatePool(10, 10, 10);
+      const invalidMix: BucketMix = {
+        safe_bet: -0.5,
+        stretch: NaN,
+        wildcard: 0.5,
+      };
+      // Should guard: safe_bet -> 0, stretch -> 0, wildcard -> 0.5 => normalized to 100% wildcard
+      const ranked = buildRankedList(pool, invalidMix, 5);
+      expect(ranked.length).toBe(5);
+      for (const item of ranked) {
+        expect(item.bucket).toBe('wildcard');
+      }
+    });
+
+    it('guards all-zero or invalid mix gracefully defaulting to safe_bet', () => {
+      const pool = generatePool(10, 10, 10);
+      const zeroMix: BucketMix = {
+        safe_bet: 0,
+        stretch: 0,
+        wildcard: 0,
+      };
+      const ranked = buildRankedList(pool, zeroMix, 5);
+      expect(ranked.length).toBe(5);
+      for (const item of ranked) {
+        expect(item.bucket).toBe('safe_bet');
+      }
     });
 
     it('is completely deterministic for identical inputs', () => {

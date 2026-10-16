@@ -9,7 +9,6 @@ import type {
 
 export const DEFAULT_RELEVANCE_FLOOR = 0.45;
 export const DEFAULT_MMR_LAMBDA = 0.7;
-export const DEFAULT_MMR_WINDOW = 2;
 
 export interface TasteProfile {
   genres: Map<string, number>;
@@ -35,7 +34,7 @@ export interface ScoreCandidatesOptions {
  */
 export function getDecade(yearOrDate: string | undefined | null): string | null {
   if (!yearOrDate || typeof yearOrDate !== 'string') return null;
-  const fourDigit = yearOrDate.match(/\b(\d{4})\b/);
+  const fourDigit = yearOrDate.match(/(\d{4})(?!\d)/);
   if (fourDigit) {
     const year = parseInt(fourDigit[1], 10);
     if (!isNaN(year) && year >= 1880 && year <= 2100) {
@@ -106,8 +105,9 @@ export function buildTasteProfile(userRatings: UserRating[]): TasteProfile {
 
   for (const r of userRatings) {
     const rating = typeof r.rating === 'number' && Number.isFinite(r.rating) ? r.rating : 5.5;
-    // Centered around 5.5: 10 is +1.0, 5.5 is 0, 1 is -1.0
-    const weight = (rating - 5.5) / 4.5;
+    // Centered around 5.5: 10 is +1.0, 5.5 is 0, 1 is -1.0; clamped to [-1, 1]
+    const rawWeight = (rating - 5.5) / 4.5;
+    const weight = Math.max(-1, Math.min(1, rawWeight));
     totalWeight += weight;
 
     // Genres
@@ -416,11 +416,18 @@ export function mixForSerendipityLevel(level: number): BucketMix {
     wildcard = 0.15 + 0.25 * t;
   }
 
-  const total = safe_bet + stretch + wildcard;
+  const guardShare = (x: number): number =>
+    Number.isFinite(x) ? Math.max(0, x) : 0;
+
+  const gSafe = guardShare(safe_bet);
+  const gStretch = guardShare(stretch);
+  const gWildcard = guardShare(wildcard);
+  const total = gSafe + gStretch + gWildcard;
+
   return {
-    safe_bet: safe_bet / total,
-    stretch: stretch / total,
-    wildcard: wildcard / total,
+    safe_bet: total > 0 ? gSafe / total : 1,
+    stretch: total > 0 ? gStretch / total : 0,
+    wildcard: total > 0 ? gWildcard / total : 0,
   };
 }
 
@@ -478,13 +485,14 @@ export function candidateSimilarity(a: Candidate, b: Candidate): number {
 }
 
 /**
- * Ranks candidates within a bucket using Maximal Marginal Relevance (MMR).
+ * Ranks candidates within a bucket using Maximal Marginal Relevance (Carbonell and Goldstein 1998).
+ * Each pick maximizes lambda * score - (1 - lambda) * max similarity to ALL already-selected items.
+ * Ties break on raw score, then on lower movie ID, so the order is deterministic.
  */
 export function rankBucketMMR(
   candidates: ScoredCandidate[],
   scoreFn: (c: ScoredCandidate) => number,
-  lambda = DEFAULT_MMR_LAMBDA,
-  windowSize = DEFAULT_MMR_WINDOW
+  lambda = DEFAULT_MMR_LAMBDA
 ): ScoredCandidate[] {
   if (candidates.length <= 1) return [...candidates];
 
@@ -498,18 +506,14 @@ export function rankBucketMMR(
     let bestRawScore = -Infinity;
     let bestMovieId = Infinity;
 
-    const recent = windowSize > 0 ? selected.slice(-windowSize) : selected;
-
     for (let i = 0; i < remaining.length; i++) {
       const candidate = remaining[i];
       const rawScore = scoreFn(candidate);
 
       let maxSim = 0;
-      if (recent.length > 0) {
-        for (const s of recent) {
-          const sim = candidateSimilarity(candidate, s);
-          if (sim > maxSim) maxSim = sim;
-        }
+      for (const s of selected) {
+        const sim = candidateSimilarity(candidate, s);
+        if (sim > maxSim) maxSim = sim;
       }
 
       const mmrScore = l * rawScore - (1 - l) * maxSim;
@@ -566,6 +570,28 @@ export function buildRankedList(
     return [];
   }
 
+  // Guard mix shares: Number.isFinite(x) ? Math.max(0, x) : 0, then renormalize
+  const guardShare = (x: number | undefined): number =>
+    typeof x === 'number' && Number.isFinite(x) ? Math.max(0, x) : 0;
+
+  const rawSafe = guardShare(mix?.safe_bet);
+  const rawStretch = guardShare(mix?.stretch);
+  const rawWildcard = guardShare(mix?.wildcard);
+  const mixTotal = rawSafe + rawStretch + rawWildcard;
+
+  const normalizedMix: BucketMix =
+    mixTotal > 0
+      ? {
+          safe_bet: rawSafe / mixTotal,
+          stretch: rawStretch / mixTotal,
+          wildcard: rawWildcard / mixTotal,
+        }
+      : {
+          safe_bet: 1,
+          stretch: 0,
+          wildcard: 0,
+        };
+
   // 1. Deduplicate input candidates by movie.id
   const seenIds = new Set<number>();
   const deduplicated: ScoredCandidate[] = [];
@@ -583,8 +609,8 @@ export function buildRankedList(
   const buckets: Bucket[] = ['safe_bet', 'stretch', 'wildcard'];
   const rawCounts = buckets.map((b) => ({
     bucket: b,
-    exact: targetTotal * (mix[b] ?? 0),
-    floor: Math.floor(targetTotal * (mix[b] ?? 0)),
+    exact: targetTotal * (normalizedMix[b] ?? 0),
+    floor: Math.floor(targetTotal * (normalizedMix[b] ?? 0)),
   }));
 
   const allocated = rawCounts.reduce((acc, curr) => acc + curr.floor, 0);
@@ -639,7 +665,7 @@ export function buildRankedList(
   // 5. Select items per bucket, filling from the next bucket when a bucket runs short
   const fallbackOrder: Record<Bucket, Bucket[]> = {
     safe_bet: ['stretch', 'wildcard'],
-    stretch: ['wildcard', 'safe_bet'],
+    stretch: ['safe_bet', 'wildcard'],
     wildcard: ['stretch', 'safe_bet'],
   };
 
@@ -703,6 +729,66 @@ export function buildRankedList(
     }
   }
 
+  // 5b. Enforce the top-5 rule:
+  // After allocation, the first min(5, n) slots must contain min(3, safe supply) safe bets
+  // and min(1, stretch supply) stretches.
+  // Promote from unconsumed safe/stretch candidates and drop the lowest-ranked item of the largest other bucket.
+  const safeSupply = bucketCandidates.safe_bet.length;
+  const stretchSupply = bucketCandidates.stretch.length;
+  const topLimit = Math.min(5, targetTotal);
+
+  const targetStretch =
+    normalizedMix.stretch > 0 ? Math.min(1, stretchSupply, topLimit) : 0;
+  const targetSafe =
+    normalizedMix.safe_bet > 0
+      ? Math.min(3, safeSupply, Math.max(0, topLimit - targetStretch))
+      : 0;
+
+  const promoteAndDrop = (targetBucket: Bucket, requiredCount: number) => {
+    while (
+      selectedBuckets[targetBucket].length < requiredCount &&
+      unconsumed[targetBucket].length > 0
+    ) {
+      const otherBuckets = buckets.filter(
+        (b) => b !== targetBucket && selectedBuckets[b].length > 0
+      );
+      if (otherBuckets.length === 0) break;
+
+      const requiredMins: Record<Bucket, number> = {
+        safe_bet: targetSafe,
+        stretch: targetStretch,
+        wildcard: 0,
+      };
+
+      const aboveMin = otherBuckets.filter(
+        (b) => selectedBuckets[b].length > requiredMins[b]
+      );
+      const eligible = aboveMin.length > 0 ? aboveMin : otherBuckets;
+
+      const tiePriority: Record<Bucket, number> = {
+        wildcard: 3,
+        stretch: 2,
+        safe_bet: 1,
+      };
+
+      eligible.sort((a, b) => {
+        const countDiff = selectedBuckets[b].length - selectedBuckets[a].length;
+        if (countDiff !== 0) return countDiff;
+        return tiePriority[b] - tiePriority[a];
+      });
+
+      const donorBucket = eligible[0];
+      const dropped = selectedBuckets[donorBucket].pop()!;
+      unconsumed[donorBucket].unshift(dropped);
+
+      const promoted = unconsumed[targetBucket].shift()!;
+      selectedBuckets[targetBucket].push(promoted);
+    }
+  };
+
+  promoteAndDrop('safe_bet', targetSafe);
+  promoteAndDrop('stretch', targetStretch);
+
   // 6. Interleave buckets so that:
   // - The top 5 contain at least 3 safe bets and 1 stretch when available
   // - Remaining items are interleaved smoothly
@@ -728,7 +814,6 @@ export function buildRankedList(
   };
 
   const top5Pattern: Bucket[] = ['safe_bet', 'safe_bet', 'stretch', 'safe_bet', 'wildcard'];
-  const topLimit = Math.min(5, targetTotal);
   for (let i = 0; i < topLimit; i++) {
     const item = pick(top5Pattern[i]);
     if (item) interleaved.push(item);
