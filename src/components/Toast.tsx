@@ -9,7 +9,7 @@ export const Toast: React.FC = () => {
 
   return (
     <div className="fixed bottom-20 md:bottom-6 right-4 left-4 sm:left-auto sm:right-6 z-50 flex items-center justify-center pointer-events-none animate-fadeIn">
-      <div className="pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--bg-surface-elevated)]/95 border border-[var(--border-focus)] text-slate-100 text-xs sm:text-sm shadow-lg backdrop-blur-xl max-w-md">
+      <div className="pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-2xl bg-[var(--bg-surface-elevated)] border border-[var(--border-focus)] text-slate-100 text-xs sm:text-sm shadow-lg max-w-md">
         <div className="p-1 rounded-lg palette-tag-secondary shrink-0">
           <CheckCircle className="w-4 h-4 text-[var(--accent-secondary)]" />
         </div>

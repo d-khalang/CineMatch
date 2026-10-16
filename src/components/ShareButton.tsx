@@ -58,7 +58,7 @@ export const ShareButton: React.FC<ShareButtonProps> = ({
         className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all cursor-pointer ${
           isCopied
             ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-            : 'bg-[var(--bg-surface-elevated)]/90 text-slate-300 border-[var(--border-subtle)] hover:text-white hover:bg-[var(--bg-surface-hover)] hover:border-[var(--border-focus)]'
+            : 'bg-[var(--bg-surface-elevated)] text-slate-300 border-[var(--border-subtle)] hover:text-white hover:bg-[var(--bg-surface-hover)] hover:border-[var(--border-focus)]'
         } ${className}`}
         title={title || (isCopied ? 'IMDb link copied!' : 'Share IMDb page')}
       >
@@ -78,10 +78,10 @@ export const ShareButton: React.FC<ShareButtonProps> = ({
     <button
       onClick={handleShare}
       disabled={isLoading}
-      className={`p-1.5 rounded-lg backdrop-blur-md border transition-all cursor-pointer ${
+      className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
         isCopied
           ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-          : 'bg-[var(--bg-surface-elevated)]/90 text-slate-400 border-[var(--border-subtle)] hover:text-white hover:border-[var(--border-focus)]'
+          : 'bg-[var(--bg-surface-elevated)] text-slate-400 border-[var(--border-subtle)] hover:text-white hover:border-[var(--border-focus)]'
       } ${className}`}
       title={title || (isCopied ? 'IMDb link copied!' : 'Share IMDb page')}
     >

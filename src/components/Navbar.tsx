@@ -64,7 +64,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings, onOpenPalette })
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id as any)}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus-visible:outline-none ${
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 cursor-pointer ${
                   isActive
                     ? 'bg-[var(--accent-primary)] text-[var(--accent-text)]'
                     : 'text-slate-400 hover:text-white hover:bg-white/5'
@@ -94,7 +94,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings, onOpenPalette })
           {onOpenPalette && (
             <button
               onClick={onOpenPalette}
-              className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus-visible:outline-none"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
               title="Change Color Palette & Typography"
               aria-label="Color Palette & Typography"
             >
@@ -105,7 +105,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings, onOpenPalette })
           {/* AI Engine & API Keys direct access */}
           <button
             onClick={onOpenSettings}
-            className="flex items-center gap-1.5 px-2 sm:px-2.5 h-8 sm:h-9 rounded-full text-xs text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus-visible:outline-none"
+            className="flex items-center gap-1.5 px-2 sm:px-2.5 h-8 sm:h-9 rounded-full text-xs text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
             title={`AI Engine & API Keys (${getProviderName()})`}
             aria-label="AI Engine & API Keys"
           >
@@ -121,7 +121,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings, onOpenPalette })
           {/* Settings direct access */}
           <button
             onClick={onOpenSettings}
-            className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus-visible:outline-none"
+            className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
             title="App Settings & Data"
             aria-label="Settings"
           >

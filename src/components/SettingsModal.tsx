@@ -282,11 +282,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 animate-fadeIn"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-xl max-h-[90dvh] flex flex-col rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-xl overflow-hidden p-6 sm:p-8 space-y-5"
+        className="relative w-full max-w-xl max-h-[90dvh] flex flex-col rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-lg overflow-hidden p-6 sm:p-8 space-y-5"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -349,7 +349,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
           {/* Android: Remember on this device Switch */}
           {isVaultSupported() && (
-            <div className="p-4 rounded-2xl bg-[var(--surface-hover)] border border-[var(--border-subtle)] space-y-2">
+            <div className="p-4 rounded-2xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] space-y-2">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5 pr-4">
                   <div className="flex items-center gap-2">
@@ -389,7 +389,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           )}
 
           {/* TMDB Credentials Section */}
-          <div className="space-y-3 p-4 rounded-2xl bg-[var(--surface-hover)] border border-[var(--border-subtle)]">
+          <div className="space-y-3 p-4 rounded-2xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)]">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Film className="w-4 h-4 text-[var(--accent-primary)]" />
@@ -495,7 +495,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           </div>
 
           {/* AI Provider Section */}
-          <div className="space-y-3 p-4 rounded-2xl bg-[var(--surface-hover)] border border-[var(--border-subtle)]">
+          <div className="space-y-3 p-4 rounded-2xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)]">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
                 AI Recommendation Engine
@@ -743,14 +743,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           <button
             onClick={onClose}
             disabled={isSaving}
-            className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-[var(--surface-hover)] transition-colors"
+            className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-[var(--bg-surface-hover)] transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={isSaving}
-            className="px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-black font-semibold text-xs transition-all cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50"
+            className="px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-[var(--accent-text)] font-semibold text-xs transition-all cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50"
           >
             {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             Save & Apply Settings
