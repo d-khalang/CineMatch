@@ -149,7 +149,7 @@ export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: contro
         <div className="fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-40">
           <button
             onClick={() => setIsOpen(true)}
-            className="group flex items-center gap-2 px-3.5 py-2.5 rounded-full bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-slate-200 hover:text-white border border-[var(--border-subtle)] hover:border-[var(--border-focus)] shadow-md transition-all active:scale-95 cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus-visible:outline-none"
+            className="group flex items-center gap-2 px-3.5 py-2.5 rounded-full bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-slate-200 hover:text-white border border-[var(--border-subtle)] hover:border-[var(--border-focus)] transition-all active:scale-95 cursor-pointer"
             title="Open Cinematic Palette & Font Studio"
           >
             <div className="w-5 h-5 rounded-full flex items-center justify-center bg-[var(--accent-primary)] text-[var(--accent-text)] font-black">
@@ -166,11 +166,11 @@ export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: contro
       {/* Interactive Modal / Studio Drawer */}
       {showModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-[var(--bg-canvas)]/85 backdrop-blur-md animate-fadeIn"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-[var(--bg-canvas)]/85 animate-fadeIn"
           onClick={handleClose}
         >
           <div
-            className="relative w-full max-w-xl rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-xl overflow-hidden my-auto max-h-[90vh] flex flex-col"
+            className="relative w-full max-w-xl rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-lg overflow-hidden my-auto max-h-[90vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Studio Header */}

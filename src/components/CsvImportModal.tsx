@@ -329,8 +329,8 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-      <div className="relative w-full max-w-xl max-h-[90dvh] flex flex-col rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-xl overflow-hidden p-6 sm:p-8 space-y-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-fadeIn">
+      <div className="relative w-full max-w-xl max-h-[90dvh] flex flex-col rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-lg overflow-hidden p-6 sm:p-8 space-y-5">
         {/* Header */}
         <div className="flex items-center justify-between pb-2 border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-3">
@@ -338,17 +338,17 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
               <Upload className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold tracking-tight text-[var(--text-primary)]">
+              <h2 className="text-xl font-bold tracking-tight text-white">
                 Import Movie Ratings
               </h2>
-              <p className="text-xs text-[var(--text-secondary)]">
+              <p className="text-xs text-slate-400">
                 Import from IMDb or Letterboxd CSV exports (Max 2 MB)
               </p>
             </div>
           </div>
           <button
             onClick={handleClose}
-            className="p-2 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors"
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-[var(--bg-surface-hover)] transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -364,16 +364,16 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
 
           {!parseResult && (
             <div className="border-2 border-dashed border-[var(--border-subtle)] rounded-2xl p-8 text-center space-y-3 hover:border-[var(--accent-primary)]/50 transition-colors">
-              <FileText className="w-10 h-10 mx-auto text-[var(--text-secondary)]" />
+              <FileText className="w-10 h-10 mx-auto text-slate-400" />
               <div className="space-y-1">
-                <p className="text-sm font-medium text-[var(--text-primary)]">
+                <p className="text-sm font-medium text-white">
                   Select your exported CSV file
                 </p>
-                <p className="text-xs text-[var(--text-secondary)]">
+                <p className="text-xs text-slate-400">
                   Supports ratings from IMDb (ratings.csv) and Letterboxd (ratings.csv)
                 </p>
               </div>
-              <label className="inline-block px-4 py-2 rounded-xl bg-[var(--surface-hover)] text-xs font-semibold text-[var(--text-primary)] hover:bg-[var(--border-subtle)] cursor-pointer transition-colors">
+              <label className="inline-block px-4 py-2 rounded-xl bg-[var(--bg-surface-hover)] text-xs font-semibold text-white hover:bg-[var(--border-subtle)] cursor-pointer transition-colors">
                 Browse Files
                 <input
                   type="file"
@@ -388,15 +388,15 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
           {/* Import Preview */}
           {parseResult && (
             <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-[var(--surface-hover)] border border-[var(--border-subtle)] space-y-3">
+              <div className="p-4 rounded-2xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] space-y-3">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-[var(--text-primary)]">
+                  <span className="font-semibold text-white">
                     Detected Format:{' '}
                     <span className="capitalize text-[var(--accent-primary)]">
                       {parseResult.format}
                     </span>
                   </span>
-                  <span className="text-[var(--text-secondary)]">
+                  <span className="text-slate-400">
                     {parseResult.accepted.length} films ready
                   </span>
                 </div>
@@ -417,7 +417,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                       key={idx}
                       className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-black/20"
                     >
-                      <span className="truncate max-w-[280px] font-medium text-[var(--text-primary)]">
+                      <span className="truncate max-w-[280px] font-medium text-white">
                         {item.title} {item.year ? `(${item.year})` : ''}
                       </span>
                       <span className="font-bold text-[var(--accent-primary)] shrink-0">
@@ -426,7 +426,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                     </div>
                   ))}
                   {parseResult.accepted.length > 5 && (
-                    <p className="text-[11px] text-center text-[var(--text-secondary)] pt-1">
+                    <p className="text-[11px] text-center text-slate-400 pt-1">
                       ...and {parseResult.accepted.length - 5} more films
                     </p>
                   )}
@@ -436,7 +436,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
               {/* Mode Selection — only before resolution or during review */}
               {(importPhase === 'select' || importPhase === 'review') && (
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold text-[var(--text-secondary)]">
+                  <label className="text-xs font-semibold text-slate-400">
                     Import Action:
                   </label>
                   <div className="grid grid-cols-2 gap-3 text-xs">
@@ -446,11 +446,11 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                       disabled={importPhase === 'review'}
                       className={`p-3 rounded-xl border text-left transition-all ${
                         importMode === 'merge'
-                          ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--text-primary)]'
-                          : 'bg-[var(--surface-hover)] border-[var(--border-subtle)] text-[var(--text-secondary)]'
+                          ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-white'
+                          : 'bg-[var(--bg-surface-hover)] border-[var(--border-subtle)] text-slate-400'
                       } disabled:opacity-60`}
                     >
-                      <span className="font-semibold block text-[var(--text-primary)]">Merge</span>
+                      <span className="font-semibold block text-white">Merge</span>
                       Keep existing ratings and update/add imported films.
                     </button>
                     <button
@@ -459,11 +459,11 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                       disabled={importPhase === 'review'}
                       className={`p-3 rounded-xl border text-left transition-all ${
                         importMode === 'replace'
-                          ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-[var(--text-primary)]'
-                          : 'bg-[var(--surface-hover)] border-[var(--border-subtle)] text-[var(--text-secondary)]'
+                          ? 'bg-[var(--accent-primary)]/10 border-[var(--accent-primary)] text-white'
+                          : 'bg-[var(--bg-surface-hover)] border-[var(--border-subtle)] text-slate-400'
                       } disabled:opacity-60`}
                     >
-                      <span className="font-semibold block text-[var(--text-primary)]">Replace</span>
+                      <span className="font-semibold block text-white">Replace</span>
                       Replace all currently stored ratings with this file.
                     </button>
                   </div>
@@ -533,7 +533,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
         <div className="flex items-center justify-end gap-3 pt-3 border-t border-[var(--border-subtle)]">
           <button
             onClick={handleClose}
-            className="px-4 py-2.5 rounded-xl text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors"
+            className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-[var(--bg-surface-hover)] transition-colors"
           >
             Cancel
           </button>
@@ -543,7 +543,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
             <button
               onClick={resolveImport}
               disabled={isProcessing}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-black font-semibold text-xs transition-all disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-[var(--accent-text)] font-semibold text-xs transition-all disabled:opacity-50"
             >
               {isProcessing ? (
                 <>
@@ -563,7 +563,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
           {importPhase === 'resolving' && (
             <button
               disabled
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] text-black font-semibold text-xs opacity-50"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] text-[var(--accent-text)] font-semibold text-xs opacity-50"
             >
               <Loader2 className="w-4 h-4 animate-spin" />
               Matching...
@@ -575,13 +575,13 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
             <>
               <button
                 onClick={resetState}
-                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors"
+                className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-[var(--bg-surface-hover)] transition-colors"
               >
                 Start Over
               </button>
               <button
                 onClick={confirmImport}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-black font-semibold text-xs transition-all"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-[var(--accent-text)] font-semibold text-xs transition-all"
               >
                 <CheckCircle className="w-4 h-4" />
                 Confirm Import ({pendingRatings.length} Films)
@@ -596,7 +596,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                 handleClose();
                 generateRankings().catch(() => {});
               }}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-black font-semibold text-xs transition-all"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-[var(--accent-text)] font-semibold text-xs transition-all"
             >
               <CheckCircle className="w-4 h-4" />
               Done — Recalibrate AI Recommendations

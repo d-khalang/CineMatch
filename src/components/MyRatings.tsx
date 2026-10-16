@@ -322,7 +322,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
 
                   {/* Top Left: Rating Badge */}
                   <div className="absolute top-2 left-2 z-10 flex flex-col items-start gap-1">
-                    <div className="px-2 py-0.5 rounded-md bg-[var(--bg-surface)]/90 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-[var(--border-subtle)]">
+                    <div className="px-2 py-0.5 rounded-md bg-[var(--bg-surface)] text-[11px] font-bold text-amber-400 border border-[var(--border-subtle)]">
                       ★ {item.rating}/10
                     </div>
                   </div>
@@ -343,7 +343,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
                       }}
                       variant="icon"
                       iconSize="w-3.5 h-3.5"
-                      className="opacity-90 sm:opacity-0 sm:group-hover:opacity-100 bg-[var(--bg-surface)]/90 border border-[var(--border-subtle)]"
+                      className="opacity-90 sm:opacity-0 sm:group-hover:opacity-100 bg-[var(--bg-surface)] border border-[var(--border-subtle)]"
                     />
                   </div>
                 </div>
