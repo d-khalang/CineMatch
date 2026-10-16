@@ -88,6 +88,8 @@ AGY_BASE_BRANCH=agents/integration AGY_WORK_ROOT="$TEMP/cinematch-agy-a" node au
 AGY_DISPATCH_LABEL=antigravity-ready-b AGY_BASE_BRANCH=agents/integration AGY_WORK_ROOT="$TEMP/cinematch-agy-b" node automation/linear-antigravity/worker.mjs --watch
 ```
 
+The Coordinator also runs `node automation/linear-antigravity/owner-watch.mjs` as a wake signal: it prints a line within about a minute when an `owner-directive` issue is created, updated or commented on, or when `loop-stop` is set on the milestone. Owner input is then handled immediately instead of on the next timed tick.
+
 A check failure that one line fixes may be fixed directly by the Coordinator in the worker's retained workspace, as long as it reruns the checks before pushing. Workers now attempt up to two repair passes on their own first.
 
 ## Constraints that bind every role
