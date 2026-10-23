@@ -7,7 +7,7 @@ import {
   getGenreIdsForVibes,
   VIBE_KEYWORD_MAP,
   MissingTmdbCredentialError,
-} from '../tmdb';
+} from '../tmdbClient';
 
 export interface CandidateOptions {
   seedMovieIds?: number[];
@@ -555,4 +555,20 @@ export async function generateCandidates(
   }
 
   return Array.from(candidateMap.values());
+}
+
+export interface CandidateRecommendationOptions extends CandidateOptions {
+  userRatings?: UserRating[] | Record<number, UserRating>;
+}
+
+export async function getCandidateRecommendationPool(
+  options: CandidateRecommendationOptions = {},
+  signal?: AbortSignal
+): Promise<Movie[]> {
+  const candidates = await generateCandidates(
+    options.userRatings || [],
+    options,
+    signal
+  );
+  return candidates.map((c) => c.movie);
 }
