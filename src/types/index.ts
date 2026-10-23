@@ -31,7 +31,7 @@ export interface UserRating {
   ratedAt: number; // timestamp
 }
 
-// CIN-24 stub
+// HiddenFilm schema (v3)
 export interface HiddenFilm {
   movieId: number;
   reason: 'seen' | 'not_for_me';

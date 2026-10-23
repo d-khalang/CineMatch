@@ -1,7 +1,9 @@
-import { UserRating, Movie, AISettings, Recommendation } from '../types';
+import { UserRating, Movie, AISettings, Recommendation, HiddenFilm } from '../types';
 import { sanitizeOpenRouterModel } from './ai/openRouterProvider';
 
-export const STORAGE_VERSION = 2;
+export const STORAGE_VERSION = 3;
+
+export const HIDDEN_FILMS_CAP = 2000;
 
 export const STORAGE_KEYS = {
   RATINGS: 'cinematch_user_ratings_v2',
@@ -10,7 +12,7 @@ export const STORAGE_KEYS = {
   SETTINGS: 'cinematch_ai_settings_v2',
   CACHED_RECOMMENDATIONS: 'cinematch_cached_recs_v2',
   STORAGE_META: 'cinematch_storage_meta_v2',
-  HIDDEN_FILMS: 'cinematch_hidden_films_v3', // CIN-24 stub
+  HIDDEN_FILMS: 'cinematch_hidden_films_v3',
   // Legacy v1 keys
   LEGACY_RATINGS: 'cinematch_user_ratings_v1',
   LEGACY_SETTINGS: 'cinematch_ai_settings_v1',
@@ -178,10 +180,47 @@ export const getStorageStatus = (): StorageStatus => {
  * 3. Verifies durable disk persistence before deleting any legacy user data keys.
  * 4. Only marks migration complete if all non-empty datasets were durably saved.
  */
+const ensureHiddenFilmsInitialized = (): void => {
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEYS.HIDDEN_FILMS);
+  } catch {
+    return;
+  }
+  if (raw === null) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.HIDDEN_FILMS, JSON.stringify([]));
+    } catch {
+      // ignore if storage write is blocked
+    }
+    return;
+  }
+  let validated: HiddenFilm[];
+  try {
+    validated = validateHiddenFilms(JSON.parse(raw));
+  } catch {
+    try {
+      localStorage.setItem(STORAGE_KEYS.HIDDEN_FILMS, JSON.stringify([]));
+    } catch {
+      // ignore if storage write is blocked
+    }
+    return;
+  }
+  const serialized = JSON.stringify(validated);
+  if (serialized !== raw) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.HIDDEN_FILMS, serialized);
+    } catch {
+      // preserve existing valid storage entry if rewrite fails (e.g. quota exceeded)
+    }
+  }
+};
+
 export const runStorageMigration = (): { migrated: boolean; secretsStripped: boolean } => {
   try {
     const alreadyMigrated = localStorage.getItem(STORAGE_KEYS.STORAGE_META);
     if (alreadyMigrated === 'migrated_from_v1') {
+      ensureHiddenFilmsInitialized();
       return { migrated: false, secretsStripped: false };
     }
 
@@ -368,6 +407,7 @@ export const runStorageMigration = (): { migrated: boolean; secretsStripped: boo
         // If meta write fails, don't claim full completion
         return { migrated: false, secretsStripped };
       }
+      ensureHiddenFilmsInitialized();
       return { migrated: true, secretsStripped };
     }
 
@@ -458,6 +498,44 @@ export const validateWatchlistMovies = (data: unknown): Record<number, Movie> =>
     }
   }
   return result;
+};
+
+/**
+ * Caps hidden films list at HIDDEN_FILMS_CAP (2000), dropping the oldest entries by hiddenAt.
+ */
+export const capHiddenFilms = (films: HiddenFilm[]): HiddenFilm[] => {
+  if (films.length <= HIDDEN_FILMS_CAP) return films;
+  const indexed = films.map((film, index) => ({ film, index }));
+  indexed.sort((a, b) => a.film.hiddenAt - b.film.hiddenAt || a.index - b.index);
+  const toDrop = new Set(
+    indexed.slice(0, films.length - HIDDEN_FILMS_CAP).map((item) => item.index)
+  );
+  return films.filter((_, index) => !toDrop.has(index));
+};
+
+/**
+ * Validates hidden films array shape
+ */
+export const validateHiddenFilms = (data: unknown): HiddenFilm[] => {
+  if (!Array.isArray(data)) return [];
+  const byMovieId = new Map<number, HiddenFilm>();
+  for (const item of data) {
+    if (!item || typeof item !== 'object') continue;
+    const raw = item as Record<string, unknown>;
+    const movieId = Number(raw.movieId);
+    if (!Number.isFinite(movieId) || movieId <= 0) continue;
+    if (raw.reason !== 'seen' && raw.reason !== 'not_for_me') continue;
+    const hiddenAt =
+      typeof raw.hiddenAt === 'number' && Number.isFinite(raw.hiddenAt)
+        ? raw.hiddenAt
+        : Date.now();
+    const entry: HiddenFilm =
+      typeof raw.title === 'string'
+        ? { movieId, reason: raw.reason, hiddenAt, title: raw.title }
+        : { movieId, reason: raw.reason, hiddenAt };
+    byMovieId.set(movieId, entry);
+  }
+  return capHiddenFilms(Array.from(byMovieId.values()));
 };
 
 export const clearInMemoryStoreForTesting = (): void => {
