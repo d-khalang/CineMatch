@@ -42,13 +42,15 @@ Each loop milestone has a parent issue. The Coordinator posts one short comment 
 
 Every dispatched issue contains: Goal, Context and decision, Scope, Constraints, Acceptance criteria, Verification, Dependencies, Review focus. Sized for one Gemini run (well under 30 minutes). Two concurrently dispatched issues must not touch the same files.
 
-**Frozen acceptance tests** (adopted after M1: both large M1 issues needed three passes, and some tests were bent to fit the code). For logic issues, the Coordinator or a Sonnet agent first commits to `agents/integration`:
+**Frozen acceptance tests** (adopted after M1: both large M1 issues needed three passes, and some tests were bent to fit the code). For logic issues, the Coordinator or a Sonnet agent first commits to a frozen branch `codex/antigravity-<spec issue id>`, cut from `agents/integration`:
 - the interface stub, if it is new
 - the failing acceptance and fixture tests, including one end-to-end test across dependent modules
 
+Failing tests never land on `agents/integration` itself, because they would fail every other lane's checks. The worker cannot branch from its own issue's branch, so the frozen branch is named after the spec issue (or the owner's bug report), and a separate dispatch issue starts with `Branch from: codex/antigravity-<spec issue id>`. If `agents/integration` moves before dispatch, merge it into the frozen branch; don't rebase it.
+
 The worker implements until those tests pass. It may add tests, but it must not edit or weaken the frozen ones. The PR description maps each acceptance criterion to the test that proves it. Parallel issues that share an interface get that interface frozen first.
 
-**Gemini runs without terminal commands.** A run where Gemini attempted a command is rejected by the worker, even when Gemini reports success. Issue text must never ask Gemini to run anything.
+**Gemini runs without terminal commands.** A run where Gemini attempted a command is rejected by the worker, even when Gemini reports success. Issue text must never ask Gemini to run anything. When an issue needs computed values, such as contrast ratios, the Coordinator computes them and puts them in the issue. If a command is denied before Gemini has edited anything, which usually means a search, the worker retries once with a reminder.
 
 ## Rework
 
@@ -69,7 +71,7 @@ When the rework PR merges, the Coordinator closes the original PR and marks both
 ## Coordinator cycle
 
 1. Stop if the milestone issue has `loop-stop`. Read open `owner-directive` issues first.
-2. For each `In Review` issue: run the Reviewer on its PR. `PASS` → mark ready, squash-merge into `agents/integration`, mark `Done`, unblock dependents. `CHANGES` → rework issue or escalate per the attempt rules.
+2. For each `In Review` issue: mark its PR ready, which starts the `chatgpt-codex-connector` review (about 4 minutes), and run the Reviewer. Merge only when the Reviewer returns `PASS` and the Codex review has completed on the head commit with no unaddressed P1. A Codex P2 is either fixed, filed, or answered on the PR. Then squash-merge into `agents/integration`, mark `Done`, and unblock dependents. `CHANGES` → rework issue or escalate per the attempt rules.
 3. For each `In Progress` issue whose worker run stopped with an error: diagnose, then rework, rescope or escalate.
 4. After every third merge: run the user persona and critic on `agents/integration`, then triage their findings.
 5. Keep each lane at one or two `Todo` issues, in dependency order.
