@@ -44,6 +44,115 @@ function composeSignals(signals: (AbortSignal | undefined)[]): AbortSignal {
   return controller.signal;
 }
 
+const MAX_PROMPT_RATINGS = 80;
+const TOP_RATINGS_COUNT = 60;
+const BOTTOM_RATINGS_COUNT = 20;
+
+export function buildOpenRouterPrompt(request: RecommendationRequest): string {
+  const {
+    userRatings = [],
+    candidatePool = [],
+    serendipityLevel = 30,
+    selectedVibes = [],
+    preferredEras = [],
+  } = request;
+
+  const isTruncated = userRatings.length > MAX_PROMPT_RATINGS;
+  const selectedRatings = isTruncated
+    ? (() => {
+        const ratingValue = (r: { rating: number }) => (Number.isFinite(r.rating) ? r.rating : 0);
+        const sorted = [...userRatings].sort((a, b) => ratingValue(b) - ratingValue(a));
+        return [...sorted.slice(0, TOP_RATINGS_COUNT), ...sorted.slice(-BOTTOM_RATINGS_COUNT)];
+      })()
+    : userRatings;
+
+  const ratingsSummary = selectedRatings.map((r) => ({
+    title: r.title,
+    user_rating: `${r.rating}/10`,
+    genres: r.genres,
+    director: r.director,
+    year: r.year,
+  }));
+
+  let genreSummaryLine = '';
+  if (isTruncated) {
+    const genreCounts = new Map<string, number>();
+    for (const r of userRatings) {
+      for (const g of r.genres ?? []) {
+        const name = g.trim();
+        if (name) {
+          genreCounts.set(name, (genreCounts.get(name) ?? 0) + 1);
+        }
+      }
+    }
+    const summaryText = Array.from(genreCounts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([genre, count]) => `${genre}: ${count}`)
+      .join(', ');
+    genreSummaryLine = `\nGenre Summary (all ${userRatings.length} ratings, ${userRatings.length - MAX_PROMPT_RATINGS} omitted above): ${summaryText || 'None'}`;
+  }
+
+  const poolSummary = candidatePool.slice(0, 40).map((m) => ({
+    id: m.id,
+    title: m.title,
+    year: m.release_date?.slice(0, 4),
+    genres: (m.genres || []).map((g) => g.name),
+    tmdb_rating: m.vote_average,
+  }));
+
+  const normalizedSerendipity = Number.isFinite(serendipityLevel)
+    ? Math.min(100, Math.max(0, serendipityLevel))
+    : 30;
+  const activeBand =
+    normalizedSerendipity <= 30 ? 'low' : normalizedSerendipity <= 70 ? 'mid' : 'high';
+
+  return `You are Cinephile AI, an expert cinematic curator.
+Recommend the top films for the user based on their ratings.
+
+User Profile:
+${JSON.stringify(ratingsSummary, null, 2)}${genreSummaryLine}
+
+Serendipity: ${normalizedSerendipity}%
+Serendipity Rubric:
+- 0–30%${activeBand === 'low' ? ' [ACTIVE]' : ''}: mostly close matches to the user's taste.
+- 31–70%${activeBand === 'mid' ? ' [ACTIVE]' : ''}: a mix, with some films from adjacent genres or creators.
+- 71–100%${activeBand === 'high' ? ' [ACTIVE]' : ''}: mostly films the user would not pick themselves, but with a clear bridge to their taste.
+Vibes: ${selectedVibes.join(', ') || 'Any'}
+Eras: ${preferredEras.join(', ') || 'Any'}
+
+Candidate Pool:
+${JSON.stringify(poolSummary, null, 2)}
+
+Instructions:
+1. Return 12–20 films in "pool_rankings" from the Candidate Pool and up to 3 films in "unconstrained_discoveries" outside the pool.
+2. Follow the [ACTIVE] Serendipity Rubric band. At high serendipity, avoid obvious acclaimed films the user would pick themselves.
+3. For each pick that isn't a safe bet ("safe_bet"), provide a reason that names the bridge to the user's taste and explains why the risk is worth it.
+4. Use "serendipityType" values only from the allowed set: "safe_bet", "thematic_gem", "director_match", "wildcard_discovery", "ai_cinephile_discovery".
+
+Output strictly valid JSON with this format:
+{
+  "taste_analysis": "2-sentence summary of user's taste.",
+  "pool_rankings": [
+    {
+      "id": 12345,
+      "score": 95,
+      "reason": "Personalized reason",
+      "serendipityType": "safe_bet",
+      "highlightTags": ["Tag1", "Tag2"]
+    }
+  ],
+  "unconstrained_discoveries": [
+    {
+      "title": "Movie Title",
+      "year": "1994",
+      "score": 90,
+      "reason": "Reason",
+      "highlightTags": ["Discovery"]
+    }
+  ]
+}`;
+}
+
 export class OpenRouterProvider implements IAIProvider {
   readonly id = 'openrouter';
   readonly name = 'OpenRouter AI (Free & Multi-Model)';
@@ -90,11 +199,7 @@ export class OpenRouterProvider implements IAIProvider {
 
   async generateRecommendations(request: RecommendationRequest, signal?: AbortSignal): Promise<AIRecommendationResult> {
     const {
-      userRatings,
       candidatePool,
-      serendipityLevel = 30,
-      selectedVibes = [],
-      preferredEras = [],
       apiKey,
       model = OPENROUTER_DEFAULT_MODEL,
     } = request;
@@ -108,57 +213,7 @@ export class OpenRouterProvider implements IAIProvider {
     const candidateMap = new Map<number, Movie>();
     candidatePool.forEach((m) => candidateMap.set(m.id, m));
 
-    const ratingsSummary = userRatings.map((r) => ({
-      title: r.title,
-      user_rating: `${r.rating}/10`,
-      genres: r.genres,
-      director: r.director,
-      year: r.year,
-    }));
-
-    const poolSummary = candidatePool.slice(0, 40).map((m) => ({
-      id: m.id,
-      title: m.title,
-      year: m.release_date?.slice(0, 4),
-      genres: (m.genres || []).map((g) => g.name),
-      tmdb_rating: m.vote_average,
-    }));
-
-    const systemPrompt = `You are Cinephile AI, an expert cinematic curator.
-Recommend the top films for the user based on their ratings.
-
-User Profile:
-${JSON.stringify(ratingsSummary, null, 2)}
-
-Serendipity: ${serendipityLevel}%
-Vibes: ${selectedVibes.join(', ') || 'Any'}
-Eras: ${preferredEras.join(', ') || 'Any'}
-
-Candidate Pool:
-${JSON.stringify(poolSummary, null, 2)}
-
-Output strictly valid JSON with this format:
-{
-  "taste_analysis": "2-sentence summary of user's taste.",
-  "pool_rankings": [
-    {
-      "id": 12345,
-      "score": 95,
-      "reason": "Personalized reason",
-      "serendipityType": "safe_bet",
-      "highlightTags": ["Tag1", "Tag2"]
-    }
-  ],
-  "unconstrained_discoveries": [
-    {
-      "title": "Movie Title",
-      "year": "1994",
-      "score": 90,
-      "reason": "Reason",
-      "highlightTags": ["Discovery"]
-    }
-  ]
-}`;
+    const systemPrompt = buildOpenRouterPrompt(request);
 
     const timeoutController = new AbortController();
     const timeout = setTimeout(() => timeoutController.abort(new Error('OpenRouter request timed out after 25s')), 25000);
