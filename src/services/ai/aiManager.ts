@@ -4,6 +4,8 @@ import { GeminiProvider } from './geminiProvider';
 import { OpenRouterProvider } from './openRouterProvider';
 import { AIProviderId, Recommendation } from '../../types';
 
+export const MIN_RECOMMENDATIONS = 8;
+
 export interface AIGenerationResponse {
   recommendations: Recommendation[];
   unconstrainedDiscoveries?: UnconstrainedDiscovery[];
@@ -65,8 +67,75 @@ class AIServiceManager {
 
     try {
       const result = await provider.generateRecommendations(request, signal);
+      if (signal?.aborted) {
+        throw new DOMException('Generation aborted by caller', 'AbortError');
+      }
+
+      const seenIds = new Set<number>();
+      let recommendations = (result.recommendations || [])
+        .filter((r) => {
+          if (!r?.movie || seenIds.has(r.movie.id)) return false;
+          seenIds.add(r.movie.id);
+          return true;
+        })
+        .map((r) => ({
+          ...r,
+          score: typeof r.score === 'number' && Number.isFinite(r.score) ? r.score : 85,
+        }));
+
+      if (provider.id !== 'local' && recommendations.length < MIN_RECOMMENDATIONS) {
+        const remainingPool = (request.candidatePool || []).filter((m) => {
+          if (!m || seenIds.has(m.id)) return false;
+          seenIds.add(m.id);
+          return true;
+        });
+
+        if (remainingPool.length > 0) {
+          const local = this.getProvider('local');
+          const localRes = await local.generateRecommendations(
+            { ...request, candidatePool: remainingPool },
+            signal
+          );
+
+          const finiteAiScores = recommendations
+            .map((r) => r.score)
+            .filter((s) => typeof s === 'number' && Number.isFinite(s));
+          const minAiScore =
+            finiteAiScores.length > 0 ? Math.min(...finiteAiScores) : Infinity;
+
+          const needed = MIN_RECOMMENDATIONS - recommendations.length;
+          const existingIds = new Set(recommendations.map((r) => r.movie.id));
+          const backfill: Recommendation[] = [];
+
+          for (const rec of localRes.recommendations) {
+            if (backfill.length >= needed) break;
+            if (!rec?.movie || existingIds.has(rec.movie.id)) continue;
+            existingIds.add(rec.movie.id);
+
+            const baseScore =
+              typeof rec.score === 'number' && Number.isFinite(rec.score) ? rec.score : 50;
+
+            backfill.push({
+              movie: rec.movie,
+              score: Number.isFinite(minAiScore) ? Math.min(baseScore, minAiScore - 1) : baseScore,
+              rank: 0,
+              reason: rec.reason,
+              serendipityType: rec.serendipityType,
+              highlightTags: rec.highlightTags,
+            });
+          }
+
+          recommendations = [...recommendations, ...backfill];
+        }
+
+        recommendations = recommendations.map((rec, idx) => ({
+          ...rec,
+          rank: idx + 1,
+        }));
+      }
+
       return {
-        recommendations: result.recommendations,
+        recommendations,
         unconstrainedDiscoveries: result.unconstrainedDiscoveries,
         tasteAnalysis: result.tasteAnalysis,
         usedProvider: provider.name,

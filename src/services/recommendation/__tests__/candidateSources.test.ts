@@ -715,5 +715,109 @@ describe('candidateSources module', () => {
       expect(movie888?.title).toBe('Seed Rec Film');
       expect(movie888?.poster_path).toBe('/p888.jpg');
     });
+
+    it('interleaves vibe-targeted streams ahead of the base stream and alongside era streams in the first 40 items', async () => {
+      server.use(
+        http.get('https://api.themoviedb.org/3/discover/movie', ({ request }) => {
+          const url = new URL(request.url);
+          const gte = url.searchParams.get('primary_release_date.gte');
+          const withKeywords = url.searchParams.get('with_keywords');
+          const withGenres = url.searchParams.get('with_genres');
+          const isHiddenGem = url.searchParams.get('vote_count.lte') === '800';
+          const voteCountGte = Number(url.searchParams.get('vote_count.gte') || 0);
+
+          if (isHiddenGem) {
+            return HttpResponse.json({
+              page: 1,
+              results: Array.from({ length: 20 }, (_, i) => ({
+                id: 9000 + i,
+                title: `Gem ${9000 + i}`,
+                poster_path: `/g${9000 + i}.jpg`,
+                release_date: '1992-01-01',
+                vote_average: 7.6,
+                vote_count: 200,
+                genre_ids: [878],
+              })),
+            });
+          }
+
+          if (gte) {
+            const year = Number(gte.slice(0, 4)) + 2;
+            const base = (year - 1900) * 10000 + voteCountGte * 10;
+            return HttpResponse.json({
+              page: 1,
+              results: Array.from({ length: 20 }, (_, i) => ({
+                id: base + i,
+                title: `Era ${year} #${i}`,
+                poster_path: `/e${base + i}.jpg`,
+                release_date: `${year}-05-01`,
+                vote_average: 7.9,
+                vote_count: 600,
+                genre_ids: [878],
+              })),
+            });
+          }
+
+          if (withKeywords || withGenres) {
+            const streamTag = withKeywords ? 'VibeKeyword' : `VibeGenre_${voteCountGte}`;
+            const base = withKeywords ? 5000 : 3000 + voteCountGte;
+            return HttpResponse.json({
+              page: 1,
+              results: Array.from({ length: 20 }, (_, i) => ({
+                id: base + i,
+                title: `${streamTag} ${base + i}`,
+                poster_path: `/v${base + i}.jpg`,
+                release_date: '1998-01-01',
+                vote_average: 7.8,
+                vote_count: 700,
+                genre_ids: [878],
+              })),
+            });
+          }
+
+          const base = 7000 + voteCountGte;
+          return HttpResponse.json({
+            page: 1,
+            results: Array.from({ length: 20 }, (_, i) => ({
+              id: base + i,
+              title: `Base ${base + i}`,
+              poster_path: `/b${base + i}.jpg`,
+              release_date: '1985-01-01',
+              vote_average: 8.2,
+              vote_count: 1500,
+              genre_ids: [18],
+            })),
+          });
+        }),
+        http.get('https://api.themoviedb.org/3/trending/movie/:timeWindow', () =>
+          HttpResponse.json({ page: 1, results: [] })
+        )
+      );
+
+      // 1. Vibe-only: all 3 vibe streams appear before the first Base item
+      const vibeOnly = await generateCandidates([], {
+        selectedVibes: ['mind-bending'],
+      });
+
+      expect(vibeOnly.slice(0, 3).map((c) => c.movie.title)).toEqual([
+        'VibeGenre_600 3600',
+        'VibeGenre_1000 4000',
+        'VibeKeyword 5000',
+      ]);
+      expect(vibeOnly[3].movie.title).toContain('Base');
+
+      // 2. Combined eras + vibes: both era streams and vibe streams reach the 40-item AI window ahead of base
+      clearTmdbCache();
+      const combined = await generateCandidates([], {
+        preferredEras: ['2000s', '2010s'],
+        selectedVibes: ['mind-bending'],
+      });
+      const first40 = combined.slice(0, 40);
+      expect(first40).toHaveLength(40);
+      expect(first40.some((c) => c.movie.title.startsWith('Era 2002'))).toBe(true);
+      expect(first40.some((c) => c.movie.title.startsWith('Era 2012'))).toBe(true);
+      expect(first40.some((c) => c.movie.title.startsWith('VibeGenre_600'))).toBe(true);
+      expect(first40.some((c) => c.movie.title.startsWith('VibeKeyword'))).toBe(true);
+    });
   });
 });
