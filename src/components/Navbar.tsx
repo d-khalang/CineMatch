@@ -76,7 +76,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings, onOpenPalette })
                   <span
                     className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                       isActive
-                        ? 'bg-black/25 text-inherit'
+                        ? 'bg-white/30 text-inherit'
                         : 'bg-white/10 text-slate-300'
                     }`}
                   >
