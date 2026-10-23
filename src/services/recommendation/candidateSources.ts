@@ -465,13 +465,13 @@ export async function generateCandidates(
   const basePromises = baseQueryTasks.map((t) => t());
   const seedGraphPromises = seedQueryTasks.map((t) => t());
 
-  const baselinePromises = [...basePromises, ...eraPromises, ...vibePromises];
-
   // Execute all scheduled tasks with concurrency and ceiling limits
-  const [seedGraphArrays, hiddenGemArrays, baselineArrays] = await Promise.all([
+  const [seedGraphArrays, hiddenGemArrays, eraArrays, vibeArrays, baseArrays] = await Promise.all([
     Promise.all(seedGraphPromises),
     Promise.all(hiddenGemPromises),
-    Promise.all(baselinePromises),
+    Promise.all(eraPromises),
+    Promise.all(vibePromises),
+    Promise.all(basePromises),
   ]);
 
   if (signal?.aborted) {
@@ -480,7 +480,7 @@ export async function generateCandidates(
 
   const seedResults = seedGraphArrays.flat();
   const hiddenGemResults = hiddenGemArrays.flat();
-  const baselineResults = baselineArrays.flat();
+  const baseResults = baseArrays.flat();
 
   // Deduplication & source tagging
   const excludeSet = new Set<number>(options.excludeIds);
@@ -528,9 +528,19 @@ export async function generateCandidates(
     }
   };
 
-  // Interleave streams to ensure a rich balance of baseline, seeds, and hidden gems
+  // Interleave streams to ensure a rich balance of eras, vibes, baseline, seeds, and hidden gems
   const streams = [
-    { items: baselineResults, source: 'acclaimed_baseline' as CandidateSource, isSeed: false },
+    ...eraArrays.map((items) => ({
+      items,
+      source: 'acclaimed_baseline' as CandidateSource,
+      isSeed: false,
+    })),
+    ...vibeArrays.map((items) => ({
+      items,
+      source: 'acclaimed_baseline' as CandidateSource,
+      isSeed: false,
+    })),
+    { items: baseResults, source: 'acclaimed_baseline' as CandidateSource, isSeed: false },
     { items: seedResults, source: 'seed_graph' as CandidateSource, isSeed: true },
     { items: hiddenGemResults, source: 'hidden_gem' as CandidateSource, isSeed: false },
   ];
