@@ -12,6 +12,16 @@ vi.mock('../../services/tmdb', async (importOriginal) => {
   return {
     ...actual,
     IMAGE_BASE_URL: 'https://image.tmdb.org/t/p/w500',
+    getMovieDetails: vi.fn().mockResolvedValue(null),
+    hydrateBatchWithDiscoveries: vi.fn().mockResolvedValue([]),
+  };
+});
+
+// The store imports the candidate pool from its own module (CIN-21).
+vi.mock('../../services/recommendation/candidateSources', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
     getCandidateRecommendationPool: vi.fn().mockResolvedValue([
       {
         id: 500,
@@ -25,8 +35,6 @@ vi.mock('../../services/tmdb', async (importOriginal) => {
         genres: [{ id: 28, name: 'Action' }],
       },
     ]),
-    getMovieDetails: vi.fn().mockResolvedValue(null),
-    hydrateBatchWithDiscoveries: vi.fn().mockResolvedValue([]),
   };
 });
 

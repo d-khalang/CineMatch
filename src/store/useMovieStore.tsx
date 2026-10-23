@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Movie, UserRating, HiddenFilm, Recommendation, AISettings, TasteStats } from '../types';
 import { aiManager } from '../services/ai/aiManager';
-import { getCandidateRecommendationPool, getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
+import { getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
+import { getCandidateRecommendationPool } from '../services/recommendation/candidateSources';
 import { credentialStore } from '../services/credentialStore';
 import { credentialCoordinator } from '../services/credentialCoordinator';
 import {

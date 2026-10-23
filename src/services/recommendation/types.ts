@@ -18,7 +18,9 @@ export interface Candidate {
   seedNeighbour: boolean;
 }
 
-export type Bucket = 'safe_bet' | 'stretch' | 'wildcard';
+export type AboveFloorBucket = 'safe_bet' | 'stretch' | 'wildcard';
+
+export type Bucket = AboveFloorBucket | 'below_floor';
 
 /** All scores are normalized to 0..1. */
 export interface CandidateScores {
@@ -34,7 +36,7 @@ export interface ScoredCandidate extends Candidate {
 }
 
 /** Share of the list per bucket; values sum to 1. */
-export type BucketMix = Record<Bucket, number>;
+export type BucketMix = Record<AboveFloorBucket, number>;
 
 /** Pagination state for one source query, used by "load more". */
 export interface SourceCursor {
