@@ -31,6 +31,14 @@ export interface UserRating {
   ratedAt: number; // timestamp
 }
 
+// CIN-24 stub
+export interface HiddenFilm {
+  movieId: number;
+  reason: 'seen' | 'not_for_me';
+  hiddenAt: number; // timestamp
+  title?: string;
+}
+
 export type SerendipityMode = 'safe' | 'balanced' | 'exploratory' | 'wildcard';
 
 export interface Recommendation {

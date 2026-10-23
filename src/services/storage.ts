@@ -10,6 +10,7 @@ export const STORAGE_KEYS = {
   SETTINGS: 'cinematch_ai_settings_v2',
   CACHED_RECOMMENDATIONS: 'cinematch_cached_recs_v2',
   STORAGE_META: 'cinematch_storage_meta_v2',
+  HIDDEN_FILMS: 'cinematch_hidden_films_v3', // CIN-24 stub
   // Legacy v1 keys
   LEGACY_RATINGS: 'cinematch_user_ratings_v1',
   LEGACY_SETTINGS: 'cinematch_ai_settings_v1',

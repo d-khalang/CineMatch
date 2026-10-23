@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Movie, UserRating, Recommendation, AISettings, TasteStats } from '../types';
+import { Movie, UserRating, HiddenFilm, Recommendation, AISettings, TasteStats } from '../types';
 import { aiManager } from '../services/ai/aiManager';
 import { getCandidateRecommendationPool, getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
 import { credentialStore } from '../services/credentialStore';
@@ -32,6 +32,9 @@ const DEFAULT_SETTINGS: AISettings = {
 interface MovieStoreContextType {
   ratings: Record<number, UserRating>;
   watchlist: number[];
+  hiddenFilms: HiddenFilm[]; // CIN-24 stub
+  hideFilm: (movieId: number, reason: HiddenFilm['reason'], title?: string) => void; // CIN-24 stub
+  restoreFilm: (movieId: number) => void; // CIN-24 stub
   watchlistMovies: Record<number, Movie>;
   aiSettings: AISettings;
   recommendations: Recommendation[];
@@ -866,6 +869,9 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       value={{
         ratings,
         watchlist,
+        hiddenFilms: [], // CIN-24 stub
+        hideFilm: () => { throw new Error('not implemented'); }, // CIN-24 stub
+        restoreFilm: () => { throw new Error('not implemented'); }, // CIN-24 stub
         watchlistMovies,
         aiSettings,
         recommendations,
