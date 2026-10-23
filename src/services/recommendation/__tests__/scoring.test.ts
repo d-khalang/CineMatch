@@ -363,7 +363,8 @@ describe('Recommendation Scoring Module', () => {
       for (const sc of scored) {
         expect(sc.scores.relevance).toBeLessThan(DEFAULT_RELEVANCE_FLOOR);
         expect(sc.scores.serendipity).toBe(0);
-        expect(sc.bucket).toBe('safe_bet');
+        expect(sc.bucket).toBe('below_floor');
+        expect(sc.bucket).not.toBe('safe_bet');
         expect(sc.bucket).not.toBe('stretch');
         expect(sc.bucket).not.toBe('wildcard');
       }
@@ -424,7 +425,7 @@ describe('Recommendation Scoring Module', () => {
       expect(uNonSeed).toBeGreaterThan(uSeed);
     });
 
-    it('relevance floor rule: sets serendipity to 0 and bucket to safe_bet when relevance < floor', () => {
+    it('relevance floor rule: sets serendipity to 0 and bucket to below_floor when relevance < floor', () => {
       const scoresBelowFloor = {
         relevance: 0.44, // below 0.45
         novelty: 0.95,
@@ -433,7 +434,8 @@ describe('Recommendation Scoring Module', () => {
       };
 
       const bucket = assignBucket(scoresBelowFloor, 0.45);
-      expect(bucket).toBe('safe_bet');
+      expect(bucket).toBe('below_floor');
+      expect(bucket).not.toBe('safe_bet');
       expect(bucket).not.toBe('stretch');
       expect(bucket).not.toBe('wildcard');
 
@@ -514,13 +516,13 @@ describe('Recommendation Scoring Module', () => {
   });
 
   describe('assignBuckets', () => {
-    it('assigns buckets to candidates matching score thresholds', () => {
+    it('assigns percentile-relative buckets to above-floor candidates and below_floor to weak matches', () => {
       const items: Array<{ scores: CandidateScores }> = [
         {
-          scores: { relevance: 0.8, novelty: 0.5, unexpectedness: 0.7, serendipity: 0.48 },
+          scores: { relevance: 0.8, novelty: 0.5, unexpectedness: 0.5, serendipity: 0.32 },
         },
         {
-          scores: { relevance: 0.8, novelty: 0.7, unexpectedness: 0.4, serendipity: 0.44 },
+          scores: { relevance: 0.8, novelty: 0.7, unexpectedness: 0.3, serendipity: 0.28 },
         },
         {
           scores: { relevance: 0.85, novelty: 0.2, unexpectedness: 0.1, serendipity: 0.13 },
@@ -534,7 +536,7 @@ describe('Recommendation Scoring Module', () => {
       expect(bucketed[0].bucket).toBe('wildcard');
       expect(bucketed[1].bucket).toBe('stretch');
       expect(bucketed[2].bucket).toBe('safe_bet');
-      expect(bucketed[3].bucket).toBe('safe_bet'); // below floor
+      expect(bucketed[3].bucket).toBe('below_floor'); // below floor
     });
   });
 

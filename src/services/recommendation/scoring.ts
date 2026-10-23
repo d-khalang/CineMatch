@@ -2,6 +2,7 @@ import type { Movie, UserRating } from '../../types';
 import type {
   Candidate,
   ScoredCandidate,
+  AboveFloorBucket,
   Bucket,
   BucketMix,
   CandidateScores,
@@ -27,6 +28,8 @@ export interface RankedCandidate extends ScoredCandidate {
 
 export interface ScoreCandidatesOptions {
   relevanceFloor?: number;
+  preferredEras?: string[];
+  selectedVibes?: string[];
 }
 
 /**
@@ -76,9 +79,20 @@ function getDirector(movie: Movie): string | null {
   return null;
 }
 
+function computeMedian(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
+
 /**
  * Builds a taste profile vector from user ratings.
  * Centered around 5.5 so ratings <= 5 count against affinities.
+ * Unusual genres are genres below the median affinity (only positive genres at or above
+ * the median affinity are added to `usualGenres`).
  */
 export function buildTasteProfile(userRatings: UserRating[]): TasteProfile {
   const genres = new Map<string, number>();
@@ -143,8 +157,15 @@ export function buildTasteProfile(userRatings: UserRating[]): TasteProfile {
     }
   }
 
-  for (const [g, aff] of genres) {
-    if (aff > 0) usualGenres.add(g);
+  // Unusual genres are genres below the median affinity.
+  // Only positively rated genres at or above the median affinity count as usual.
+  if (genres.size > 0) {
+    const genreMedian = computeMedian([...genres.values()]);
+    for (const [g, aff] of genres) {
+      if (aff > 0 && aff >= genreMedian) {
+        usualGenres.add(g);
+      }
+    }
   }
 
   for (const [d, aff] of decades) {
@@ -243,22 +264,92 @@ function computeUnexpectedness(candidate: Candidate, profile: TasteProfile): num
   return Math.max(0, Math.min(1, rawUnexpectedness));
 }
 
+interface NormalizedColdStartSignals {
+  preferredDecades: Set<string>;
+  vibes: string[];
+}
+
+function normalizeColdStartSignals(
+  options?: ScoreCandidatesOptions
+): NormalizedColdStartSignals {
+  const preferredDecades = new Set<string>();
+  if (Array.isArray(options?.preferredEras)) {
+    for (const era of options.preferredEras) {
+      const dec = getDecade(era);
+      if (dec) {
+        preferredDecades.add(dec);
+      }
+    }
+  }
+
+  const vibeSet = new Set<string>();
+  if (Array.isArray(options?.selectedVibes)) {
+    for (const vibe of options.selectedVibes) {
+      if (typeof vibe === 'string' && vibe.trim().length > 0) {
+        vibeSet.add(vibe.trim().toLowerCase());
+      }
+    }
+  }
+
+  return { preferredDecades, vibes: [...vibeSet] };
+}
+
+function computeColdStartBoost(
+  candidate: Candidate,
+  signals?: NormalizedColdStartSignals
+): number {
+  if (!signals || (signals.preferredDecades.size === 0 && signals.vibes.length === 0)) {
+    return 0;
+  }
+
+  let boost = 0;
+
+  if (signals.preferredDecades.size > 0) {
+    const candidateDecade = getDecade(candidate.movie.release_date);
+    if (candidateDecade && signals.preferredDecades.has(candidateDecade)) {
+      boost += 0.08;
+    }
+  }
+
+  if (signals.vibes.length > 0) {
+    const overview =
+      typeof candidate.movie.overview === 'string'
+        ? candidate.movie.overview.toLowerCase()
+        : '';
+    const keywords = getKeywords(candidate.movie);
+    let matchedVibes = 0;
+    for (const vibe of signals.vibes) {
+      if (overview.includes(vibe) || keywords.some((k) => k.includes(vibe))) {
+        matchedVibes++;
+      }
+    }
+    if (matchedVibes > 0) {
+      boost += Math.min(0.15, matchedVibes * 0.08);
+    }
+  }
+
+  return boost;
+}
+
 /**
- * Computes candidate relevance normalized to 0..1 based on taste profile affinity and quality.
+ * Computes candidate relevance normalized to 0..1 based on taste profile affinity, quality,
+ * and optional cold-start signals (preferredEras and selectedVibes).
  */
 function computeCandidateRelevance(
   candidate: Candidate,
   profile: TasteProfile,
-  relevanceFloor = DEFAULT_RELEVANCE_FLOOR
+  relevanceFloor = DEFAULT_RELEVANCE_FLOOR,
+  signals?: NormalizedColdStartSignals
 ): number {
   const voteAvg = Number.isFinite(candidate.movie.vote_average)
     ? candidate.movie.vote_average
     : 6.0;
   const qualityFactor = Math.max(-0.15, Math.min(0.15, (voteAvg - 6.5) * 0.04));
+  const coldStartBoost = computeColdStartBoost(candidate, signals);
 
-  // 1. Empty profile: quality baseline
+  // 1. Empty profile: quality baseline plus cold-start signals
   if (profile.totalRatings === 0) {
-    return Math.max(0, Math.min(1, 0.55 + qualityFactor));
+    return Math.max(0, Math.min(1, 0.55 + qualityFactor + coldStartBoost));
   }
 
   // 2. All-negative profile: user has rejected everything they've seen.
@@ -315,20 +406,23 @@ function computeCandidateRelevance(
   const scale = Math.max(1, Math.sqrt(profile.totalRatings) * 1.5);
   const normalizedAff = Math.tanh((rawAff + sentimentBias) / scale);
 
-  const baseRelevance = 0.50 + 0.35 * normalizedAff + qualityFactor;
+  const baseRelevance = 0.50 + 0.35 * normalizedAff + qualityFactor + coldStartBoost;
   return Math.max(0, Math.min(1, baseRelevance));
 }
 
 /**
- * Assigns a bucket ('safe_bet' | 'stretch' | 'wildcard') based on scores.
- * Enforces the rule that below the relevance floor, a candidate is NEVER a stretch or wildcard.
+ * Assigns a bucket ('safe_bet' | 'stretch' | 'wildcard' | 'below_floor') to a single score set.
+ * Enforces the rule that below the relevance floor, a candidate is NEVER a 'safe_bet',
+ * 'stretch', or 'wildcard', and instead receives 'below_floor'.
+ * For pool-level percentile-relative bucket assignment, use `assignBuckets`.
  */
 export function assignBucket(
   scores: CandidateScores,
   relevanceFloor = DEFAULT_RELEVANCE_FLOOR
 ): Bucket {
-  if (scores.relevance < relevanceFloor) {
-    return 'safe_bet';
+  const floor = Number.isFinite(relevanceFloor) ? relevanceFloor : DEFAULT_RELEVANCE_FLOOR;
+  if (!Number.isFinite(scores.relevance) || scores.relevance < floor) {
+    return 'below_floor';
   }
   if (scores.unexpectedness >= 0.60) {
     return 'wildcard';
@@ -340,35 +434,115 @@ export function assignBucket(
 }
 
 /**
- * Assigns buckets to a list of candidates.
+ * Assigns percentile-relative buckets across a list of candidates:
+ * - Below-floor candidates (`relevance < relevanceFloor`) are assigned `'below_floor'`
+ *   so weak matches are never labelled `'safe_bet'`.
+ * - Wildcard band (top 15%): among above-floor candidates (`N` items), the top
+ *   `ceil(0.15 * N)` items ranked by `unexpectedness` (ties broken by `serendipity`,
+ *   `novelty`, `relevance`) are assigned `'wildcard'`.
+ * - Stretch band (next band, ~35% up to top 50%): among the remaining above-floor
+ *   candidates, the next `ceil(0.50 * N) - wildcardCount` items ranked by `serendipity`
+ *   (ties broken by `unexpectedness`, `novelty`, `relevance`) are assigned `'stretch'`.
+ * - Safe bet band (remaining ~50%): all remaining above-floor candidates are assigned `'safe_bet'`.
  */
 export function assignBuckets<T extends { scores: CandidateScores; bucket?: Bucket }>(
   candidates: T[],
   relevanceFloor = DEFAULT_RELEVANCE_FLOOR
 ): (T & { bucket: Bucket })[] {
-  return candidates.map((c) => ({
+  const nTotal = candidates.length;
+  if (nTotal === 0) return [];
+
+  const floor = Number.isFinite(relevanceFloor) ? relevanceFloor : DEFAULT_RELEVANCE_FLOOR;
+  const buckets = new Array<Bucket>(nTotal).fill('below_floor');
+  const aboveIndices: number[] = [];
+
+  for (let i = 0; i < nTotal; i++) {
+    if (
+      Number.isFinite(candidates[i].scores.relevance) &&
+      candidates[i].scores.relevance >= floor
+    ) {
+      aboveIndices.push(i);
+    }
+  }
+
+  const nAbove = aboveIndices.length;
+  if (nAbove === 1) {
+    const idx = aboveIndices[0];
+    buckets[idx] = assignBucket(candidates[idx].scores, floor);
+  } else if (nAbove >= 2) {
+    const wildcardCount = Math.ceil(0.15 * nAbove);
+    const stretchCount = Math.max(0, Math.ceil(0.50 * nAbove) - wildcardCount);
+
+    // Top 15% of unexpectedness among above-floor candidates -> 'wildcard'
+    const byUnexpectedness = [...aboveIndices].sort((ia, ib) => {
+      const a = candidates[ia].scores;
+      const b = candidates[ib].scores;
+      return (
+        b.unexpectedness - a.unexpectedness ||
+        b.serendipity - a.serendipity ||
+        b.novelty - a.novelty ||
+        b.relevance - a.relevance ||
+        ia - ib
+      );
+    });
+
+    const wildcardSet = new Set<number>();
+    for (let i = 0; i < wildcardCount && i < byUnexpectedness.length; i++) {
+      const idx = byUnexpectedness[i];
+      buckets[idx] = 'wildcard';
+      wildcardSet.add(idx);
+    }
+
+    // Next band (up to top 50% of above-floor candidates) by serendipity -> 'stretch'; rest -> 'safe_bet'
+    const remainingAbove = aboveIndices
+      .filter((idx) => !wildcardSet.has(idx))
+      .sort((ia, ib) => {
+        const a = candidates[ia].scores;
+        const b = candidates[ib].scores;
+        return (
+          b.serendipity - a.serendipity ||
+          b.unexpectedness - a.unexpectedness ||
+          b.novelty - a.novelty ||
+          b.relevance - a.relevance ||
+          ia - ib
+        );
+      });
+
+    for (let i = 0; i < remainingAbove.length; i++) {
+      const idx = remainingAbove[i];
+      buckets[idx] = i < stretchCount ? 'stretch' : 'safe_bet';
+    }
+  }
+
+  return candidates.map((c, i) => ({
     ...c,
-    bucket: assignBucket(c.scores, relevanceFloor),
+    bucket: buckets[i],
   }));
 }
 
 /**
- * Scores candidates for relevance, novelty, unexpectedness and serendipity.
+ * Scores candidates for relevance, novelty, unexpectedness and serendipity,
+ * and assigns percentile-relative buckets across the candidate pool.
  */
 export function scoreCandidates(
   candidates: Candidate[],
   profile: TasteProfile,
   optionsOrFloor: number | ScoreCandidatesOptions = DEFAULT_RELEVANCE_FLOOR
 ): ScoredCandidate[] {
-  const floor =
+  const options: ScoreCandidatesOptions =
     typeof optionsOrFloor === 'number'
-      ? optionsOrFloor
-      : (optionsOrFloor?.relevanceFloor ?? DEFAULT_RELEVANCE_FLOOR);
+      ? { relevanceFloor: optionsOrFloor }
+      : (optionsOrFloor ?? {});
+  const floor =
+    typeof options.relevanceFloor === 'number' && Number.isFinite(options.relevanceFloor)
+      ? options.relevanceFloor
+      : DEFAULT_RELEVANCE_FLOOR;
+  const signals = normalizeColdStartSignals(options);
 
   const noveltyMap = computeNovelties(candidates);
 
-  return candidates.map((candidate) => {
-    const relevance = computeCandidateRelevance(candidate, profile, floor);
+  const prelim = candidates.map((candidate) => {
+    const relevance = computeCandidateRelevance(candidate, profile, floor, signals);
     const novelty = noveltyMap.get(candidate.movie.id) ?? 0.5;
     const unexpectedness = computeUnexpectedness(candidate, profile);
 
@@ -384,14 +558,13 @@ export function scoreCandidates(
       serendipity,
     };
 
-    const bucket = assignBucket(scores, floor);
-
     return {
       ...candidate,
       scores,
-      bucket,
     };
   });
+
+  return assignBuckets(prelim, floor);
 }
 
 /**
@@ -556,9 +729,24 @@ export function rankBucketMMR(
 }
 
 /**
+ * Computes wildcard ranking score: unexpectedness weighted with normalized vote_average quality.
+ */
+function computeWildcardRankScore(candidate: ScoredCandidate): number {
+  const unexpectedness = Number.isFinite(candidate.scores.unexpectedness)
+    ? Math.max(0, Math.min(1, candidate.scores.unexpectedness))
+    : 0;
+  const voteAvg = Number.isFinite(candidate.movie.vote_average)
+    ? candidate.movie.vote_average
+    : 6.0;
+  const quality = Math.max(0, Math.min(1, voteAvg / 10));
+  return 0.6 * unexpectedness + 0.4 * quality;
+}
+
+/**
  * Builds a ranked recommendation list combining safe bets, stretches and wildcards.
  * Interleaves buckets so the top 5 contain at least 3 safe bets and 1 stretch when available,
- * fills deficits from subsequent buckets, and assigns final ranks.
+ * fills deficits from subsequent buckets, drops below-floor items when above-floor supply suffices
+ * (or places them last as 'below_floor' when supply runs short), and assigns final ranks.
  */
 export function buildRankedList(
   scored: ScoredCandidate[],
@@ -602,235 +790,288 @@ export function buildRankedList(
     }
   }
 
-  const targetTotal = Math.min(size, deduplicated.length);
-  if (targetTotal <= 0) return [];
+  const overallTarget = Math.min(size, deduplicated.length);
+  if (overallTarget <= 0) return [];
 
-  // 2. Compute target counts per bucket using Largest Remainder Method
-  const buckets: Bucket[] = ['safe_bet', 'stretch', 'wildcard'];
-  const rawCounts = buckets.map((b) => ({
-    bucket: b,
-    exact: targetTotal * (normalizedMix[b] ?? 0),
-    floor: Math.floor(targetTotal * (normalizedMix[b] ?? 0)),
-  }));
+  // Separate above-floor candidates from below-floor candidates.
+  // Below-floor films are never 'safe_bet'; they are dropped when above-floor supply is enough,
+  // or placed at the tail when above-floor supply runs short.
+  const aboveFloorCandidates: ScoredCandidate[] = [];
+  const belowFloorCandidates: ScoredCandidate[] = [];
 
-  const allocated = rawCounts.reduce((acc, curr) => acc + curr.floor, 0);
-  let remainder = targetTotal - allocated;
-
-  const remainders = rawCounts
-    .map((r, idx) => ({
-      ...r,
-      fraction: r.exact - r.floor,
-      priority: idx,
-    }))
-    .sort((a, b) => {
-      const diff = b.fraction - a.fraction;
-      if (Math.abs(diff) > 1e-9) return diff;
-      return a.priority - b.priority;
-    });
-
-  const targetCount: Record<Bucket, number> = {
-    safe_bet: 0,
-    stretch: 0,
-    wildcard: 0,
-  };
-
-  for (const r of remainders) {
-    let count = r.floor;
-    if (remainder > 0) {
-      count++;
-      remainder--;
+  const isBelowFloor = (c: ScoredCandidate): boolean => {
+    if (!Number.isFinite(c.scores.relevance) || c.scores.relevance <= 0) return true;
+    if (c.bucket === 'below_floor') return true;
+    if (!c.bucket) return c.scores.relevance < DEFAULT_RELEVANCE_FLOOR;
+    if (
+      c.scores.relevance < DEFAULT_RELEVANCE_FLOOR &&
+      c.scores.serendipity === 0 &&
+      (c.scores.novelty > 0 || c.scores.unexpectedness > 0)
+    ) {
+      return true;
     }
-    targetCount[r.bucket] = count;
-  }
-
-  // 3. Partition deduplicated candidates into buckets
-  const bucketCandidates: Record<Bucket, ScoredCandidate[]> = {
-    safe_bet: [],
-    stretch: [],
-    wildcard: [],
+    return false;
   };
 
   for (const c of deduplicated) {
-    const b = c.bucket || assignBucket(c.scores);
-    bucketCandidates[b].push(c);
-  }
-
-  // 4. Rank each bucket using MMR
-  const rankedBuckets: Record<Bucket, ScoredCandidate[]> = {
-    safe_bet: rankBucketMMR(bucketCandidates.safe_bet, (c) => c.scores.relevance, lambda),
-    stretch: rankBucketMMR(bucketCandidates.stretch, (c) => c.scores.serendipity, lambda),
-    wildcard: rankBucketMMR(bucketCandidates.wildcard, (c) => c.scores.unexpectedness, lambda),
-  };
-
-  // 5. Select items per bucket, filling from the next bucket when a bucket runs short
-  const fallbackOrder: Record<Bucket, Bucket[]> = {
-    safe_bet: ['stretch', 'wildcard'],
-    stretch: ['safe_bet', 'wildcard'],
-    wildcard: ['stretch', 'safe_bet'],
-  };
-
-  const selectedBuckets: Record<Bucket, ScoredCandidate[]> = {
-    safe_bet: [],
-    stretch: [],
-    wildcard: [],
-  };
-
-  const deficits: Record<Bucket, number> = {
-    safe_bet: 0,
-    stretch: 0,
-    wildcard: 0,
-  };
-
-  for (const b of buckets) {
-    const available = rankedBuckets[b];
-    const needed = targetCount[b];
-    const takeCount = Math.min(available.length, needed);
-    selectedBuckets[b] = available.slice(0, takeCount);
-    deficits[b] = needed - takeCount;
-  }
-
-  const unconsumed: Record<Bucket, ScoredCandidate[]> = {
-    safe_bet: rankedBuckets.safe_bet.slice(selectedBuckets.safe_bet.length),
-    stretch: rankedBuckets.stretch.slice(selectedBuckets.stretch.length),
-    wildcard: rankedBuckets.wildcard.slice(selectedBuckets.wildcard.length),
-  };
-
-  for (const b of buckets) {
-    let deficit = deficits[b];
-    if (deficit <= 0) continue;
-
-    for (const nextB of fallbackOrder[b]) {
-      if (deficit <= 0) break;
-      const pool = unconsumed[nextB];
-      const takeCount = Math.min(pool.length, deficit);
-      if (takeCount > 0) {
-        selectedBuckets[nextB].push(...pool.slice(0, takeCount));
-        unconsumed[nextB] = pool.slice(takeCount);
-        deficit -= takeCount;
-      }
-    }
-  }
-
-  let currentTotal =
-    selectedBuckets.safe_bet.length +
-    selectedBuckets.stretch.length +
-    selectedBuckets.wildcard.length;
-
-  if (currentTotal < targetTotal) {
-    for (const b of buckets) {
-      if (currentTotal >= targetTotal) break;
-      const pool = unconsumed[b];
-      const takeCount = Math.min(pool.length, targetTotal - currentTotal);
-      if (takeCount > 0) {
-        selectedBuckets[b].push(...pool.slice(0, takeCount));
-        unconsumed[b] = pool.slice(takeCount);
-        currentTotal += takeCount;
-      }
-    }
-  }
-
-  // 5b. Enforce the top-5 rule:
-  // After allocation, the first min(5, n) slots must contain min(3, safe supply) safe bets
-  // and min(1, stretch supply) stretches.
-  // Promote from unconsumed safe/stretch candidates and drop the lowest-ranked item of the largest other bucket.
-  const safeSupply = bucketCandidates.safe_bet.length;
-  const stretchSupply = bucketCandidates.stretch.length;
-  const topLimit = Math.min(5, targetTotal);
-
-  const targetStretch =
-    normalizedMix.stretch > 0 ? Math.min(1, stretchSupply, topLimit) : 0;
-  const targetSafe =
-    normalizedMix.safe_bet > 0
-      ? Math.min(3, safeSupply, Math.max(0, topLimit - targetStretch))
-      : 0;
-
-  const promoteAndDrop = (targetBucket: Bucket, requiredCount: number) => {
-    while (
-      selectedBuckets[targetBucket].length < requiredCount &&
-      unconsumed[targetBucket].length > 0
-    ) {
-      const otherBuckets = buckets.filter(
-        (b) => b !== targetBucket && selectedBuckets[b].length > 0
-      );
-      if (otherBuckets.length === 0) break;
-
-      const requiredMins: Record<Bucket, number> = {
-        safe_bet: targetSafe,
-        stretch: targetStretch,
-        wildcard: 0,
-      };
-
-      const aboveMin = otherBuckets.filter(
-        (b) => selectedBuckets[b].length > requiredMins[b]
-      );
-      const eligible = aboveMin.length > 0 ? aboveMin : otherBuckets;
-
-      const tiePriority: Record<Bucket, number> = {
-        wildcard: 3,
-        stretch: 2,
-        safe_bet: 1,
-      };
-
-      eligible.sort((a, b) => {
-        const countDiff = selectedBuckets[b].length - selectedBuckets[a].length;
-        if (countDiff !== 0) return countDiff;
-        return tiePriority[b] - tiePriority[a];
+    if (isBelowFloor(c)) {
+      belowFloorCandidates.push({
+        ...c,
+        bucket: 'below_floor',
       });
-
-      const donorBucket = eligible[0];
-      const dropped = selectedBuckets[donorBucket].pop()!;
-      unconsumed[donorBucket].unshift(dropped);
-
-      const promoted = unconsumed[targetBucket].shift()!;
-      selectedBuckets[targetBucket].push(promoted);
+    } else {
+      aboveFloorCandidates.push(c);
     }
-  };
+  }
 
-  promoteAndDrop('safe_bet', targetSafe);
-  promoteAndDrop('stretch', targetStretch);
-
-  // 6. Interleave buckets so that:
-  // - The top 5 contain at least 3 safe bets and 1 stretch when available
-  // - Remaining items are interleaved smoothly
-  const queues: Record<Bucket, ScoredCandidate[]> = {
-    safe_bet: [...selectedBuckets.safe_bet],
-    stretch: [...selectedBuckets.stretch],
-    wildcard: [...selectedBuckets.wildcard],
-  };
-
+  const targetTotal = Math.min(overallTarget, aboveFloorCandidates.length);
   const interleaved: ScoredCandidate[] = [];
 
-  const pick = (preferred: Bucket): ScoredCandidate | null => {
-    if (queues[preferred].length > 0) {
-      return queues[preferred].shift()!;
-    }
-    const remainingBuckets = buckets
-      .filter((b) => queues[b].length > 0)
-      .sort((a, b) => queues[b].length - queues[a].length);
-    if (remainingBuckets.length > 0) {
-      return queues[remainingBuckets[0]].shift()!;
-    }
-    return null;
-  };
+  if (targetTotal > 0) {
+    // 2. Compute target counts per bucket using Largest Remainder Method
+    const buckets: AboveFloorBucket[] = ['safe_bet', 'stretch', 'wildcard'];
+    const rawCounts = buckets.map((b) => ({
+      bucket: b,
+      exact: targetTotal * (normalizedMix[b] ?? 0),
+      floor: Math.floor(targetTotal * (normalizedMix[b] ?? 0)),
+    }));
 
-  const top5Pattern: Bucket[] = ['safe_bet', 'safe_bet', 'stretch', 'safe_bet', 'wildcard'];
-  for (let i = 0; i < topLimit; i++) {
-    const item = pick(top5Pattern[i]);
-    if (item) interleaved.push(item);
-  }
+    const allocated = rawCounts.reduce((acc, curr) => acc + curr.floor, 0);
+    let remainder = targetTotal - allocated;
 
-  while (interleaved.length < targetTotal) {
-    const remainingBuckets = buckets
-      .filter((b) => queues[b].length > 0)
+    const remainders = rawCounts
+      .map((r, idx) => ({
+        ...r,
+        fraction: r.exact - r.floor,
+        priority: idx,
+      }))
       .sort((a, b) => {
-        const countDiff = queues[b].length - queues[a].length;
-        if (countDiff !== 0) return countDiff;
-        return buckets.indexOf(a) - buckets.indexOf(b);
+        const diff = b.fraction - a.fraction;
+        if (Math.abs(diff) > 1e-9) return diff;
+        return a.priority - b.priority;
       });
 
-    if (remainingBuckets.length === 0) break;
-    const item = queues[remainingBuckets[0]].shift()!;
-    interleaved.push(item);
+    const targetCount: Record<AboveFloorBucket, number> = {
+      safe_bet: 0,
+      stretch: 0,
+      wildcard: 0,
+    };
+
+    for (const r of remainders) {
+      let count = r.floor;
+      if (remainder > 0) {
+        count++;
+        remainder--;
+      }
+      targetCount[r.bucket] = count;
+    }
+
+    // 3. Partition above-floor candidates into buckets
+    const bucketCandidates: Record<AboveFloorBucket, ScoredCandidate[]> = {
+      safe_bet: [],
+      stretch: [],
+      wildcard: [],
+    };
+
+    for (const c of aboveFloorCandidates) {
+      const assigned = c.bucket || assignBucket(c.scores);
+      const b: AboveFloorBucket =
+        assigned === 'wildcard' || assigned === 'stretch' ? assigned : 'safe_bet';
+      bucketCandidates[b].push({ ...c, bucket: b });
+    }
+
+    // 4. Rank each bucket using MMR (wildcards ranked by unexpectedness weighted with vote_average)
+    const rankedBuckets: Record<AboveFloorBucket, ScoredCandidate[]> = {
+      safe_bet: rankBucketMMR(bucketCandidates.safe_bet, (c) => c.scores.relevance, lambda),
+      stretch: rankBucketMMR(bucketCandidates.stretch, (c) => c.scores.serendipity, lambda),
+      wildcard: rankBucketMMR(bucketCandidates.wildcard, computeWildcardRankScore, lambda),
+    };
+
+    // 5. Select items per bucket, filling from the next bucket when a bucket runs short
+    const fallbackOrder: Record<AboveFloorBucket, AboveFloorBucket[]> = {
+      safe_bet: ['stretch', 'wildcard'],
+      stretch: ['safe_bet', 'wildcard'],
+      wildcard: ['stretch', 'safe_bet'],
+    };
+
+    const selectedBuckets: Record<AboveFloorBucket, ScoredCandidate[]> = {
+      safe_bet: [],
+      stretch: [],
+      wildcard: [],
+    };
+
+    const deficits: Record<AboveFloorBucket, number> = {
+      safe_bet: 0,
+      stretch: 0,
+      wildcard: 0,
+    };
+
+    for (const b of buckets) {
+      const available = rankedBuckets[b];
+      const needed = targetCount[b];
+      const takeCount = Math.min(available.length, needed);
+      selectedBuckets[b] = available.slice(0, takeCount);
+      deficits[b] = needed - takeCount;
+    }
+
+    const unconsumed: Record<AboveFloorBucket, ScoredCandidate[]> = {
+      safe_bet: rankedBuckets.safe_bet.slice(selectedBuckets.safe_bet.length),
+      stretch: rankedBuckets.stretch.slice(selectedBuckets.stretch.length),
+      wildcard: rankedBuckets.wildcard.slice(selectedBuckets.wildcard.length),
+    };
+
+    for (const b of buckets) {
+      let deficit = deficits[b];
+      if (deficit <= 0) continue;
+
+      for (const nextB of fallbackOrder[b]) {
+        if (deficit <= 0) break;
+        const pool = unconsumed[nextB];
+        const takeCount = Math.min(pool.length, deficit);
+        if (takeCount > 0) {
+          selectedBuckets[nextB].push(...pool.slice(0, takeCount));
+          unconsumed[nextB] = pool.slice(takeCount);
+          deficit -= takeCount;
+        }
+      }
+    }
+
+    let currentTotal =
+      selectedBuckets.safe_bet.length +
+      selectedBuckets.stretch.length +
+      selectedBuckets.wildcard.length;
+
+    if (currentTotal < targetTotal) {
+      for (const b of buckets) {
+        if (currentTotal >= targetTotal) break;
+        const pool = unconsumed[b];
+        const takeCount = Math.min(pool.length, targetTotal - currentTotal);
+        if (takeCount > 0) {
+          selectedBuckets[b].push(...pool.slice(0, takeCount));
+          unconsumed[b] = pool.slice(takeCount);
+          currentTotal += takeCount;
+        }
+      }
+    }
+
+    // 5b. Enforce the top-5 rule:
+    // After allocation, the first min(5, n) slots must contain min(3, safe supply) safe bets
+    // and min(1, stretch supply) stretches.
+    // Promote from unconsumed safe/stretch candidates and drop the lowest-ranked item of the largest other bucket.
+    const safeSupply = bucketCandidates.safe_bet.length;
+    const stretchSupply = bucketCandidates.stretch.length;
+    const topLimit = Math.min(5, targetTotal);
+
+    const targetStretch =
+      normalizedMix.stretch > 0 ? Math.min(1, stretchSupply, topLimit) : 0;
+    const targetSafe =
+      normalizedMix.safe_bet > 0
+        ? Math.min(3, safeSupply, Math.max(0, topLimit - targetStretch))
+        : 0;
+
+    const promoteAndDrop = (targetBucket: AboveFloorBucket, requiredCount: number) => {
+      while (
+        selectedBuckets[targetBucket].length < requiredCount &&
+        unconsumed[targetBucket].length > 0
+      ) {
+        const otherBuckets = buckets.filter(
+          (b) => b !== targetBucket && selectedBuckets[b].length > 0
+        );
+        if (otherBuckets.length === 0) break;
+
+        const requiredMins: Record<AboveFloorBucket, number> = {
+          safe_bet: targetSafe,
+          stretch: targetStretch,
+          wildcard: 0,
+        };
+
+        const aboveMin = otherBuckets.filter(
+          (b) => selectedBuckets[b].length > requiredMins[b]
+        );
+        const eligible = aboveMin.length > 0 ? aboveMin : otherBuckets;
+
+        const tiePriority: Record<AboveFloorBucket, number> = {
+          wildcard: 3,
+          stretch: 2,
+          safe_bet: 1,
+        };
+
+        eligible.sort((a, b) => {
+          const countDiff = selectedBuckets[b].length - selectedBuckets[a].length;
+          if (countDiff !== 0) return countDiff;
+          return tiePriority[b] - tiePriority[a];
+        });
+
+        const donorBucket = eligible[0];
+        const dropped = selectedBuckets[donorBucket].pop()!;
+        unconsumed[donorBucket].unshift(dropped);
+
+        const promoted = unconsumed[targetBucket].shift()!;
+        selectedBuckets[targetBucket].push(promoted);
+      }
+    };
+
+    promoteAndDrop('safe_bet', targetSafe);
+    promoteAndDrop('stretch', targetStretch);
+
+    // 6. Interleave buckets so that:
+    // - The top 5 contain at least 3 safe bets and 1 stretch when available
+    // - Remaining items are interleaved smoothly
+    const queues: Record<AboveFloorBucket, ScoredCandidate[]> = {
+      safe_bet: [...selectedBuckets.safe_bet],
+      stretch: [...selectedBuckets.stretch],
+      wildcard: [...selectedBuckets.wildcard],
+    };
+
+    const pick = (preferred: AboveFloorBucket): ScoredCandidate | null => {
+      if (queues[preferred].length > 0) {
+        return queues[preferred].shift()!;
+      }
+      const remainingBuckets = buckets
+        .filter((b) => queues[b].length > 0)
+        .sort((a, b) => queues[b].length - queues[a].length);
+      if (remainingBuckets.length > 0) {
+        return queues[remainingBuckets[0]].shift()!;
+      }
+      return null;
+    };
+
+    const top5Pattern: AboveFloorBucket[] = [
+      'safe_bet',
+      'safe_bet',
+      'stretch',
+      'safe_bet',
+      'wildcard',
+    ];
+    for (let i = 0; i < topLimit; i++) {
+      const item = pick(top5Pattern[i]);
+      if (item) interleaved.push(item);
+    }
+
+    while (interleaved.length < targetTotal) {
+      const remainingBuckets = buckets
+        .filter((b) => queues[b].length > 0)
+        .sort((a, b) => {
+          const countDiff = queues[b].length - queues[a].length;
+          if (countDiff !== 0) return countDiff;
+          return buckets.indexOf(a) - buckets.indexOf(b);
+        });
+
+      if (remainingBuckets.length === 0) break;
+      const item = queues[remainingBuckets[0]].shift()!;
+      interleaved.push(item);
+    }
+  }
+
+  // 6b. When above-floor supply runs short, fill the tail with below-floor candidates last.
+  if (interleaved.length < overallTarget && belowFloorCandidates.length > 0) {
+    const rankedBelow = rankBucketMMR(
+      belowFloorCandidates,
+      (c) => c.scores.relevance,
+      lambda
+    );
+    const neededBelow = overallTarget - interleaved.length;
+    interleaved.push(...rankedBelow.slice(0, neededBelow));
   }
 
   // 7. Assign final ranks (1..n)
