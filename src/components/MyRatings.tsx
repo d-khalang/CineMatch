@@ -249,7 +249,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
               placeholder="Search rated films..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-200 focus:outline-none focus:border-[var(--border-focus)]"
+              className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus:border-[var(--border-focus)]"
             />
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           </div>
@@ -257,7 +257,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
           <select
             value={sortBy}
             onChange={(e: any) => setSortBy(e.target.value)}
-            className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-300 focus:outline-none focus:border-[var(--border-focus)] cursor-pointer"
+            className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus:border-[var(--border-focus)] cursor-pointer"
           >
             <option value="recent">Recently Rated</option>
             <option value="rating-desc">Highest Rating</option>
@@ -322,7 +322,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
 
                   {/* Top Left: Rating Badge */}
                   <div className="absolute top-2 left-2 z-10 flex flex-col items-start gap-1">
-                    <div className="px-2 py-0.5 rounded-md bg-[var(--bg-surface)]/90 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-[var(--border-subtle)]">
+                    <div className="px-2 py-0.5 rounded-md bg-[var(--bg-surface)] text-[11px] font-bold text-amber-400 border border-[var(--border-subtle)]">
                       ★ {item.rating}/10
                     </div>
                   </div>
@@ -343,7 +343,7 @@ export const MyRatings: React.FC<MyRatingsProps> = ({ onOpenCsvModal }) => {
                       }}
                       variant="icon"
                       iconSize="w-3.5 h-3.5"
-                      className="opacity-90 sm:opacity-0 sm:group-hover:opacity-100 bg-[var(--bg-surface)]/90 border border-[var(--border-subtle)]"
+                      className="opacity-90 sm:opacity-0 sm:group-hover:opacity-100 bg-[var(--bg-surface)] border border-[var(--border-subtle)]"
                     />
                   </div>
                 </div>

@@ -235,7 +235,7 @@ export const Watchlist: React.FC = () => {
                 placeholder="Search movies in your watchlist..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-200 focus:outline-none focus:border-[var(--border-focus)]"
+                className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus:border-[var(--border-focus)]"
               />
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             </div>
@@ -246,7 +246,7 @@ export const Watchlist: React.FC = () => {
               <select
                 value={sortBy}
                 onChange={(e: any) => setSortBy(e.target.value)}
-                className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-300 focus:outline-none focus:border-[var(--border-focus)] cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus:border-[var(--border-focus)] cursor-pointer"
               >
                 <option value="recent">Recently Added</option>
                 <option value="rating-desc">Highest TMDB Rating</option>
@@ -381,7 +381,7 @@ export const Watchlist: React.FC = () => {
                         e.stopPropagation();
                         toggleWatchlist(movie);
                       }}
-                      className="p-1.5 rounded-lg bg-[var(--bg-surface)]/90 backdrop-blur-md text-[var(--accent-hover)] hover:text-rose-400 border border-[var(--border-subtle)] transition-all cursor-pointer"
+                      className="p-1.5 rounded-lg bg-[var(--bg-surface)] text-[var(--accent-hover)] hover:text-rose-400 border border-[var(--border-subtle)] transition-all cursor-pointer"
                       title="Remove from Watchlist"
                     >
                       <BookmarkCheck className="w-3.5 h-3.5" />
@@ -390,14 +390,14 @@ export const Watchlist: React.FC = () => {
                       movie={movie}
                       variant="icon"
                       iconSize="w-3.5 h-3.5"
-                      className="p-1.5 rounded-lg opacity-90 sm:opacity-0 sm:group-hover:opacity-100 bg-[var(--bg-surface)]/90 border border-[var(--border-subtle)]"
+                      className="p-1.5 rounded-lg opacity-90 sm:opacity-0 sm:group-hover:opacity-100 bg-[var(--bg-surface)] border border-[var(--border-subtle)]"
                     />
                   </div>
 
                   {/* Top Left Rating Badge */}
                   {movie.vote_average > 0 && (
                     <div className="absolute top-2 left-2 z-10">
-                      <span className="px-2 py-0.5 rounded-md bg-[var(--bg-surface)]/90 backdrop-blur-md text-[11px] font-bold text-amber-400 border border-[var(--border-subtle)]">
+                      <span className="px-2 py-0.5 rounded-md bg-[var(--bg-surface)] text-[11px] font-bold text-amber-400 border border-[var(--border-subtle)]">
                         ★ {movie.vote_average.toFixed(1)}
                       </span>
                     </div>

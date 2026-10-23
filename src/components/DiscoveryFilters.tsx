@@ -91,7 +91,7 @@ export const DiscoveryFilters: React.FC = () => {
             step="5"
             value={aiSettings.serendipityLevel}
             onChange={(e) => handleSerendipityChange(Number(e.target.value))}
-            className="w-full h-2.5 bg-[var(--bg-surface-elevated)] rounded-lg appearance-none cursor-pointer accent-[var(--accent-primary)] focus:outline-none border border-[var(--border-subtle)]"
+            className="w-full h-2.5 bg-[var(--bg-surface-elevated)] rounded-lg appearance-none cursor-pointer accent-[var(--accent-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] border border-[var(--border-subtle)]"
           />
           <div className="flex justify-between text-[11px] text-slate-400 mt-2 font-mono">
             <span className="flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> 0% Safe Bets</span>

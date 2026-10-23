@@ -19,7 +19,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ onOpenSettings
   ];
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--bg-surface)]/95 backdrop-blur-xl border-t border-[var(--border-subtle)] safe-pb transition-colors duration-300">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--bg-surface)] border-t border-[var(--border-subtle)] safe-pb transition-colors duration-300">
       <div className="flex items-center justify-around h-16 px-1">
         {navItems.map((item) => {
           const Icon = item.icon;
