@@ -1,10 +1,20 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import Papa from 'papaparse';
 import { X, Upload, FileText, CheckCircle, Loader2, AlertCircle, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
-import { UserRating } from '../types';
+import { Movie, UserRating } from '../types';
 import { searchMovies, findMovieByExternalId } from '../services/tmdb';
 import { credentialStore } from '../services/credentialStore';
-import { parseMovieCsv, CsvParseResult, ParsedCsvMovie } from '../services/csvService';
+import {
+  parseMovieCsv,
+  CsvParseResult,
+  ParsedCsvMovie,
+  detectLetterboxdCsvKind,
+  parseWatchedCsv,
+  WatchedParseResult,
+  WatchedRow,
+} from '../services/csvService';
+import { planWatchedImport, WatchedImportPlan } from '../services/watchedImport';
 import { titlesMatch } from '../services/titleMatcher';
 import { useModalA11y } from './useModalA11y';
 
@@ -18,15 +28,19 @@ type ImportPhase = 'select' | 'resolving' | 'review' | 'committed';
 const IMDB_ID_REGEX = /^tt\d{7,10}$/;
 
 export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose }) => {
-  const { importRatingsList, replaceRatingsList, generateRankings, ratings } = useMovieStore();
+  const { importRatingsList, replaceRatingsList, generateRankings, ratings, hiddenFilms, hideFilms } =
+    useMovieStore();
+  const [fileKind, setFileKind] = useState<'ratings' | 'watched'>('ratings');
   const [parseResult, setParseResult] = useState<CsvParseResult | null>(null);
+  const [watchedResult, setWatchedResult] = useState<WatchedParseResult | null>(null);
+  const [watchedPlan, setWatchedPlan] = useState<WatchedImportPlan | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
   const [importPhase, setImportPhase] = useState<ImportPhase>('select');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Two-phase state: resolved results held for user review before committing
+  // Two-phase state: resolved results held for user review before committing (ratings import)
   const [pendingRatings, setPendingRatings] = useState<UserRating[]>([]);
   const [unresolvedItems, setUnresolvedItems] = useState<{ title: string; year?: string; reason: string }[]>([]);
 
@@ -63,6 +77,9 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   const resetState = () => {
     cancelImport();
     setParseResult(null);
+    setWatchedResult(null);
+    setWatchedPlan(null);
+    setFileKind('ratings');
     setIsProcessing(false);
     setStatusMessage(null);
     setImportPhase('select');
@@ -74,9 +91,12 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setErrorMessage(null);
     setParseResult(null);
+    setWatchedResult(null);
+    setWatchedPlan(null);
     setPendingRatings([]);
     setUnresolvedItems([]);
     setImportPhase('select');
+    setFileKind('ratings');
 
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
@@ -87,11 +107,27 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
 
       try {
         const text = await selectedFile.text();
-        const result = parseMovieCsv(text);
-        if (result.accepted.length === 0) {
-          setErrorMessage('Could not find any valid movie rating rows in this CSV.');
+        const cleanContent = text.replace(/^\uFEFF/, '').trim();
+        const parseOutput = Papa.parse<string[]>(cleanContent, { preview: 1, skipEmptyLines: 'greedy' });
+        const headers = parseOutput.data && parseOutput.data.length > 0 ? parseOutput.data[0] : [];
+        const detectedKind = detectLetterboxdCsvKind(headers);
+
+        if (detectedKind === 'watched') {
+          const result = parseWatchedCsv(text);
+          if (result.accepted.length === 0) {
+            setErrorMessage('Could not find any valid movie rows in this CSV.');
+          } else {
+            setFileKind('watched');
+            setWatchedResult(result);
+          }
         } else {
-          setParseResult(result);
+          const result = parseMovieCsv(text);
+          if (result.accepted.length === 0) {
+            setErrorMessage('Could not find any valid movie rating rows in this CSV.');
+          } else {
+            setFileKind('ratings');
+            setParseResult(result);
+          }
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Failed to parse CSV file';
@@ -101,13 +137,91 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   };
 
   /**
-   * Phase 1: Resolve movies via TMDB. Results are stored as pending, NOT committed.
-   * Uses AbortController for cancellation and operation versioning to invalidate stale results.
+   * Shared helper to resolve a film item via IMDb ID or TMDB search with title/year verification.
+   */
+  const resolveMovieItem = async (
+    item: { title: string; year?: string; sourceId?: string },
+    hasTmdb: boolean,
+    signal: AbortSignal
+  ): Promise<{ movie: Movie | null; reason?: string }> => {
+    // Case 1: IMDb ID lookup if available
+    if (hasTmdb && item.sourceId && IMDB_ID_REGEX.test(item.sourceId)) {
+      try {
+        const found = await findMovieByExternalId(item.sourceId, 'imdb_id', signal);
+        if (signal.aborted) return { movie: null };
+        if (found) {
+          return { movie: found };
+        }
+      } catch {
+        if (signal.aborted) return { movie: null };
+      }
+    }
+
+    // Case 2: Resolve via TMDB search with title verification
+    if (hasTmdb) {
+      try {
+        const searchRes = await searchMovies(item.title, 1, signal);
+        if (signal.aborted) return { movie: null };
+
+        if (searchRes.movies.length > 0) {
+          let match: Movie | null = null;
+          if (item.year) {
+            const parsedYear = parseInt(item.year, 10);
+            const candidates = searchRes.movies.filter((m) => {
+              if (!m.release_date) return false;
+              const mYear = parseInt(m.release_date.slice(0, 4), 10);
+              if (isNaN(mYear) || Math.abs(mYear - parsedYear) > 1) return false;
+              return titlesMatch(item.title, m.title);
+            });
+            match = candidates.length === 1 ? candidates[0] : null;
+          } else {
+            const exactMatches = searchRes.movies.filter(
+              (m) => m.title.toLowerCase() === item.title.toLowerCase()
+            );
+            if (exactMatches.length === 1) {
+              match = exactMatches[0];
+            } else if (exactMatches.length === 0) {
+              const similarCandidates = searchRes.movies.filter((m) =>
+                titlesMatch(item.title, m.title)
+              );
+              if (similarCandidates.length === 1) {
+                match = similarCandidates[0];
+              }
+            }
+          }
+
+          if (match) {
+            return { movie: match };
+          }
+        }
+
+        return {
+          movie: null,
+          reason: item.year
+            ? `No verified TMDB match with matching title released around ${item.year}`
+            : 'Ambiguous or unverified TMDB title match',
+        };
+      } catch {
+        if (signal.aborted) return { movie: null };
+        return {
+          movie: null,
+          reason: 'TMDB network lookup failed',
+        };
+      }
+    }
+
+    return {
+      movie: null,
+      reason: 'TMDB credential required to resolve external film titles',
+    };
+  };
+
+  /**
+   * Phase 1 (Ratings): Resolve movies via TMDB. Results are stored as pending, NOT committed.
    */
   const resolveImport = async () => {
     if (!parseResult || parseResult.accepted.length === 0) return;
 
-    // Cancel any previous in-flight resolution
     cancelImport();
 
     const controller = new AbortController();
@@ -127,10 +241,8 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
       const unresolved: { title: string; year?: string; reason: string }[] = [];
       const moviesToProcess = parseResult.accepted;
 
-      // Run bounded parallel searches (chunks of 4) to avoid TMDB 429
       const chunkSize = 4;
       for (let i = 0; i < moviesToProcess.length; i += chunkSize) {
-        // Check cancellation between chunks
         if (controller.signal.aborted || operationVersionRef.current !== thisOperationVersion) {
           return;
         }
@@ -161,115 +273,31 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
               return;
             }
 
-            // Case 2: Resolve via IMDb external ID if available (stable identifier)
-            if (hasTmdb && item.sourceId && IMDB_ID_REGEX.test(item.sourceId)) {
-              try {
-                const found = await findMovieByExternalId(item.sourceId, 'imdb_id', controller.signal);
-                if (controller.signal.aborted) return;
-                if (found) {
-                  importedRatings.push({
-                    movieId: found.id,
-                    title: found.title,
-                    rating: item.rating,
-                    posterPath: found.poster_path,
-                    year: found.release_date ? found.release_date.slice(0, 4) : item.year,
-                    genres: (found.genres || []).map((g) => g.name),
-                    director: item.director,
-                    ratedAt: item.ratedAt ?? Date.now(),
-                  });
-                  return;
-                }
-                // IMDb ID lookup returned nothing — fall through to search
-              } catch {
-                if (controller.signal.aborted) return;
-                // Fall through to search
-              }
+            const res = await resolveMovieItem(item, hasTmdb, controller.signal);
+            if (controller.signal.aborted) return;
+
+            if (res.movie) {
+              importedRatings.push({
+                movieId: res.movie.id,
+                title: res.movie.title,
+                rating: item.rating,
+                posterPath: res.movie.poster_path,
+                year: res.movie.release_date ? res.movie.release_date.slice(0, 4) : item.year,
+                genres: (res.movie.genres || []).map((g) => g.name),
+                director: item.director,
+                ratedAt: item.ratedAt ?? Date.now(),
+              });
+            } else {
+              unresolved.push({
+                title: item.title,
+                year: item.year,
+                reason: res.reason || 'Could not match film',
+              });
             }
-
-            // Case 3: Resolve via TMDB search with title verification
-            if (hasTmdb) {
-              try {
-                const searchRes = await searchMovies(item.title, 1, controller.signal);
-                if (controller.signal.aborted) return;
-
-                if (searchRes.movies.length > 0) {
-                  let match = null;
-                  if (item.year) {
-                    const parsedYear = parseInt(item.year, 10);
-                    // Match requires both year proximity AND title similarity.
-                    // If multiple candidates qualify, treat as ambiguous.
-                    const candidates = searchRes.movies.filter((m) => {
-                      if (!m.release_date) return false;
-                      const mYear = parseInt(m.release_date.slice(0, 4), 10);
-                      if (isNaN(mYear) || Math.abs(mYear - parsedYear) > 1) return false;
-                      return titlesMatch(item.title, m.title);
-                    });
-                    match = candidates.length === 1 ? candidates[0] : null;
-                  } else {
-                    // No year specified: check for exact title matches across candidates
-                    const exactMatches = searchRes.movies.filter(
-                      (m) => m.title.toLowerCase() === item.title.toLowerCase()
-                    );
-                    if (exactMatches.length === 1) {
-                      match = exactMatches[0];
-                    } else if (exactMatches.length === 0) {
-                      // No exact matches: check if exactly one candidate has high title similarity
-                      const similarCandidates = searchRes.movies.filter((m) =>
-                        titlesMatch(item.title, m.title)
-                      );
-                      if (similarCandidates.length === 1) {
-                        match = similarCandidates[0];
-                      }
-                      // 0 or >1 similar candidates: ambiguous, leave unresolved (match remains null)
-                    }
-                    // Multiple exact matches (e.g. remakes without year): ambiguous, leave unresolved (match remains null)
-                  }
-
-                  if (match) {
-                    importedRatings.push({
-                      movieId: match.id,
-                      title: match.title,
-                      rating: item.rating,
-                      posterPath: match.poster_path,
-                      year: match.release_date ? match.release_date.slice(0, 4) : item.year,
-                      genres: (match.genres || []).map((g) => g.name),
-                      director: item.director,
-                      ratedAt: item.ratedAt ?? Date.now(),
-                    });
-                    return;
-                  }
-                }
-                // No verified match
-                unresolved.push({
-                  title: item.title,
-                  year: item.year,
-                  reason: item.year
-                    ? `No verified TMDB match with matching title released around ${item.year}`
-                    : 'Ambiguous or unverified TMDB title match',
-                });
-                return;
-              } catch {
-                if (controller.signal.aborted) return;
-                unresolved.push({
-                  title: item.title,
-                  year: item.year,
-                  reason: 'TMDB network lookup failed',
-                });
-                return;
-              }
-            }
-
-            // Case 4: No TMDB credentials and no TMDB_ID provided
-            unresolved.push({
-              title: item.title,
-              year: item.year,
-              reason: 'TMDB credential required to resolve external film titles',
-            });
           })
         );
       }
 
-      // Final cancellation/staleness check before updating state
       if (controller.signal.aborted || operationVersionRef.current !== thisOperationVersion) {
         return;
       }
@@ -284,7 +312,6 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
           (unresolved.length > 0 ? `(${unresolved[0].reason})` : '')
         );
       } else {
-        // Move to review phase — results are shown but NOT committed yet
         setImportPhase('review');
         setStatusMessage(
           `Resolution complete: ${importedRatings.length} matched, ${unresolved.length} unresolved, ${parseResult.rejected.length} skipped. Review results below and confirm.`
@@ -304,13 +331,105 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   };
 
   /**
-   * Phase 2: User has reviewed the results and explicitly confirms the commit.
-   * Only runs if the operation version is still current (not cancelled or superseded).
+   * Watched Import: Resolve rows with same batching and rate limits, plan import, and hideFilms.
+   */
+  const resolveWatchedImport = async () => {
+    if (!watchedResult || watchedResult.accepted.length === 0) return;
+
+    cancelImport();
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const thisOperationVersion = ++operationVersionRef.current;
+
+    setIsProcessing(true);
+    setImportPhase('resolving');
+    setErrorMessage(null);
+    setStatusMessage('Matching films with TMDB database...');
+    setUnresolvedItems([]);
+
+    try {
+      const hasTmdb = credentialStore.hasTmdb();
+      const rowsToProcess = watchedResult.accepted;
+      const resolved = new Map<number, number | null>();
+      const unresolved: { title: string; year?: string; reason: string }[] = [];
+
+      const chunkSize = 4;
+      for (let i = 0; i < rowsToProcess.length; i += chunkSize) {
+        if (controller.signal.aborted || operationVersionRef.current !== thisOperationVersion) {
+          return;
+        }
+
+        const chunk = rowsToProcess.slice(i, i + chunkSize);
+        setStatusMessage(
+          `Matching films ${i + 1} to ${Math.min(i + chunkSize, rowsToProcess.length)} of ${
+            rowsToProcess.length
+          }...`
+        );
+
+        await Promise.all(
+          chunk.map(async (item: WatchedRow, chunkIdx: number) => {
+            if (controller.signal.aborted) return;
+            const globalIdx = i + chunkIdx;
+
+            const res = await resolveMovieItem(item, hasTmdb, controller.signal);
+            if (controller.signal.aborted) return;
+
+            if (res.movie) {
+              resolved.set(globalIdx, res.movie.id);
+            } else {
+              resolved.set(globalIdx, null);
+              unresolved.push({
+                title: item.title,
+                year: item.year,
+                reason: res.reason || 'Could not match film',
+              });
+            }
+          })
+        );
+      }
+
+      if (controller.signal.aborted || operationVersionRef.current !== thisOperationVersion) {
+        return;
+      }
+
+      setUnresolvedItems(unresolved);
+
+      const plan = planWatchedImport(rowsToProcess, ratings, hiddenFilms, resolved);
+
+      if (controller.signal.aborted || operationVersionRef.current !== thisOperationVersion) {
+        return;
+      }
+
+      hideFilms(plan.toHide);
+
+      setWatchedPlan(plan);
+      setImportPhase('committed');
+      const seenCount = plan.toHide.length;
+      const seenText = seenCount === 1 ? '1 film marked as seen' : `${seenCount} films marked as seen`;
+      const skippedCount = plan.skippedRated + plan.skippedDuplicate;
+      setStatusMessage(
+        `Import complete: ${seenText}, ${skippedCount} skipped, ${plan.unresolved} unresolved, ${plan.droppedForCap} dropped.`
+      );
+    } catch (err: unknown) {
+      if (controller.signal.aborted) return;
+      if (operationVersionRef.current !== thisOperationVersion) return;
+      const msg = err instanceof Error ? err.message : 'Import failed';
+      setErrorMessage(msg);
+      setImportPhase('select');
+    } finally {
+      if (operationVersionRef.current === thisOperationVersion) {
+        setIsProcessing(false);
+      }
+    }
+  };
+
+  /**
+   * Phase 2 (Ratings): User has reviewed the results and explicitly confirms the commit.
    */
   const confirmImport = () => {
     if (pendingRatings.length === 0) return;
 
-    // Final staleness check
     const currentVersion = operationVersionRef.current;
 
     if (importMode === 'replace') {
@@ -322,7 +441,6 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
       importRatingsList(Array.from(existingMap.values()));
     }
 
-    // Verify the commit wasn't superseded during synchronous execution
     if (operationVersionRef.current !== currentVersion) return;
 
     setImportPhase('committed');
@@ -351,7 +469,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                 Import Movie Ratings
               </h2>
               <p className="text-xs text-slate-400">
-                Import from IMDb or Letterboxd CSV exports (Max 2 MB)
+                Import from IMDb or Letterboxd CSV exports (ratings.csv or watched.csv, max 2 MB)
               </p>
             </div>
           </div>
@@ -372,7 +490,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
             </div>
           )}
 
-          {!parseResult && (
+          {!parseResult && !watchedResult && (
             <div className="border-2 border-dashed border-[var(--border-subtle)] rounded-2xl p-8 text-center space-y-3 hover:border-[var(--accent-primary)]/50 transition-colors">
               <FileText className="w-10 h-10 mx-auto text-slate-400" />
               <div className="space-y-1">
@@ -380,7 +498,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                   Select your exported CSV file
                 </p>
                 <p className="text-xs text-slate-400">
-                  Supports ratings from IMDb (ratings.csv) and Letterboxd (ratings.csv)
+                  Supports ratings from IMDb (ratings.csv) and Letterboxd (ratings.csv or watched.csv)
                 </p>
               </div>
               <label className="inline-block px-4 py-2 rounded-xl bg-[var(--bg-surface-hover)] text-xs font-semibold text-white hover:bg-[var(--border-subtle)] cursor-pointer transition-colors">
@@ -398,8 +516,8 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
             </div>
           )}
 
-          {/* Import Preview */}
-          {parseResult && (
+          {/* Ratings Import Preview */}
+          {fileKind === 'ratings' && parseResult && (
             <div className="space-y-4">
               <div className="p-4 rounded-2xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] space-y-3">
                 <div className="flex items-center justify-between text-xs">
@@ -540,6 +658,154 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
               )}
             </div>
           )}
+
+          {/* Watched CSV Preview & Resolving */}
+          {fileKind === 'watched' && watchedResult && importPhase !== 'committed' && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-2xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] space-y-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-white">
+                    Detected Format:{' '}
+                    <span className="capitalize text-[var(--accent-primary)]">
+                      Letterboxd (watched)
+                    </span>
+                  </span>
+                  <span className="text-slate-400">
+                    {watchedResult.accepted.length} films ready
+                  </span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs">
+                  These films will be marked as "Seen it" so they stop being recommended.
+                </div>
+
+                {watchedResult.rejected.length > 0 && (
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>
+                      {watchedResult.rejected.length} row(s) had missing movie titles and will be skipped.
+                    </span>
+                  </div>
+                )}
+
+                {/* Sample preview */}
+                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                  {watchedResult.accepted.slice(0, 5).map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between text-xs py-1 px-2 rounded-lg bg-black/20"
+                    >
+                      <span className="truncate max-w-[280px] font-medium text-white">
+                        {item.title} {item.year ? `(${item.year})` : ''}
+                      </span>
+                      <span className="font-medium text-xs text-slate-400 shrink-0">
+                        Watched
+                      </span>
+                    </div>
+                  ))}
+                  {watchedResult.accepted.length > 5 && (
+                    <p className="text-[11px] text-center text-slate-400 pt-1">
+                      ...and {watchedResult.accepted.length - 5} more films
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {statusMessage && (
+                <div className="text-xs text-[var(--accent-primary)] flex items-center gap-2">
+                  {isProcessing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{statusMessage}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Watched CSV Committed Results */}
+          {fileKind === 'watched' && importPhase === 'committed' && watchedPlan && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs space-y-3">
+                <div className="flex items-center gap-2 font-bold text-sm">
+                  <CheckCircle className="w-5 h-5 shrink-0 text-emerald-400" />
+                  <span>Import Complete</span>
+                </div>
+
+                {statusMessage && (
+                  <div className="text-xs text-[var(--accent-primary)] font-medium">
+                    {statusMessage}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                  <div className="p-2 rounded-xl bg-black/20">
+                    <span className="block text-slate-400">Marked Seen</span>
+                    <span className="font-bold text-emerald-300">{watchedPlan.toHide.length}</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-black/20">
+                    <span className="block text-slate-400">Skipped</span>
+                    <span className="font-bold text-slate-200">
+                      {watchedPlan.skippedRated + watchedPlan.skippedDuplicate}
+                    </span>
+                    {(watchedPlan.skippedRated > 0 || watchedPlan.skippedDuplicate > 0) && (
+                      <span className="block text-[10px] text-slate-400">
+                        {watchedPlan.skippedRated} rated, {watchedPlan.skippedDuplicate} dup
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-2 rounded-xl bg-black/20">
+                    <span className="block text-slate-400">Unresolved</span>
+                    <span className="font-bold text-amber-300">{watchedPlan.unresolved}</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-black/20">
+                    <span className="block text-slate-400">Dropped (Cap)</span>
+                    <span className="font-bold text-amber-300">{watchedPlan.droppedForCap}</span>
+                  </div>
+                </div>
+
+                {watchedPlan.droppedForCap > 0 && (
+                  <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] flex items-start gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      {watchedPlan.droppedForCap} film(s) were dropped to respect the 2,000 hidden films limit.
+                    </span>
+                  </div>
+                )}
+
+                {watchedPlan.toHide.length > 0 && (
+                  <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
+                    {watchedPlan.toHide.slice(0, 5).map((h, idx) => (
+                      <div key={idx} className="text-[11px] text-emerald-200/80 truncate">
+                        ✓ {h.title || `Movie #${h.movieId}`}
+                      </div>
+                    ))}
+                    {watchedPlan.toHide.length > 5 && (
+                      <div className="text-[10px] text-emerald-200/60 pt-0.5">
+                        ...and {watchedPlan.toHide.length - 5} more films
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {unresolvedItems.length > 0 && (
+                <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs space-y-1.5 max-h-32 overflow-y-auto">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{unresolvedItems.length} film(s) could not be matched:</span>
+                  </div>
+                  {unresolvedItems.slice(0, 10).map((u, idx) => (
+                    <div key={idx} className="text-[11px] text-amber-200/80 truncate">
+                      • {u.title} {u.year ? `(${u.year})` : ''}: {u.reason}
+                    </div>
+                  ))}
+                  {unresolvedItems.length > 10 && (
+                    <div className="text-[10px] text-amber-200/60 pt-0.5">
+                      ...and {unresolvedItems.length - 10} more unresolved films
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -552,25 +818,26 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
           </button>
 
           {/* Phase 1 button: Start resolution (not commit) */}
-          {parseResult && importPhase === 'select' && (
-            <button
-              onClick={resolveImport}
-              disabled={isProcessing}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-black font-semibold text-xs transition-all disabled:opacity-50"
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Resolving...
-                </>
-              ) : (
-                <>
-                  <Upload className="w-4 h-4" />
-                  Start Import ({parseResult.accepted.length} Films)
-                </>
-              )}
-            </button>
-          )}
+          {((parseResult && fileKind === 'ratings') || (watchedResult && fileKind === 'watched')) &&
+            importPhase === 'select' && (
+              <button
+                onClick={fileKind === 'watched' ? resolveWatchedImport : resolveImport}
+                disabled={isProcessing}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-black font-semibold text-xs transition-all disabled:opacity-50"
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Resolving...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    Start Import ({fileKind === 'watched' ? watchedResult!.accepted.length : parseResult!.accepted.length} Films)
+                  </>
+                )}
+              </button>
+            )}
 
           {/* Resolving phase: show spinner */}
           {importPhase === 'resolving' && (
@@ -583,8 +850,8 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
             </button>
           )}
 
-          {/* Phase 2 buttons: Review → Confirm or go back */}
-          {importPhase === 'review' && pendingRatings.length > 0 && (
+          {/* Phase 2 buttons (Ratings): Review → Confirm or go back */}
+          {fileKind === 'ratings' && importPhase === 'review' && pendingRatings.length > 0 && (
             <>
               <button
                 onClick={resetState}
@@ -602,7 +869,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
             </>
           )}
 
-          {/* Phase 3: Committed — offer recalibration */}
+          {/* Committed phase — offer recalibration */}
           {importPhase === 'committed' && (
             <button
               onClick={() => {
