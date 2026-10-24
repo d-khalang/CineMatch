@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Trophy,
   Sparkles,
@@ -24,6 +24,7 @@ export const RankedFeed: React.FC = () => {
     recommendations,
     ratings,
     watchlist,
+    hiddenFilms,
     isGeneratingRecs,
     generateRankings,
     lastProviderUsed,
@@ -37,6 +38,7 @@ export const RankedFeed: React.FC = () => {
     setSelectedMovieForModal,
     setActiveTab,
     showToast,
+    hideFilm,
   } = useMovieStore();
 
   const [pendingRemovalIds, setPendingRemovalIds] = useState<Record<number, boolean>>({});
@@ -88,9 +90,32 @@ export const RankedFeed: React.FC = () => {
     removeRating(movieId);
   };
 
-  // Keep unrated movies AND movies currently in grace period
+  const handleHideFilm = (movieId: number, reason: 'seen' | 'not_for_me', rawTitle?: string) => {
+    const title = rawTitle && rawTitle.trim() ? rawTitle.trim() : `#${movieId}`;
+    if (pendingTimersRef.current[movieId]) {
+      clearTimeout(pendingTimersRef.current[movieId]);
+      delete pendingTimersRef.current[movieId];
+    }
+    setPendingRemovalIds((prev) => {
+      if (!prev[movieId]) return prev;
+      const next = { ...prev };
+      delete next[movieId];
+      return next;
+    });
+    hideFilm(movieId, reason, title);
+    showToast(`Hidden "${title}". Restore it in Settings → Hidden films.`);
+  };
+
+  const hiddenMovieIds = useMemo(
+    () => new Set((hiddenFilms || []).map((h) => h.movieId)),
+    [hiddenFilms]
+  );
+
+  // Keep unrated movies AND movies currently in grace period, strictly excluding hidden films
   const visibleRecommendations = recommendations.filter(
-    (rec) => !ratings[rec.movie.id] || Boolean(pendingRemovalIds[rec.movie.id])
+    (rec) =>
+      !hiddenMovieIds.has(rec.movie.id) &&
+      (!ratings[rec.movie.id] || Boolean(pendingRemovalIds[rec.movie.id]))
   );
 
   const profileSig = Object.entries(ratings)
@@ -294,6 +319,7 @@ export const RankedFeed: React.FC = () => {
             const posterUrl = movie.poster_path ? `${IMAGE_BASE_URL}${movie.poster_path}` : null;
             const year = movie.release_date ? movie.release_date.slice(0, 4) : '';
             const isPendingRemoval = Boolean(pendingRemovalIds[movie.id]);
+            const displayTitle = movie.title && movie.title.trim() ? movie.title.trim() : `#${movie.id}`;
 
             return (
               <div
@@ -339,86 +365,86 @@ export const RankedFeed: React.FC = () => {
 
                   <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-surface)] via-transparent to-transparent opacity-60 md:hidden" />
 
-                    {/* Mobile Match pill, Watchlist & Share buttons */}
-                    <div className="absolute top-4 right-4 md:hidden flex items-center gap-1.5">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleWatchlist(movie);
-                        }}
-                        className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
-                          inWatchlist
-                            ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-hover)] border-[var(--border-focus)]'
-                            : 'bg-[var(--bg-surface)] text-slate-300 border-[var(--border-subtle)] hover:text-white'
-                        }`}
-                        title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
-                      >
-                        {inWatchlist ? <BookmarkCheck className="w-4 h-4 text-[var(--accent-hover)]" /> : <Bookmark className="w-4 h-4" />}
-                      </button>
-                      <ShareButton movie={movie} variant="icon" iconSize="w-4 h-4" />
-                      <div className="px-2.5 py-1 rounded-full bg-[var(--bg-surface)] text-xs font-bold text-[var(--accent-primary)] border border-[var(--border-focus)]">
-                        {score}% Match
-                      </div>
+                  {/* Mobile Match pill, Watchlist & Share buttons */}
+                  <div className="absolute top-4 right-4 md:hidden flex items-center gap-1.5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleWatchlist(movie);
+                      }}
+                      className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                        inWatchlist
+                          ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-hover)] border-[var(--border-focus)]'
+                          : 'bg-[var(--bg-surface)] text-slate-300 border-[var(--border-subtle)] hover:text-white'
+                      }`}
+                      title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                    >
+                      {inWatchlist ? <BookmarkCheck className="w-4 h-4 text-[var(--accent-hover)]" /> : <Bookmark className="w-4 h-4" />}
+                    </button>
+                    <ShareButton movie={movie} variant="icon" iconSize="w-4 h-4" />
+                    <div className="px-2.5 py-1 rounded-full bg-[var(--bg-surface)] text-xs font-bold text-[var(--accent-primary)] border border-[var(--border-focus)]">
+                      {score}% Match
                     </div>
                   </div>
+                </div>
 
-                  {/* Content & AI Reasoning Body */}
-                  <div className="flex flex-col justify-between flex-grow space-y-3">
-                    <div className="space-y-2">
-                      {/* Header Row */}
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2 mb-1">
-                            {getSerendipityBadge(serendipityType)}
-                            {highlightTags &&
-                              highlightTags.map((tag, idx) => (
-                                <span
-                                  key={idx}
-                                  className="text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-medium tracking-wide"
-                                >
-                                  {tag}
-                                </span>
-                              ))}
-                          </div>
-
-                          <h2
-                            onClick={() => setSelectedMovieForModal(movie)}
-                            className="text-lg sm:text-xl font-bold text-white hover:text-[var(--accent-secondary)] transition-colors cursor-pointer flex items-center gap-2"
-                          >
-                            {movie.title}
-                            {year && <span className="text-slate-400 font-normal text-sm">({year})</span>}
-                          </h2>
+                {/* Content & AI Reasoning Body */}
+                <div className="flex flex-col justify-between flex-grow space-y-3">
+                  <div className="space-y-2">
+                    {/* Header Row */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          {getSerendipityBadge(serendipityType)}
+                          {highlightTags &&
+                            highlightTags.map((tag, idx) => (
+                              <span
+                                key={idx}
+                                className="text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-medium tracking-wide"
+                              >
+                                {tag}
+                              </span>
+                            ))}
                         </div>
 
-                        {/* Desktop Match Score & Watchlist & Share */}
-                        <div className="hidden md:flex items-center gap-2">
-                          <div className="text-right mr-1">
-                            <div className="text-lg font-extrabold text-[var(--accent-primary)]">{score}%</div>
-                            <div className="text-[10px] text-[var(--accent-secondary)] uppercase tracking-wider font-bold">
-                              Taste Match
-                            </div>
-                          </div>
-
-                          <button
-                            onClick={() => toggleWatchlist(movie)}
-                            className={`p-2.5 rounded-xl border transition-colors cursor-pointer ${
-                              inWatchlist
-                                ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-hover)] border-[var(--border-focus)]'
-                                : 'bg-[var(--bg-surface-elevated)] text-slate-400 border-[var(--border-subtle)] hover:text-white'
-                            }`}
-                            title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
-                          >
-                            {inWatchlist ? <BookmarkCheck className="w-5 h-5 text-[var(--accent-hover)]" /> : <Bookmark className="w-5 h-5" />}
-                          </button>
-
-                          <ShareButton
-                            movie={movie}
-                            variant="icon"
-                            iconSize="w-5 h-5"
-                            className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] text-slate-400 border-[var(--border-subtle)] hover:text-white"
-                          />
-                        </div>
+                        <h2
+                          onClick={() => setSelectedMovieForModal(movie)}
+                          className="text-lg sm:text-xl font-bold text-white hover:text-[var(--accent-secondary)] transition-colors cursor-pointer flex items-center gap-2"
+                        >
+                          {movie.title}
+                          {year && <span className="text-slate-400 font-normal text-sm">({year})</span>}
+                        </h2>
                       </div>
+
+                      {/* Desktop Match Score & Watchlist & Share */}
+                      <div className="hidden md:flex items-center gap-2">
+                        <div className="text-right mr-1">
+                          <div className="text-lg font-extrabold text-[var(--accent-primary)]">{score}%</div>
+                          <div className="text-[10px] text-[var(--accent-secondary)] uppercase tracking-wider font-bold">
+                            Taste Match
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => toggleWatchlist(movie)}
+                          className={`p-2.5 rounded-xl border transition-colors cursor-pointer ${
+                            inWatchlist
+                              ? 'bg-[var(--accent-primary)]/20 text-[var(--accent-hover)] border-[var(--border-focus)]'
+                              : 'bg-[var(--bg-surface-elevated)] text-slate-400 border-[var(--border-subtle)] hover:text-white'
+                          }`}
+                          title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}
+                        >
+                          {inWatchlist ? <BookmarkCheck className="w-5 h-5 text-[var(--accent-hover)]" /> : <Bookmark className="w-5 h-5" />}
+                        </button>
+
+                        <ShareButton
+                          movie={movie}
+                          variant="icon"
+                          iconSize="w-5 h-5"
+                          className="p-2.5 rounded-xl bg-[var(--bg-surface-elevated)] text-slate-400 border-[var(--border-subtle)] hover:text-white"
+                        />
+                      </div>
+                    </div>
 
                     {/* Movie Metadata bar */}
                     <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
@@ -472,12 +498,31 @@ export const RankedFeed: React.FC = () => {
                       />
                     </div>
 
-                    <button
-                      onClick={() => setSelectedMovieForModal(movie)}
-                      className="text-xs text-[var(--accent-primary)] hover:text-[var(--accent-hover)] hover:underline font-bold self-end sm:self-center transition-colors cursor-pointer"
-                    >
-                      Trailer & Details
-                    </button>
+                    <div className="flex flex-wrap items-center gap-3 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => handleHideFilm(movie.id, 'seen', displayTitle)}
+                        aria-label={`Seen it: ${displayTitle}`}
+                        className="text-xs text-slate-400 hover:text-slate-200 transition-colors cursor-pointer focus-ring rounded px-1.5 py-0.5"
+                      >
+                        Seen it
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleHideFilm(movie.id, 'not_for_me', displayTitle)}
+                        aria-label={`Not for me: ${displayTitle}`}
+                        className="text-xs text-slate-400 hover:text-slate-200 transition-colors cursor-pointer focus-ring rounded px-1.5 py-0.5"
+                      >
+                        Not for me
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMovieForModal(movie)}
+                        className="text-xs text-[var(--accent-primary)] hover:text-[var(--accent-hover)] hover:underline font-bold transition-colors cursor-pointer focus-ring rounded px-1.5 py-0.5"
+                      >
+                        Trailer & Details
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

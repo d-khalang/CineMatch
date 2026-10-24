@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   Cpu,
@@ -35,7 +35,17 @@ interface SettingsModalProps {
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
-  const { aiSettings, updateAISettings, showToast } = useMovieStore();
+  const { aiSettings, updateAISettings, showToast, hiddenFilms = [], restoreFilm } = useMovieStore();
+
+  const sortedHiddenFilms = useMemo(() => {
+    return [...hiddenFilms].sort(
+      (a, b) => (Number(b.hiddenAt) || 0) - (Number(a.hiddenAt) || 0)
+    );
+  }, [hiddenFilms]);
+
+  const visibleHiddenFilms = useMemo(() => {
+    return sortedHiddenFilms.slice(0, 50);
+  }, [sortedHiddenFilms]);
 
   const [provider, setProvider] = useState<AIProviderId>(aiSettings.activeProvider);
   const [geminiModel, setGeminiModel] = useState<string>(aiSettings.geminiModel || 'gemini-3.8-flash');
@@ -278,7 +288,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setIsSaving(false);
     }
   };
-
 
   return (
     <div
@@ -732,6 +741,61 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     {aiTesting.success ? <CheckCircle className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
                     <span>{aiTesting.message}</span>
                   </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Hidden Films Section */}
+          <div className="space-y-3 p-4 rounded-2xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <EyeOff className="w-4 h-4 text-[var(--accent-primary)]" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  Hidden films ({hiddenFilms.length})
+                </h3>
+              </div>
+            </div>
+
+            {hiddenFilms.length === 0 ? (
+              <p className="text-xs text-slate-400 py-1">No hidden films.</p>
+            ) : (
+              <div className="space-y-2">
+                <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                  {visibleHiddenFilms.map((film, index) => {
+                    const displayTitle =
+                      film.title && film.title.trim() ? film.title.trim() : `#${film.movieId}`;
+                    const reasonLabel = film.reason === 'seen' ? 'Seen' : 'Not for me';
+
+                    return (
+                      <div
+                        key={`${film.movieId}-${film.hiddenAt || index}`}
+                        className="flex items-center justify-between gap-3 p-2 rounded-xl bg-black/20 border border-white/5 text-xs"
+                      >
+                        <div className="min-w-0 flex-1 flex items-center gap-2">
+                          <span className="font-medium text-slate-200 truncate">
+                            {displayTitle}
+                          </span>
+                          <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full palette-tag-secondary font-medium">
+                            {reasonLabel}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => restoreFilm(film.movieId)}
+                          aria-label={`Restore: ${displayTitle}`}
+                          className="shrink-0 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-medium border border-white/10 transition-colors cursor-pointer focus-ring"
+                        >
+                          Restore
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                {hiddenFilms.length > 50 && (
+                  <p className="text-xs text-slate-400 text-center pt-1">
+                    …and {hiddenFilms.length - 50} more
+                  </p>
                 )}
               </div>
             )}
