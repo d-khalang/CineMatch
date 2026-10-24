@@ -21,8 +21,7 @@ export const DiscoveryFilters: React.FC = () => {
   const { aiSettings, updateAISettings, generateRankings, isGeneratingRecs, recsSettingsStale } = useMovieStore();
 
   const handleSerendipityChange = (val: number) => {
-    const sanitized = Number.isFinite(val) ? Math.min(100, Math.max(0, val)) : 40;
-    updateAISettings({ serendipityLevel: sanitized });
+    updateAISettings({ serendipityLevel: val });
   };
 
   const toggleVibe = (vibe: string) => {
@@ -37,8 +36,7 @@ export const DiscoveryFilters: React.FC = () => {
     updateAISettings({ preferredEras: updated });
   };
 
-  const getSerendipityLabel = (rawLevel: number) => {
-    const level = typeof rawLevel === 'number' && Number.isFinite(rawLevel) ? rawLevel : 40;
+  const getSerendipityLabel = (level: number) => {
     if (level < 25) return { title: 'Safe Bets', desc: 'Predictable high-accuracy matches matching your proven favorites', color: 'text-[var(--accent-secondary)] font-bold' };
     if (level < 60) return { title: 'Balanced Discovery', desc: 'A smart blend of core favorites and fresh thematic twists', color: 'text-slate-200 font-bold' };
     if (level < 85) return { title: 'Hidden Gems', desc: 'Branching outside usual comfort zones with high-quality under-the-radar cinema', color: 'text-[var(--accent-hover)] font-bold' };

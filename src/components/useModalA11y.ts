@@ -14,24 +14,25 @@ const FOCUSABLE_SELECTOR = [
   '[contenteditable]:not([contenteditable="false"])',
 ].join(', ');
 
-function isFocusable(el: HTMLElement): boolean {
+export function isFocusable(el: HTMLElement): boolean {
   if (el.hasAttribute('disabled') || (el as any).disabled === true) return false;
   if (el.getAttribute('aria-hidden') === 'true' || Boolean(el.closest('[aria-hidden="true"]'))) return false;
   if (el.hasAttribute('hidden') || Boolean(el.closest('[hidden]'))) return false;
-  if (el.classList.contains('hidden') || Boolean(el.closest('.hidden'))) return false;
 
   let curr: HTMLElement | null = el;
   while (curr) {
     if (curr.style?.display === 'none' || curr.style?.visibility === 'hidden') {
       return false;
     }
+    if (typeof window !== 'undefined' && window.getComputedStyle) {
+      const style = window.getComputedStyle(curr);
+      if (style.display === 'none' || style.visibility === 'hidden') {
+        return false;
+      }
+    }
     curr = curr.parentElement;
   }
 
-  if (typeof window !== 'undefined' && window.getComputedStyle) {
-    const style = window.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden') return false;
-  }
   return true;
 }
 
@@ -53,6 +54,11 @@ export interface UseModalA11yOptions {
  * - Traps Tab and Shift+Tab navigation within the container
  * - Closes on Escape
  * - On close: returns focus to the opener element
+ *
+ * Note on modal stack: Stacked/nested modals are intentionally unsupported.
+ * Each open modal registers a document capture keydown listener, so stacked modals
+ * would cause a single Escape key to dismiss all open modals and their focus traps
+ * would conflict. CineMatch only ever mounts or displays one modal dialog at a time.
  */
 export function useModalA11y<T extends HTMLElement = HTMLDivElement>(
   isOpen: boolean,
@@ -168,15 +174,26 @@ export function useModalA11y<T extends HTMLElement = HTMLDivElement>(
         const first = focusables[0];
         const last = focusables[focusables.length - 1];
         const active = document.activeElement;
-        const activeIndex = focusables.indexOf(active as HTMLElement);
+
+        const isLeavingBackward =
+          !active ||
+          active === first ||
+          !container.contains(active) ||
+          Boolean(first.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_PRECEDING);
+
+        const isLeavingForward =
+          !active ||
+          active === last ||
+          !container.contains(active) ||
+          Boolean(last.compareDocumentPosition(active) & Node.DOCUMENT_POSITION_FOLLOWING);
 
         if (e.shiftKey) {
-          if (active === first || !container.contains(active) || activeIndex === -1) {
+          if (isLeavingBackward) {
             e.preventDefault();
             last.focus();
           }
         } else {
-          if (active === last || !container.contains(active) || activeIndex === -1) {
+          if (isLeavingForward) {
             e.preventDefault();
             first.focus();
           }
