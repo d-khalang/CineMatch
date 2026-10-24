@@ -21,7 +21,9 @@ export const DiscoveryFilters: React.FC = () => {
   const { aiSettings, updateAISettings, generateRankings, isGeneratingRecs, recsSettingsStale } = useMovieStore();
 
   const handleSerendipityChange = (val: number) => {
-    updateAISettings({ serendipityLevel: val });
+    // The one clamp: stored settings and imports can carry non-finite or out-of-range values.
+    const level = Number.isFinite(val) ? Math.min(100, Math.max(0, val)) : 40;
+    updateAISettings({ serendipityLevel: level });
   };
 
   const toggleVibe = (vibe: string) => {

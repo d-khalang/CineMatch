@@ -19,17 +19,13 @@ export function isFocusable(el: HTMLElement): boolean {
   if (el.getAttribute('aria-hidden') === 'true' || Boolean(el.closest('[aria-hidden="true"]'))) return false;
   if (el.hasAttribute('hidden') || Boolean(el.closest('[hidden]'))) return false;
 
+  if (typeof window === 'undefined' || !window.getComputedStyle) return true;
+  // visibility is inherited and can be overridden by a child, so check it on the element only.
+  if (window.getComputedStyle(el).visibility === 'hidden') return false;
+  // display:none on any ancestor hides the subtree.
   let curr: HTMLElement | null = el;
-  while (curr) {
-    if (curr.style?.display === 'none' || curr.style?.visibility === 'hidden') {
-      return false;
-    }
-    if (typeof window !== 'undefined' && window.getComputedStyle) {
-      const style = window.getComputedStyle(curr);
-      if (style.display === 'none' || style.visibility === 'hidden') {
-        return false;
-      }
-    }
+  while (curr && curr !== document.body) {
+    if (window.getComputedStyle(curr).display === 'none') return false;
     curr = curr.parentElement;
   }
 
