@@ -19,10 +19,8 @@ export interface CsvParseResult {
   totalRows: number;
 }
 
-// CIN-47 stub
 export type LetterboxdCsvKind = 'ratings' | 'watched' | 'unknown';
 
-// CIN-47 stub
 export interface WatchedRow {
   title: string;
   year?: string;
@@ -30,23 +28,75 @@ export interface WatchedRow {
   watchedAt?: number; // epoch ms from the Date column; undefined if unparseable or in the future
 }
 
-// CIN-47 stub
 export interface WatchedParseResult {
   accepted: WatchedRow[];
   rejected: { row: number; title?: string; reason: string }[];
   totalRows: number;
 }
 
-// CIN-47 stub
 export function detectLetterboxdCsvKind(headers: string[]): LetterboxdCsvKind {
-  void headers;
-  throw new Error('CIN-47 not implemented: detectLetterboxdCsvKind');
+  const normalized = headers.map((h) =>
+    typeof h === 'string' ? h.replace(/^\uFEFF/, '').trim().toLowerCase() : ''
+  );
+  const hasName = normalized.includes('name');
+  if (!hasName) return 'unknown';
+  if (normalized.includes('rating')) return 'ratings';
+  if (normalized.includes('letterboxd uri') || normalized.includes('year')) return 'watched';
+  return 'unknown';
 }
 
-// CIN-47 stub
 export function parseWatchedCsv(csvContent: string): WatchedParseResult {
-  void csvContent;
-  throw new Error('CIN-47 not implemented: parseWatchedCsv');
+  const cleanContent = csvContent.replace(/^\uFEFF/, '').trim();
+
+  const parseOutput = Papa.parse<Record<string, string>>(cleanContent, {
+    header: true,
+    skipEmptyLines: 'greedy',
+    transformHeader: (h) => h.trim().toLowerCase(),
+  });
+
+  const rows = parseOutput.data;
+  const accepted: WatchedRow[] = [];
+  const rejected: { row: number; title?: string; reason: string }[] = [];
+
+  if (!rows || rows.length === 0) {
+    return { accepted, rejected, totalRows: 0 };
+  }
+
+  rows.forEach((row, index) => {
+    const rowNum = index + 2; // 1-based + 1 for header
+    const rawTitle = row['name'] || row['title'] || '';
+    const rawYear = row['year'] || '';
+    const rawUri = row['letterboxd uri'] || row['uri'] || '';
+    const rawDate = row['date'] || row['watched date'] || '';
+
+    const title = rawTitle.trim();
+    if (!title) {
+      rejected.push({ row: rowNum, reason: 'Missing movie title' });
+      return;
+    }
+
+    const item: WatchedRow = { title };
+    const trimmedYear = rawYear.trim();
+    if (trimmedYear) {
+      item.year = trimmedYear.slice(0, 4);
+    }
+    const trimmedUri = rawUri.trim();
+    if (trimmedUri) {
+      item.sourceId = trimmedUri;
+    }
+    const watchedAt = parseWatchedDate(rawDate);
+    if (watchedAt !== undefined) {
+      item.watchedAt = watchedAt;
+    }
+
+    accepted.push(item);
+  });
+
+  return {
+    accepted,
+    rejected,
+    totalRows: rows.length,
+  };
 }
 
 /**
@@ -104,6 +154,38 @@ function parseYmdDate(raw?: string): number | undefined {
   }
 
   return utcMs;
+}
+
+/**
+ * Parses YYYY-MM-DD or parseable date string as UTC midnight.
+ * An unparseable date or one in the future returns undefined.
+ */
+function parseWatchedDate(raw?: string): number | undefined {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return parseYmdDate(trimmed);
+  }
+
+  const ms = Date.parse(trimmed);
+  if (isNaN(ms) || !Number.isFinite(ms)) {
+    return undefined;
+  }
+
+  const d = new Date(ms);
+  const utcMidnight = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const now = new Date(Date.now());
+  const tomorrowUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  const tomorrowLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+  const futureThreshold = Math.max(tomorrowUtc, tomorrowLocal);
+
+  if (utcMidnight >= futureThreshold) {
+    return undefined;
+  }
+
+  return utcMidnight;
 }
 
 /**
