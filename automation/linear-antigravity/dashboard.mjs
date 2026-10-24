@@ -251,7 +251,11 @@ async function current() {
   return inflight;
 }
 
+// Blocks DNS rebinding: a hostile page resolving its own name to 127.0.0.1 still sends its name as Host.
+const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
+
 http.createServer(async (request, response) => {
+  if (!allowedHosts.has(request.headers.host)) return response.writeHead(403).end();
   try {
     if (request.url === '/api/state') {
       const data = await current();
