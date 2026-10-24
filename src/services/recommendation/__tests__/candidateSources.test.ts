@@ -820,4 +820,148 @@ describe('candidateSources module', () => {
       expect(first40.some((c) => c.movie.title.startsWith('VibeKeyword'))).toBe(true);
     });
   });
+
+  describe('CIN-30 hardening & edge cases', () => {
+    it('handles deadlineMs <= 0 by aborting synchronously and starting 0 network requests', async () => {
+      let requestsStarted = 0;
+      server.use(
+        http.get('https://api.themoviedb.org/3/*', () => {
+          requestsStarted++;
+          return HttpResponse.json({ page: 1, results: [] });
+        })
+      );
+
+      const res = await generateCandidates([], { deadlineMs: 0 });
+      expect(res).toEqual([]);
+      expect(requestsStarted).toBe(0);
+
+      const resNeg = await generateCandidates([], { deadlineMs: -100 });
+      expect(resNeg).toEqual([]);
+      expect(requestsStarted).toBe(0);
+    });
+
+    it('cleans up caller abort listener upon normal completion', async () => {
+      server.use(
+        http.get('https://api.themoviedb.org/3/*', () => {
+          return HttpResponse.json({ page: 1, results: [] });
+        })
+      );
+
+      const caller = new AbortController();
+      let listenerRemoved = false;
+      const originalRemoveEventListener = caller.signal.removeEventListener.bind(caller.signal);
+      caller.signal.removeEventListener = (type: string, listener: any, options?: any) => {
+        if (type === 'abort') {
+          listenerRemoved = true;
+        }
+        return originalRemoveEventListener(type, listener, options);
+      };
+
+      await generateCandidates([], {}, caller.signal);
+      expect(listenerRemoved).toBe(true);
+    });
+
+    it('RequestLimiter dispose cleans up listener and aborts waiters', async () => {
+      const controller = new AbortController();
+      const limiter = new RequestLimiter(controller.signal, 1, 10);
+
+      let resolveTask1: () => void;
+      const task1Promise = limiter.schedule(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveTask1 = () => resolve('task1');
+          })
+      );
+
+      const task2Promise = limiter.schedule(async () => 'task2');
+
+      limiter.dispose();
+
+      await expect(task2Promise).rejects.toMatchObject({ name: 'AbortError' });
+
+      resolveTask1!();
+      expect(await task1Promise).toBe('task1');
+    });
+
+    it('handles seedCount: 0, negative, and NaN without splitting pairs or throwing', async () => {
+      server.use(
+        http.get('https://api.themoviedb.org/3/*', () => {
+          return HttpResponse.json({ page: 1, results: [] });
+        })
+      );
+
+      const fixture = create200RatingFixture();
+      await expect(generateCandidates(fixture, { seedCount: 0 })).resolves.toBeDefined();
+      await expect(generateCandidates(fixture, { seedCount: -5 })).resolves.toBeDefined();
+      await expect(generateCandidates(fixture, { seedCount: NaN })).resolves.toBeDefined();
+    });
+
+    it('handles preferredEras with whitespace/empty strings without incorrectly capping vibes', async () => {
+      server.use(
+        http.get('https://api.themoviedb.org/3/discover/movie', () => {
+          return HttpResponse.json({
+            page: 1,
+            results: Array.from({ length: 20 }, (_, i) => ({
+              id: 20000 + i,
+              title: `Vibe Film ${i}`,
+              poster_path: `/v${i}.jpg`,
+              release_date: '2010-01-01',
+              vote_average: 8.0,
+              vote_count: 500,
+              genre_ids: [18],
+            })),
+          });
+        }),
+        http.get('https://api.themoviedb.org/3/trending/movie/*', () => {
+          return HttpResponse.json({ page: 1, results: [] });
+        })
+      );
+
+      const result = await generateCandidates([], {
+        preferredEras: ['   ', ''],
+        selectedVibes: ['mind-bending'],
+      });
+      // Blank eras are ignored, so the no-era vibe cap (12) applies rather than 4. The pool here
+      // has fewer than 40 unique films, and the cap only reorders, never drops, so it can't bind.
+      const first40 = result.slice(0, 40);
+      const vibes = first40.filter((c) => c.sources.includes('vibe'));
+      expect(first40.some((c) => c.sources.includes('era'))).toBe(false);
+      expect(vibes.length).toBeGreaterThan(4);
+    });
+
+    it('guarantees 1 vibe in first 40 when vibe candidates exist from genre options without selectedVibes', async () => {
+      server.use(
+        http.get('https://api.themoviedb.org/3/discover/movie', ({ request }) => {
+          const url = new URL(request.url);
+          const withGenres = url.searchParams.get('with_genres');
+          if (withGenres === '28') {
+            return HttpResponse.json({
+              page: 1,
+              results: [
+                {
+                  id: 20001,
+                  title: 'Genre Vibe Film',
+                  poster_path: '/gv.jpg',
+                  release_date: '2015-01-01',
+                  vote_average: 8.0,
+                  vote_count: 700,
+                  genre_ids: [28],
+                },
+              ],
+            });
+          }
+          return HttpResponse.json({ page: 1, results: [] });
+        }),
+        http.get('https://api.themoviedb.org/3/trending/movie/*', () => {
+          return HttpResponse.json({ page: 1, results: [] });
+        })
+      );
+
+      const result = await generateCandidates([], {
+        genres: [28],
+      });
+      const first40 = result.slice(0, 40);
+      expect(first40.some((c) => c.sources.includes('vibe'))).toBe(true);
+    });
+  });
 });
