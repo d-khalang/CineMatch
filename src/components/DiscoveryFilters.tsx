@@ -21,7 +21,8 @@ export const DiscoveryFilters: React.FC = () => {
   const { aiSettings, updateAISettings, generateRankings, isGeneratingRecs, recsSettingsStale } = useMovieStore();
 
   const handleSerendipityChange = (val: number) => {
-    updateAISettings({ serendipityLevel: val });
+    const sanitized = Number.isFinite(val) ? Math.min(100, Math.max(0, val)) : 40;
+    updateAISettings({ serendipityLevel: sanitized });
   };
 
   const toggleVibe = (vibe: string) => {
@@ -36,14 +37,20 @@ export const DiscoveryFilters: React.FC = () => {
     updateAISettings({ preferredEras: updated });
   };
 
-  const getSerendipityLabel = (level: number) => {
+  const getSerendipityLabel = (rawLevel: number) => {
+    const level = typeof rawLevel === 'number' && Number.isFinite(rawLevel) ? rawLevel : 40;
     if (level < 25) return { title: 'Safe Bets', desc: 'Predictable high-accuracy matches matching your proven favorites', color: 'text-[var(--accent-secondary)] font-bold' };
     if (level < 60) return { title: 'Balanced Discovery', desc: 'A smart blend of core favorites and fresh thematic twists', color: 'text-slate-200 font-bold' };
     if (level < 85) return { title: 'Hidden Gems', desc: 'Branching outside usual comfort zones with high-quality under-the-radar cinema', color: 'text-[var(--accent-hover)] font-bold' };
     return { title: 'Wildcard Horizon', desc: 'Bold, genre-defying recommendations sharing deeper emotional & narrative DNA', color: 'text-[var(--accent-primary)] font-extrabold' };
   };
 
-  const currentSerendipity = getSerendipityLabel(aiSettings.serendipityLevel);
+  const rawLevel = aiSettings.serendipityLevel;
+  const serendipityLevel =
+    typeof rawLevel === 'number' && Number.isFinite(rawLevel)
+      ? Math.min(100, Math.max(0, rawLevel))
+      : 40;
+  const currentSerendipity = getSerendipityLabel(serendipityLevel);
 
   return (
     <div className="glass-panel rounded-2xl p-5 sm:p-6 mb-8 border border-[var(--border-subtle)] space-y-6">
@@ -83,7 +90,7 @@ export const DiscoveryFilters: React.FC = () => {
             <Compass className="w-4 h-4 text-[var(--accent-secondary)]" />
             <span className="text-sm font-semibold text-slate-200">Recommendation Serendipity:</span>
             <span className={`text-sm font-bold ${currentSerendipity.color}`}>
-              {aiSettings.serendipityLevel}% — {currentSerendipity.title}
+              {serendipityLevel}% — {currentSerendipity.title}
             </span>
           </div>
         </div>
@@ -97,7 +104,9 @@ export const DiscoveryFilters: React.FC = () => {
             min="0"
             max="100"
             step="5"
-            value={aiSettings.serendipityLevel}
+            aria-label="Recommendation serendipity"
+            aria-valuetext={`${serendipityLevel}% — ${currentSerendipity.title}`}
+            value={serendipityLevel}
             onChange={(e) => handleSerendipityChange(Number(e.target.value))}
             className="w-full h-2.5 bg-[var(--bg-surface-elevated)] rounded-lg appearance-none cursor-pointer accent-[var(--accent-primary)] focus-ring border border-[var(--border-subtle)]"
           />
