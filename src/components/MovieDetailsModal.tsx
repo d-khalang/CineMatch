@@ -7,30 +7,18 @@ import { RatingControl } from './RatingControl';
 import { ShareButton } from './ShareButton';
 import { useModalA11y } from './useModalA11y';
 
-interface MovieDetailsModalProps {
-  isOpen?: boolean;
-  onClose?: () => void;
-  movie?: Movie | null;
-}
-
-export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
-  isOpen: propIsOpen,
-  onClose: propOnClose,
-  movie: propMovie,
-}) => {
+export const MovieDetailsModal: React.FC = () => {
   const { selectedMovieForModal, setSelectedMovieForModal, ratings, setRating, removeRating, watchlist, toggleWatchlist } = useMovieStore();
   const [movieDetails, setMovieDetails] = useState<Movie | null>(null);
   const [showTrailer, setShowTrailer] = useState<boolean>(false);
 
-  const isControlled = propIsOpen !== undefined;
-  const isOpen = isControlled ? propIsOpen : Boolean(selectedMovieForModal);
-  const handleClose = propOnClose !== undefined ? propOnClose : () => setSelectedMovieForModal(null);
+  const isOpen = Boolean(selectedMovieForModal);
+  const handleClose = () => setSelectedMovieForModal(null);
   const modalRef = useModalA11y(isOpen, handleClose);
-  const targetMovie = propMovie !== undefined ? propMovie : selectedMovieForModal;
-  const movieId = targetMovie?.id;
+  const movieId = selectedMovieForModal?.id;
 
   useEffect(() => {
-    if (!targetMovie || !movieId) {
+    if (!selectedMovieForModal || !movieId) {
       setMovieDetails(null);
       setShowTrailer(false);
       return;
@@ -49,7 +37,7 @@ export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
         if (abortController.signal.aborted) return;
         console.error('Failed to load full movie details', err);
         if (isMounted) {
-          setMovieDetails(targetMovie);
+          setMovieDetails(selectedMovieForModal);
         }
       });
 
@@ -57,11 +45,11 @@ export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
       isMounted = false;
       abortController.abort();
     };
-  }, [movieId, targetMovie]);
+  }, [movieId, selectedMovieForModal]);
 
-  if (!isOpen || !targetMovie) return null;
+  if (!isOpen || !selectedMovieForModal) return null;
 
-  const movie = movieDetails || targetMovie;
+  const movie = movieDetails || selectedMovieForModal;
   const userRating = ratings[movie.id]?.rating;
   const inWatchlist = watchlist.includes(movie.id);
   const backdropUrl = movie.backdrop_path ? `${BACKDROP_BASE_URL}${movie.backdrop_path}` : null;
