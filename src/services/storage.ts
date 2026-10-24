@@ -25,6 +25,8 @@ export interface CachedRecommendationsData {
   generatedAt: number;
   usedProvider: string;
   tasteAnalysis?: string | null;
+  settingsFingerprint?: string;
+  ratedCount?: number;
 }
 
 export interface StorageStatus {

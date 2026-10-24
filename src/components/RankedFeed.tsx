@@ -27,6 +27,7 @@ export const RankedFeed: React.FC = () => {
     isGeneratingRecs,
     generateRankings,
     lastProviderUsed,
+    lastRunRatedCount,
     recommendationError,
     aiTasteAnalysis,
     setRating,
@@ -50,6 +51,9 @@ export const RankedFeed: React.FC = () => {
   }, []);
 
   const ratedCount = Object.keys(ratings).length;
+  const analyzedRatedCount = lastRunRatedCount ?? ratedCount;
+  const hasNewSince = lastRunRatedCount !== null && ratedCount > lastRunRatedCount;
+  const newSinceCount = hasNewSince ? ratedCount - lastRunRatedCount : 0;
 
   const handleRateRecommendedMovie = (movie: Movie, val: number) => {
     setRating(movie, val);
@@ -198,8 +202,11 @@ export const RankedFeed: React.FC = () => {
               Top Ranked Movies for You
             </h1>
           </div>
-          <p className="text-xs sm:text-sm text-slate-400 mt-1 flex items-center gap-2">
-            <span>Ranked by AI analyzing {ratedCount} of your ratings</span>
+          <p className="text-xs sm:text-sm text-slate-400 mt-1 flex flex-wrap items-center gap-2">
+            <span>
+              Ranked by AI analyzing {analyzedRatedCount} of your ratings
+              {hasNewSince && ` · ${newSinceCount} new since`}
+            </span>
             {lastProviderUsed && (
               <>
                 <span>•</span>
