@@ -19,6 +19,36 @@ export interface CsvParseResult {
   totalRows: number;
 }
 
+// CIN-47 stub
+export type LetterboxdCsvKind = 'ratings' | 'watched' | 'unknown';
+
+// CIN-47 stub
+export interface WatchedRow {
+  title: string;
+  year?: string;
+  sourceId?: string; // Letterboxd URI
+  watchedAt?: number; // epoch ms from the Date column; undefined if unparseable or in the future
+}
+
+// CIN-47 stub
+export interface WatchedParseResult {
+  accepted: WatchedRow[];
+  rejected: { row: number; title?: string; reason: string }[];
+  totalRows: number;
+}
+
+// CIN-47 stub
+export function detectLetterboxdCsvKind(headers: string[]): LetterboxdCsvKind {
+  void headers;
+  throw new Error('CIN-47 not implemented: detectLetterboxdCsvKind');
+}
+
+// CIN-47 stub
+export function parseWatchedCsv(csvContent: string): WatchedParseResult {
+  void csvContent;
+  throw new Error('CIN-47 not implemented: parseWatchedCsv');
+}
+
 /**
  * Strips CSV formula injection characters (=, +, -, @, tab, cr) by prepending a quote
  */

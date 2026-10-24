@@ -45,6 +45,8 @@ interface MovieStoreContextType {
   watchlist: number[];
   hiddenFilms: HiddenFilm[];
   hideFilm: (movieId: number, reason: HiddenFilm['reason'], title?: string) => void;
+  // CIN-47 stub: batch hide that preserves each entry's hiddenAt
+  hideFilms: (entries: HiddenFilm[]) => void;
   restoreFilm: (movieId: number) => void;
   watchlistMovies: Record<number, Movie>;
   aiSettings: AISettings;
@@ -992,6 +994,12 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, [ratings, hiddenFilms, aiSettings, cancelGeneration, showToast]);
 
+  // CIN-47 stub
+  const hideFilms = useCallback((entries: HiddenFilm[]) => {
+    void entries;
+    throw new Error('CIN-47 not implemented: hideFilms');
+  }, []);
+
   return (
     <MovieStoreContext.Provider
       value={{
@@ -999,6 +1007,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         watchlist,
         hiddenFilms,
         hideFilm,
+        hideFilms,
         restoreFilm,
         watchlistMovies,
         aiSettings,
