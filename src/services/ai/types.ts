@@ -13,6 +13,7 @@ export interface RecommendationRequest {
 export interface UnconstrainedDiscovery {
   title: string;
   year?: string;
+  release_date?: string;
   score: number;
   reason: string;
   highlightTags: string[];

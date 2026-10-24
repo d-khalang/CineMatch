@@ -59,14 +59,12 @@ export const DiscoveryFilters: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
-          {recsSettingsStale && !isGeneratingRecs && (
-            <span
-              role="status"
-              className="text-xs text-[var(--accent-secondary)] font-medium"
-            >
-              Settings changed — re-rank to apply
-            </span>
-          )}
+          <span
+            role="status"
+            className="text-xs text-[var(--accent-secondary)] font-medium"
+          >
+            {recsSettingsStale && !isGeneratingRecs ? 'Settings changed — re-rank to apply' : ''}
+          </span>
           <button
             onClick={generateRankings}
             disabled={isGeneratingRecs}
