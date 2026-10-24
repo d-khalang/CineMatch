@@ -46,6 +46,8 @@ vi.mock('../../services/credentialStore', () => ({
     getCredentials: vi.fn().mockReturnValue({ tmdbApiKey: 'test-tmdb-key' }),
     getVersion: vi.fn().mockReturnValue(1),
     subscribe: vi.fn().mockReturnValue(() => {}),
+    forgetAll: vi.fn(),
+    clearAllData: vi.fn(),
   },
 }));
 
