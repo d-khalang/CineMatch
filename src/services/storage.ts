@@ -530,7 +530,7 @@ export const validateHiddenFilms = (data: unknown): HiddenFilm[] => {
     const hiddenAt =
       typeof raw.hiddenAt === 'number' && Number.isFinite(raw.hiddenAt)
         ? raw.hiddenAt
-        : 0;
+        : Date.now();
     const entry: HiddenFilm =
       typeof raw.title === 'string'
         ? { movieId, reason: raw.reason, hiddenAt, title: raw.title }

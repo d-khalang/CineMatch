@@ -4,7 +4,7 @@ import { render, screen, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RankedFeed } from '../RankedFeed';
 import { Toast } from '../Toast';
-import { MovieStoreProvider } from '../../store/useMovieStore';
+import { MovieStoreProvider, useMovieStore } from '../../store/useMovieStore';
 import { STORAGE_KEYS, clearInMemoryStoreForTesting } from '../../services/storage';
 import { aiManager } from '../../services/ai/aiManager';
 
@@ -427,6 +427,10 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
     expect(seenBtn).toHaveClass('focus-ring');
     expect(notForMeBtn).toHaveClass('focus-ring');
 
+    // Verify tap target classes (AC6)
+    expect(seenBtn).toHaveClass('py-2', 'sm:py-0.5');
+    expect(notForMeBtn).toHaveClass('py-2', 'sm:py-0.5');
+
     // Verify keyboard reachability
     seenBtn.focus();
     expect(document.activeElement).toBe(seenBtn);
@@ -435,20 +439,142 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
     expect(document.activeElement).toBe(notForMeBtn);
   });
 
-  it('hidden film cannot flash back during or after an in-flight generation (Review focus)', () => {
+  it('hidden film cannot flash back during or after an in-flight generation (Review focus)', async () => {
     localStorage.setItem(STORAGE_KEYS.RATINGS, JSON.stringify(seededRatings));
     localStorage.setItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS, JSON.stringify(cachedRecs));
 
-    // Film A is recorded as hidden
-    const hiddenData = [
-      {
-        movieId: 301,
-        title: 'Candidate Film A',
-        reason: 'seen',
-        hiddenAt: Date.now(),
-      },
-    ];
-    localStorage.setItem(STORAGE_KEYS.HIDDEN_FILMS, JSON.stringify(hiddenData));
+    let resolveDeferred!: (value: unknown) => void;
+    const deferredPromise = new Promise((resolve) => {
+      resolveDeferred = resolve;
+    });
+
+    vi.mocked(aiManager.generateRecommendations).mockReturnValue(deferredPromise as any);
+
+    let storeCapture: ReturnType<typeof useMovieStore> | null = null;
+    const StoreSpy = () => {
+      storeCapture = useMovieStore();
+      return null;
+    };
+
+    render(
+      <MovieStoreProvider>
+        <StoreSpy />
+        <RankedFeed />
+      </MovieStoreProvider>
+    );
+
+    // Initial state: Candidate Film A and Candidate Film B are rendered
+    expect(screen.getByText('Candidate Film A')).toBeInTheDocument();
+    expect(screen.getByText('Candidate Film B')).toBeInTheDocument();
+
+    // Start generation (Re-Rank with AI)
+    const reRankBtn = screen.getByRole('button', { name: /Re-Rank with AI/i });
+    await act(async () => {
+      fireEvent.click(reRankBtn);
+    });
+
+    // Generation is now pending
+    expect(aiManager.generateRecommendations).toHaveBeenCalledTimes(1);
+    expect(storeCapture!.isGeneratingRecs).toBe(true);
+
+    // While generation is pending, hide Candidate Film A through the store
+    act(() => {
+      storeCapture!.hideFilm(301, 'seen', 'Candidate Film A');
+    });
+
+    expect(storeCapture!.hiddenFilms.some((h) => h.movieId === 301)).toBe(true);
+
+    // Resolve deferred promise with a result containing Candidate Film A
+    await act(async () => {
+      resolveDeferred({
+        recommendations: [
+          {
+            movie: {
+              id: 301,
+              title: 'Candidate Film A',
+              overview: 'An awesome movie',
+              release_date: '2021-05-15',
+              vote_average: 8.5,
+              vote_count: 1200,
+              poster_path: null,
+              backdrop_path: null,
+              genres: [{ id: 18, name: 'Drama' }],
+            },
+            score: 95,
+            rank: 1,
+            reason: 'Matches your taste for drama',
+            serendipityType: 'safe_bet',
+            highlightTags: [],
+          },
+          {
+            movie: {
+              id: 302,
+              title: 'Candidate Film B',
+              overview: 'Another exciting film',
+              release_date: '2022-08-20',
+              vote_average: 7.9,
+              vote_count: 900,
+              poster_path: null,
+              backdrop_path: null,
+              genres: [{ id: 878, name: 'Sci-Fi' }],
+            },
+            score: 90,
+            rank: 2,
+            reason: 'Recommended based on sci-fi ratings',
+            serendipityType: 'safe_bet',
+            highlightTags: [],
+          },
+        ],
+        usedProvider: 'gemini',
+      });
+    });
+
+    expect(storeCapture!.isGeneratingRecs).toBe(false);
+
+    // Candidate Film A never appears in the feed; Candidate Film B remains
+    expect(screen.queryByText('Candidate Film A')).toBeNull();
+    expect(screen.getByText('Candidate Film B')).toBeInTheDocument();
+
+    // Verify persisted cache excludes Film A and retains Film B
+    const storedRecs = JSON.parse(
+      localStorage.getItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS) || '{}'
+    );
+    expect(
+      storedRecs.recommendations?.some((r: { movie: { id: number } }) => r.movie.id === 301)
+    ).toBe(false);
+    expect(
+      storedRecs.recommendations?.some((r: { movie: { id: number } }) => r.movie.id === 302)
+    ).toBe(true);
+  });
+
+  it('moves focus after clicking Seen it or Not for me to next card, previous card, or feed h1 (CIN-44)', () => {
+    const threeRecs = {
+      ...cachedRecs,
+      recommendations: [
+        cachedRecs.recommendations[0], // 301: Candidate Film A
+        cachedRecs.recommendations[1], // 302: Candidate Film B
+        {
+          movie: {
+            id: 303,
+            title: 'Candidate Film C',
+            overview: 'Third movie',
+            release_date: '2023-01-01',
+            vote_average: 7.0,
+            vote_count: 500,
+            poster_path: null,
+            backdrop_path: null,
+            genres: [{ id: 35, name: 'Comedy' }],
+          },
+          score: 85,
+          rank: 3,
+          reason: 'Comedy match',
+          serendipityType: 'safe_bet',
+          highlightTags: [],
+        },
+      ],
+    };
+    localStorage.setItem(STORAGE_KEYS.RATINGS, JSON.stringify(seededRatings));
+    localStorage.setItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS, JSON.stringify(threeRecs));
 
     render(
       <MovieStoreProvider>
@@ -456,9 +582,131 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
       </MovieStoreProvider>
     );
 
-    // Film A is suppressed from the feed; Film B remains
+    // 1. Click "Seen it: Candidate Film A" (index 0).
+    // Focus moves to the next card's "Seen it" button (Candidate Film B).
+    const seenBtnA = screen.getByRole('button', { name: 'Seen it: Candidate Film A' });
+    fireEvent.click(seenBtnA);
+
+    const seenBtnB = screen.getByRole('button', { name: 'Seen it: Candidate Film B' });
+    expect(document.activeElement).toBe(seenBtnB);
+    expect(document.activeElement).not.toBe(document.body);
+
+    // 2. Click "Not for me: Candidate Film C" (the last card, now at index 1).
+    // There is no next card, so focus moves to previous card's "Seen it" button (Candidate Film B).
+    const notForMeBtnC = screen.getByRole('button', { name: 'Not for me: Candidate Film C' });
+    fireEvent.click(notForMeBtnC);
+
+    expect(document.activeElement).toBe(seenBtnB);
+    expect(document.activeElement).not.toBe(document.body);
+
+    // 3. Click "Seen it: Candidate Film B" (the only card remaining).
+    // When there are none at all, focus moves to the feed's h1.
+    fireEvent.click(seenBtnB);
+
+    const heading = screen.getByRole('heading', { level: 1, name: /Top Ranked Movies for You/i });
+    expect(document.activeElement).toBe(heading);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('moves focus after clicking Not for me to next card or feed h1 (CIN-44)', () => {
+    localStorage.setItem(STORAGE_KEYS.RATINGS, JSON.stringify(seededRatings));
+    localStorage.setItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS, JSON.stringify(cachedRecs));
+
+    render(
+      <MovieStoreProvider>
+        <RankedFeed />
+      </MovieStoreProvider>
+    );
+
+    // 1. Click "Not for me: Candidate Film A" (index 0 of 2).
+    // Focus moves to next card's "Seen it" button (Candidate Film B).
+    const notForMeBtnA = screen.getByRole('button', { name: 'Not for me: Candidate Film A' });
+    fireEvent.click(notForMeBtnA);
+
+    const seenBtnB = screen.getByRole('button', { name: 'Seen it: Candidate Film B' });
+    expect(document.activeElement).toBe(seenBtnB);
+    expect(document.activeElement).not.toBe(document.body);
+
+    // 2. Click "Not for me: Candidate Film B" (only remaining card).
+    // Focus moves to feed h1 heading.
+    const notForMeBtnB = screen.getByRole('button', { name: 'Not for me: Candidate Film B' });
+    fireEvent.click(notForMeBtnB);
+
+    const heading = screen.getByRole('heading', { level: 1, name: /Top Ranked Movies for You/i });
+    expect(document.activeElement).toBe(heading);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('hiding the last card does not trigger auto-generation (CIN-44)', async () => {
+    localStorage.setItem(STORAGE_KEYS.RATINGS, JSON.stringify(seededRatings));
+    const singleCardRecs = {
+      ...cachedRecs,
+      recommendations: [cachedRecs.recommendations[0]], // only Candidate Film A
+    };
+    localStorage.setItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS, JSON.stringify(singleCardRecs));
+
+    render(
+      <MovieStoreProvider>
+        <RankedFeed />
+      </MovieStoreProvider>
+    );
+
+    expect(screen.getByText('Candidate Film A')).toBeInTheDocument();
+    expect(aiManager.generateRecommendations).not.toHaveBeenCalled();
+
+    const seenBtn = screen.getByRole('button', { name: 'Seen it: Candidate Film A' });
+    fireEvent.click(seenBtn);
+
+    // Card is removed and empty batch state is rendered
     expect(screen.queryByText('Candidate Film A')).toBeNull();
-    expect(screen.getByText('Candidate Film B')).toBeInTheDocument();
+    expect(screen.getByText('Generate AI Rankings')).toBeInTheDocument();
+
+    // Focus moves to heading
+    const heading = screen.getByRole('heading', { level: 1, name: /Top Ranked Movies for You/i });
+    expect(document.activeElement).toBe(heading);
+    expect(document.activeElement).not.toBe(document.body);
+
+    // Must NOT call generateRecommendations even after a tick
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(aiManager.generateRecommendations).not.toHaveBeenCalled();
+  });
+
+  it('hiding the last card with "Not for me" does not trigger auto-generation (CIN-44)', async () => {
+    localStorage.setItem(STORAGE_KEYS.RATINGS, JSON.stringify(seededRatings));
+    const singleCardRecs = {
+      ...cachedRecs,
+      recommendations: [cachedRecs.recommendations[0]], // only Candidate Film A
+    };
+    localStorage.setItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS, JSON.stringify(singleCardRecs));
+
+    render(
+      <MovieStoreProvider>
+        <RankedFeed />
+      </MovieStoreProvider>
+    );
+
+    expect(screen.getByText('Candidate Film A')).toBeInTheDocument();
+    expect(aiManager.generateRecommendations).not.toHaveBeenCalled();
+
+    const notForMeBtn = screen.getByRole('button', { name: 'Not for me: Candidate Film A' });
+    fireEvent.click(notForMeBtn);
+
+    // Card is removed and empty batch state is rendered
+    expect(screen.queryByText('Candidate Film A')).toBeNull();
+    expect(screen.getByText('Generate AI Rankings')).toBeInTheDocument();
+
+    // Focus moves to heading
+    const heading = screen.getByRole('heading', { level: 1, name: /Top Ranked Movies for You/i });
+    expect(document.activeElement).toBe(heading);
+    expect(document.activeElement).not.toBe(document.body);
+
+    // Must NOT call generateRecommendations even after a tick
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(aiManager.generateRecommendations).not.toHaveBeenCalled();
   });
 
   it('keyboard tab order on the recommendation card is sequential and sensible (Review focus)', async () => {

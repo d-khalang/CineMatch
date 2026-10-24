@@ -57,6 +57,27 @@ export const RankedFeed: React.FC = () => {
   const hasNewSince = lastRunRatedCount !== null && ratedCount > lastRunRatedCount;
   const newSinceCount = hasNewSince ? ratedCount - lastRunRatedCount : 0;
 
+  const profileSig = Object.entries(ratings)
+    .map(([id, r]) => `${id}:${r.rating}`)
+    .sort()
+    .join(',');
+  const autoAttemptedProfileRef = useRef<string | null>(null);
+  const pendingFocusRef = useRef<{ type: 'card'; movieId: number } | { type: 'heading' } | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const seenButtonsRef = useRef<Record<number, HTMLButtonElement | null>>({});
+
+  const hiddenMovieIds = useMemo(
+    () => new Set((hiddenFilms || []).map((h) => h.movieId)),
+    [hiddenFilms]
+  );
+
+  // Keep unrated movies AND movies currently in grace period, strictly excluding hidden films
+  const visibleRecommendations = recommendations.filter(
+    (rec) =>
+      !hiddenMovieIds.has(rec.movie.id) &&
+      (!ratings[rec.movie.id] || Boolean(pendingRemovalIds[rec.movie.id]))
+  );
+
   const handleRateRecommendedMovie = (movie: Movie, val: number) => {
     setRating(movie, val);
     showToast(`Rated "${movie.title}" ${val}/10 — saved to My Ratings!`);
@@ -91,6 +112,25 @@ export const RankedFeed: React.FC = () => {
   };
 
   const handleHideFilm = (movieId: number, reason: 'seen' | 'not_for_me', rawTitle?: string) => {
+    autoAttemptedProfileRef.current = profileSig;
+
+    const currentIndex = visibleRecommendations.findIndex((rec) => rec.movie.id === movieId);
+    if (currentIndex !== -1) {
+      if (visibleRecommendations.length <= 1) {
+        pendingFocusRef.current = { type: 'heading' };
+      } else if (currentIndex < visibleRecommendations.length - 1) {
+        pendingFocusRef.current = {
+          type: 'card',
+          movieId: visibleRecommendations[currentIndex + 1].movie.id,
+        };
+      } else {
+        pendingFocusRef.current = {
+          type: 'card',
+          movieId: visibleRecommendations[currentIndex - 1].movie.id,
+        };
+      }
+    }
+
     const title = rawTitle && rawTitle.trim() ? rawTitle.trim() : `#${movieId}`;
     if (pendingTimersRef.current[movieId]) {
       clearTimeout(pendingTimersRef.current[movieId]);
@@ -106,23 +146,24 @@ export const RankedFeed: React.FC = () => {
     showToast(`Hidden "${title}". Restore it in Settings → Hidden films.`);
   };
 
-  const hiddenMovieIds = useMemo(
-    () => new Set((hiddenFilms || []).map((h) => h.movieId)),
-    [hiddenFilms]
-  );
+  useEffect(() => {
+    if (!pendingFocusRef.current) return;
+    const target = pendingFocusRef.current;
+    pendingFocusRef.current = null;
 
-  // Keep unrated movies AND movies currently in grace period, strictly excluding hidden films
-  const visibleRecommendations = recommendations.filter(
-    (rec) =>
-      !hiddenMovieIds.has(rec.movie.id) &&
-      (!ratings[rec.movie.id] || Boolean(pendingRemovalIds[rec.movie.id]))
-  );
-
-  const profileSig = Object.entries(ratings)
-    .map(([id, r]) => `${id}:${r.rating}`)
-    .sort()
-    .join(',');
-  const autoAttemptedProfileRef = useRef<string | null>(null);
+    if (target.type === 'heading') {
+      headingRef.current?.focus();
+    } else if (target.type === 'card') {
+      const btn =
+        seenButtonsRef.current[target.movieId] ||
+        document.querySelector<HTMLButtonElement>(`button[aria-label^="Seen it:"][data-movie-id="${target.movieId}"]`);
+      if (btn) {
+        btn.focus();
+      } else {
+        headingRef.current?.focus();
+      }
+    }
+  });
 
   useEffect(() => {
     // If we have ratings and no recommendations yet, auto-generate ONLY ONCE per profile signature
@@ -223,7 +264,11 @@ export const RankedFeed: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <Trophy className="w-6 h-6 text-[var(--accent-primary)]" />
-            <h1 className="font-heading text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            <h1
+              ref={headingRef}
+              tabIndex={-1}
+              className="font-heading text-2xl sm:text-3xl font-extrabold text-white tracking-tight focus:outline-none"
+            >
               Top Ranked Movies for You
             </h1>
           </div>
@@ -500,10 +545,18 @@ export const RankedFeed: React.FC = () => {
 
                     <div className="flex flex-wrap items-center gap-3 self-end sm:self-center">
                       <button
+                        ref={(el) => {
+                          if (el) {
+                            seenButtonsRef.current[movie.id] = el;
+                          } else {
+                            delete seenButtonsRef.current[movie.id];
+                          }
+                        }}
+                        data-movie-id={movie.id}
                         type="button"
                         onClick={() => handleHideFilm(movie.id, 'seen', displayTitle)}
                         aria-label={`Seen it: ${displayTitle}`}
-                        className="text-xs text-slate-400 hover:text-slate-200 transition-colors cursor-pointer focus-ring rounded px-1.5 py-0.5"
+                        className="text-xs text-slate-400 hover:text-slate-200 transition-colors cursor-pointer focus-ring rounded px-1.5 py-2 sm:py-0.5"
                       >
                         Seen it
                       </button>
@@ -511,7 +564,7 @@ export const RankedFeed: React.FC = () => {
                         type="button"
                         onClick={() => handleHideFilm(movie.id, 'not_for_me', displayTitle)}
                         aria-label={`Not for me: ${displayTitle}`}
-                        className="text-xs text-slate-400 hover:text-slate-200 transition-colors cursor-pointer focus-ring rounded px-1.5 py-0.5"
+                        className="text-xs text-slate-400 hover:text-slate-200 transition-colors cursor-pointer focus-ring rounded px-1.5 py-2 sm:py-0.5"
                       >
                         Not for me
                       </button>

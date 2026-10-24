@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   Cpu,
@@ -46,6 +46,49 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const visibleHiddenFilms = useMemo(() => {
     return sortedHiddenFilms.slice(0, 50);
   }, [sortedHiddenFilms]);
+
+  const pendingRestoreFocusRef = useRef<{ type: 'button'; movieId: number } | { type: 'heading' } | null>(null);
+  const hiddenFilmsHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const restoreButtonsRef = useRef<Record<number, HTMLButtonElement | null>>({});
+
+  const handleRestoreFilm = (movieId: number) => {
+    const currentIndex = visibleHiddenFilms.findIndex((f) => f.movieId === movieId);
+    if (currentIndex !== -1) {
+      if (visibleHiddenFilms.length <= 1) {
+        pendingRestoreFocusRef.current = { type: 'heading' };
+      } else if (currentIndex < visibleHiddenFilms.length - 1) {
+        pendingRestoreFocusRef.current = {
+          type: 'button',
+          movieId: visibleHiddenFilms[currentIndex + 1].movieId,
+        };
+      } else {
+        pendingRestoreFocusRef.current = {
+          type: 'button',
+          movieId: visibleHiddenFilms[currentIndex - 1].movieId,
+        };
+      }
+    }
+    restoreFilm(movieId);
+  };
+
+  useEffect(() => {
+    if (!pendingRestoreFocusRef.current) return;
+    const target = pendingRestoreFocusRef.current;
+    pendingRestoreFocusRef.current = null;
+
+    if (target.type === 'heading') {
+      hiddenFilmsHeadingRef.current?.focus();
+    } else if (target.type === 'button') {
+      const btn =
+        restoreButtonsRef.current[target.movieId] ||
+        document.querySelector<HTMLButtonElement>(`button[aria-label^="Restore:"][data-movie-id="${target.movieId}"]`);
+      if (btn) {
+        btn.focus();
+      } else {
+        hiddenFilmsHeadingRef.current?.focus();
+      }
+    }
+  });
 
   const [provider, setProvider] = useState<AIProviderId>(aiSettings.activeProvider);
   const [geminiModel, setGeminiModel] = useState<string>(aiSettings.geminiModel || 'gemini-3.8-flash');
@@ -751,7 +794,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <EyeOff className="w-4 h-4 text-[var(--accent-primary)]" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                <h3
+                  ref={hiddenFilmsHeadingRef}
+                  tabIndex={-1}
+                  className="text-xs font-bold uppercase tracking-wider text-slate-200 focus:outline-none"
+                >
                   Hidden films ({hiddenFilms.length})
                 </h3>
               </div>
@@ -781,10 +828,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                           </span>
                         </div>
                         <button
+                          ref={(el) => {
+                            if (el) {
+                              restoreButtonsRef.current[film.movieId] = el;
+                            } else {
+                              delete restoreButtonsRef.current[film.movieId];
+                            }
+                          }}
+                          data-movie-id={film.movieId}
                           type="button"
-                          onClick={() => restoreFilm(film.movieId)}
+                          onClick={() => handleRestoreFilm(film.movieId)}
                           aria-label={`Restore: ${displayTitle}`}
-                          className="shrink-0 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-medium border border-white/10 transition-colors cursor-pointer focus-ring"
+                          className="shrink-0 px-2.5 py-2 sm:py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-medium border border-white/10 transition-colors cursor-pointer focus-ring"
                         >
                           Restore
                         </button>

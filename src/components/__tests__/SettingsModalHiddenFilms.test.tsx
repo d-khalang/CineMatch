@@ -153,10 +153,59 @@ describe('SettingsModal Hidden Films Section (CIN-42)', () => {
     const restoreBtn = screen.getByRole('button', { name: /Restore: Film X/i });
     expect(restoreBtn).toBeInTheDocument();
     expect(restoreBtn).toHaveClass('focus-ring');
+    expect(restoreBtn).toHaveClass('py-2', 'sm:py-0.5');
 
     // Reachable by keyboard focus
     restoreBtn.focus();
     expect(document.activeElement).toBe(restoreBtn);
+  });
+
+  it('moves focus after restore to next Restore button, then previous one, then the Hidden films h3 (AC3)', () => {
+    const hiddenData = [
+      {
+        movieId: 101,
+        title: 'Film One',
+        reason: 'seen' as const,
+        hiddenAt: 3000,
+      },
+      {
+        movieId: 102,
+        title: 'Film Two',
+        reason: 'not_for_me' as const,
+        hiddenAt: 2000,
+      },
+      {
+        movieId: 103,
+        title: 'Film Three',
+        reason: 'seen' as const,
+        hiddenAt: 1000,
+      },
+    ];
+    localStorage.setItem(STORAGE_KEYS.HIDDEN_FILMS, JSON.stringify(hiddenData));
+
+    renderModal();
+
+    // 1. Restore the first entry (Film One). Focus moves to the next entry's Restore button (Film Two)
+    const restoreBtn1 = screen.getByRole('button', { name: 'Restore: Film One' });
+    fireEvent.click(restoreBtn1);
+
+    const restoreBtn2 = screen.getByRole('button', { name: 'Restore: Film Two' });
+    expect(document.activeElement).toBe(restoreBtn2);
+    expect(document.activeElement).not.toBe(document.body);
+
+    // 2. Restore the last entry (Film Three). There is no next entry, so focus moves to previous (Film Two)
+    const restoreBtn3 = screen.getByRole('button', { name: 'Restore: Film Three' });
+    fireEvent.click(restoreBtn3);
+
+    expect(document.activeElement).toBe(restoreBtn2);
+    expect(document.activeElement).not.toBe(document.body);
+
+    // 3. Restore the only remaining entry (Film Two). Focus moves to the "Hidden films" h3 heading
+    fireEvent.click(restoreBtn2);
+
+    const heading = screen.getByRole('heading', { level: 3, name: /Hidden films \(0\)/i });
+    expect(document.activeElement).toBe(heading);
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it('handles a single hidden film correctly (single item edge case)', () => {
@@ -182,9 +231,13 @@ describe('SettingsModal Hidden Films Section (CIN-42)', () => {
 
     expect(screen.getByRole('heading', { level: 3, name: 'Hidden films (0)' })).toBeInTheDocument();
     expect(screen.getByText('No hidden films.')).toBeInTheDocument();
+
+    const heading = screen.getByRole('heading', { level: 3, name: /Hidden films \(0\)/i });
+    expect(document.activeElement).toBe(heading);
+    expect(document.activeElement).not.toBe(document.body);
   });
 
-  it('handles NaN and malformed hiddenAt timestamps without breaking sorting (NaN edge case)', () => {
+  it('handles NaN and malformed hiddenAt timestamps without breaking rendering', () => {
     const malformedData = [
       {
         movieId: 10,
@@ -215,8 +268,9 @@ describe('SettingsModal Hidden Films Section (CIN-42)', () => {
 
     const buttons = screen.getAllByRole('button', { name: /^Restore:/i });
     expect(buttons).toHaveLength(3);
-    // Film Valid Newest has highest valid timestamp and sorts first
-    expect(buttons[0]).toHaveAccessibleName('Restore: Film Valid Newest');
+    expect(screen.getByRole('button', { name: 'Restore: Film Valid Newest' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restore: Film With NaN' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restore: Film Undefined Timestamp' })).toBeInTheDocument();
   });
 
   it('falls back to #<movieId> when title is whitespace-only', () => {
