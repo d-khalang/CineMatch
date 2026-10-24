@@ -18,6 +18,7 @@ export interface CandidateOptions {
   selectedVibes?: string[];
   randomFn?: () => number;
   seedCount?: number;
+  deadlineMs?: number; // CIN-30 stub
 }
 
 /**

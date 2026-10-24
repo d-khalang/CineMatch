@@ -8,7 +8,9 @@ export type CandidateSource =
   | 'keyword_affinity'
   | 'hidden_gem'
   | 'bridge'
-  | 'acclaimed_baseline';
+  | 'acclaimed_baseline'
+  | 'era' // CIN-30 stub
+  | 'vibe'; // CIN-30 stub
 
 export interface Candidate {
   movie: Movie;
