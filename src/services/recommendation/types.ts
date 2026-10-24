@@ -9,8 +9,8 @@ export type CandidateSource =
   | 'hidden_gem'
   | 'bridge'
   | 'acclaimed_baseline'
-  | 'era' // CIN-30 stub
-  | 'vibe'; // CIN-30 stub
+  | 'era'
+  | 'vibe';
 
 export interface Candidate {
   movie: Movie;
