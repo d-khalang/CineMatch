@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Palette, Type, Check, X } from 'lucide-react';
+import { useModalA11y } from './useModalA11y';
 
 export interface PaletteOption {
   id: string;
@@ -123,6 +124,7 @@ export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: contro
 
   const showModal = controlledOpen !== undefined ? controlledOpen : isOpen;
   const handleClose = controlledClose !== undefined ? controlledClose : () => setIsOpen(false);
+  const modalRef = useModalA11y(showModal, handleClose);
 
   // Synchronize DOM with preferences on mount/change
   useEffect(() => {
@@ -170,6 +172,10 @@ export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: contro
           onClick={handleClose}
         >
           <div
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="palette-modal-title"
             className="relative w-full max-w-xl rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-lg overflow-hidden my-auto max-h-[90vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
@@ -180,7 +186,7 @@ export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: contro
                   <Palette className="w-5 h-5 text-[var(--accent-secondary)]" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+                  <h3 id="palette-modal-title" className="text-base font-bold text-white tracking-tight flex items-center gap-2">
                     Cinematic Style Studio
                     <span className="text-[10px] px-2 py-0.5 rounded-full palette-tag-primary font-bold">
                       Live Preview
@@ -194,6 +200,7 @@ export const PaletteSwitcher: React.FC<PaletteSwitcherProps> = ({ isOpen: contro
 
               <button
                 onClick={handleClose}
+                aria-label="Close palette studio"
                 className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />

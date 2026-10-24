@@ -26,6 +26,7 @@ import { credentialStore, TmdbCredentialType } from '../services/credentialStore
 import { isVaultSupported } from '../services/nativeCredentialVault';
 import { credentialCoordinator } from '../services/credentialCoordinator';
 import { AIProviderId } from '../types';
+import { useModalA11y } from './useModalA11y';
 
 const CUSTOM_OPENROUTER_OPTION = '__custom__';
 
@@ -35,6 +36,7 @@ interface SettingsModalProps {
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
+  const modalRef = useModalA11y(isOpen, onClose);
   const { aiSettings, updateAISettings, showToast, hiddenFilms = [], restoreFilm } = useMovieStore();
 
   const sortedHiddenFilms = useMemo(() => {
@@ -338,6 +340,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       onClick={onClose}
     >
       <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-modal-title"
         className="relative w-full max-w-xl max-h-[90dvh] flex flex-col rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-lg overflow-hidden p-6 sm:p-8 space-y-5"
         onClick={(e) => e.stopPropagation()}
       >
@@ -348,13 +354,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               <Cpu className="w-5 h-5 text-[var(--accent-secondary)]" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">API Credentials & AI Engine</h2>
+              <h2 id="settings-modal-title" className="text-lg font-bold text-white">API Credentials & AI Engine</h2>
               <p className="text-xs text-slate-400">Configure direct client-side provider access</p>
             </div>
           </div>
 
           <button
             onClick={onClose}
+            aria-label="Close settings"
             className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
