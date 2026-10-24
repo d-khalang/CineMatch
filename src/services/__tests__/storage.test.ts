@@ -13,6 +13,9 @@ import {
   validateRatings,
   validateWatchlist,
   validateWatchlistMovies,
+  validateHiddenFilms,
+  capHiddenFilms,
+  HIDDEN_FILMS_CAP,
 } from '../storage';
 
 describe('Storage Service, Migration & Validation', () => {
@@ -335,5 +338,55 @@ describe('Storage Service, Migration & Validation', () => {
 
     expect(localStorage.getItem(STORAGE_KEYS.LEGACY_WATCHLIST)).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.LEGACY_WATCHLIST_MOVIES)).toBeNull();
+  });
+
+  it('validates hidden films edge cases (empty, NaN, invalid reason, single item, duplicates) and caps by oldest hiddenAt', () => {
+    expect(validateHiddenFilms(null)).toEqual([]);
+    expect(validateHiddenFilms({})).toEqual([]);
+    expect(validateHiddenFilms([])).toEqual([]);
+
+    const single = [{ movieId: 10, reason: 'seen', hiddenAt: 1000, title: 'Solo' }];
+    expect(validateHiddenFilms(single)).toEqual(single);
+
+    const mixed = [
+      null,
+      { movieId: NaN, reason: 'seen', hiddenAt: 100 },
+      { movieId: -1, reason: 'seen', hiddenAt: 100 },
+      { movieId: 5, reason: 'invalid_reason', hiddenAt: 100 },
+      { movieId: 7, reason: 'seen', hiddenAt: 100, title: 'First' },
+      { movieId: 7, reason: 'not_for_me', hiddenAt: 200, title: 'Updated' },
+    ];
+    expect(validateHiddenFilms(mixed)).toEqual([
+      { movieId: 7, reason: 'not_for_me', hiddenAt: 200, title: 'Updated' },
+    ]);
+
+    const oversized = Array.from({ length: HIDDEN_FILMS_CAP + 2 }, (_, idx) => ({
+      movieId: idx + 1,
+      reason: 'seen' as const,
+      hiddenAt: idx === 0 ? 5000 : idx,
+    }));
+    const capped = capHiddenFilms(oversized);
+    expect(capped).toHaveLength(HIDDEN_FILMS_CAP);
+    expect(capped.some((h) => h.movieId === 1)).toBe(true); // newer hiddenAt=5000 kept
+    expect(capped.some((h) => h.movieId === 2)).toBe(false); // oldest hiddenAt=1 dropped
+    expect(capped.some((h) => h.movieId === 3)).toBe(false); // second oldest hiddenAt=2 dropped
+  });
+
+  it('preserves existing hidden films during v3 migration even if storage rewrite hits quota error', () => {
+    const existingHidden = JSON.stringify([
+      { movieId: 55, reason: 'seen', hiddenAt: 12345 },
+      { movieId: -1, reason: 'invalid', hiddenAt: 0 },
+    ]);
+    localStorage.setItem(STORAGE_KEYS.STORAGE_META, 'migrated_from_v1');
+    localStorage.setItem(STORAGE_KEYS.HIDDEN_FILMS, existingHidden);
+
+    const setSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    });
+
+    runStorageMigration();
+    setSpy.mockRestore();
+
+    expect(localStorage.getItem(STORAGE_KEYS.HIDDEN_FILMS)).toBe(existingHidden);
   });
 });

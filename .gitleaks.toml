@@ -1,0 +1,9 @@
+# Extend the default rules. Versioned localStorage key names such as
+# 'cinematch_hidden_films_v3' and the 'migrated_from_v1' migration marker
+# trip generic-api-key; they are not secrets.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "CineMatch versioned storage key names and migration markers"
+regexes = ['''^cinematch_[a-z_]+_v\d+$''', '''^migrated_from_v\d+$''']

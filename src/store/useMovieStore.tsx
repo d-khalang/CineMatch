@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Movie, UserRating, Recommendation, AISettings, TasteStats } from '../types';
+import { Movie, UserRating, HiddenFilm, Recommendation, AISettings, TasteStats } from '../types';
 import { aiManager } from '../services/ai/aiManager';
 import { getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
 import { getCandidateRecommendationPool } from '../services/recommendation/candidateSources';
@@ -16,6 +16,8 @@ import {
   getStorageStatus,
   subscribeStorageStatus,
   hasUnsavedStorageChanges,
+  validateHiddenFilms,
+  capHiddenFilms,
 } from '../services/storage';
 import { OPENROUTER_DEFAULT_MODEL, sanitizeOpenRouterModel } from '../services/ai/openRouterProvider';
 
@@ -33,6 +35,9 @@ const DEFAULT_SETTINGS: AISettings = {
 interface MovieStoreContextType {
   ratings: Record<number, UserRating>;
   watchlist: number[];
+  hiddenFilms: HiddenFilm[];
+  hideFilm: (movieId: number, reason: HiddenFilm['reason'], title?: string) => void;
+  restoreFilm: (movieId: number) => void;
   watchlistMovies: Record<number, Movie>;
   aiSettings: AISettings;
   recommendations: Recommendation[];
@@ -205,6 +210,15 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   });
 
+  const [hiddenFilms, setHiddenFilms] = useState<HiddenFilm[]>(() => {
+    try {
+      const saved = safeGetItem(STORAGE_KEYS.HIDDEN_FILMS);
+      return saved ? validateHiddenFilms(JSON.parse(saved)) : [];
+    } catch {
+      return [];
+    }
+  });
+
   // 3. AI Settings State (sanitized without keys)
   const [aiSettings, setAiSettings] = useState<AISettings>(() => {
     try {
@@ -237,7 +251,12 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const cached = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
       if (cached) {
         const parsed = JSON.parse(cached);
-        return Array.isArray(parsed.recommendations) ? parsed.recommendations : [];
+        if (Array.isArray(parsed.recommendations)) {
+          const hiddenIds = new Set(hiddenFilms.map((h) => h.movieId));
+          return parsed.recommendations
+            .filter((r: Recommendation) => !hiddenIds.has(r?.movie?.id))
+            .map((r: Recommendation, idx: number) => ({ ...r, rank: idx + 1 }));
+        }
       }
       return [];
     } catch {
@@ -295,6 +314,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const ratingVersionsRef = useRef<Map<number, number>>(new Map());
   const failedWatchlistIdsRef = useRef<Set<number>>(new Set());
   const storeEpochRef = useRef<number>(0);
+  const hiddenFilmsRef = useRef<HiddenFilm[]>(hiddenFilms);
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -356,6 +376,11 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     safeSetItem(STORAGE_KEYS.WATCHLIST, JSON.stringify(watchlist));
   }, [watchlist]);
+
+  useEffect(() => {
+    hiddenFilmsRef.current = hiddenFilms;
+    safeSetItem(STORAGE_KEYS.HIDDEN_FILMS, JSON.stringify(hiddenFilms));
+  }, [hiddenFilms]);
 
   useEffect(() => {
     safeSetItem(STORAGE_KEYS.WATCHLIST_MOVIES, JSON.stringify(watchlistMovies));
@@ -504,6 +529,83 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   }, [lastProviderUsed, aiTasteAnalysis]);
 
+  const hideFilm = useCallback(
+    (movieId: number, reason: HiddenFilm['reason'], title?: string) => {
+      const hiddenAt = Date.now();
+      const entry: HiddenFilm =
+        title !== undefined
+          ? { movieId, reason, hiddenAt, title }
+          : { movieId, reason, hiddenAt };
+
+      const applyHide = (list: HiddenFilm[]): HiddenFilm[] => {
+        const filtered = list.some((h) => h.movieId === movieId)
+          ? list.filter((h) => h.movieId !== movieId)
+          : list;
+        return capHiddenFilms([...filtered, entry]);
+      };
+
+      const nextHidden = applyHide(hiddenFilmsRef.current);
+      hiddenFilmsRef.current = nextHidden;
+      safeSetItem(STORAGE_KEYS.HIDDEN_FILMS, JSON.stringify(nextHidden));
+      setHiddenFilms((prev) => {
+        const next = prev === hiddenFilmsRef.current ? prev : applyHide(prev);
+        hiddenFilmsRef.current = next;
+        return next;
+      });
+
+      setRecommendations((prev) => {
+        if (!prev.some((r) => r.movie.id === movieId)) {
+          const cachedStr = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
+          if (cachedStr) {
+            try {
+              const parsed = JSON.parse(cachedStr);
+              if (
+                Array.isArray(parsed.recommendations) &&
+                parsed.recommendations.some((r: Recommendation) => r?.movie?.id === movieId)
+              ) {
+                const filteredRecs = parsed.recommendations
+                  .filter((r: Recommendation) => r?.movie?.id !== movieId)
+                  .map((r: Recommendation, idx: number) => ({ ...r, rank: idx + 1 }));
+                safeSetItem(
+                  STORAGE_KEYS.CACHED_RECOMMENDATIONS,
+                  JSON.stringify({ ...parsed, recommendations: filteredRecs })
+                );
+              }
+            } catch {
+              // ignore malformed cache
+            }
+          }
+          return prev;
+        }
+        const next = prev
+          .filter((r) => r.movie.id !== movieId)
+          .map((r, idx) => ({ ...r, rank: idx + 1 }));
+        safeSetItem(
+          STORAGE_KEYS.CACHED_RECOMMENDATIONS,
+          JSON.stringify({
+            recommendations: next,
+            generatedAt: cachedRecsTimestamp ?? Date.now(),
+            usedProvider: lastProviderUsed,
+            tasteAnalysis: aiTasteAnalysis,
+          })
+        );
+        return next;
+      });
+    },
+    [cachedRecsTimestamp, lastProviderUsed, aiTasteAnalysis]
+  );
+
+  const restoreFilm = useCallback((movieId: number) => {
+    const nextHidden = hiddenFilmsRef.current.filter((h) => h.movieId !== movieId);
+    hiddenFilmsRef.current = nextHidden;
+    safeSetItem(STORAGE_KEYS.HIDDEN_FILMS, JSON.stringify(nextHidden));
+    setHiddenFilms((prev) => {
+      const next = prev.filter((h) => h.movieId !== movieId);
+      hiddenFilmsRef.current = next;
+      return next;
+    });
+  }, []);
+
   const removeRating = useCallback((movieId: number) => {
     cancelGeneration();
     // Increment version instead of deleting — prevents stale enrichment from a prior
@@ -606,6 +708,8 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setRatings({});
     setWatchlist([]);
     setWatchlistMovies({});
+    setHiddenFilms([]);
+    hiddenFilmsRef.current = [];
     setRecommendations([]);
     setAiTasteAnalysis(null);
     setCachedRecsTimestamp(null);
@@ -615,6 +719,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const r2 = safeRemoveItem(STORAGE_KEYS.WATCHLIST);
     const r3 = safeRemoveItem(STORAGE_KEYS.WATCHLIST_MOVIES);
     const r4 = safeRemoveItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
+    const rHidden = safeRemoveItem(STORAGE_KEYS.HIDDEN_FILMS);
 
     // Invalidate and remove all legacy recovery sources so nothing can resurrect
     const r5 = safeRemoveItem(STORAGE_KEYS.LEGACY_RATINGS);
@@ -625,7 +730,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     // Authoritatively mark migration complete so fresh launches never re-migrate
     const r9 = safeSetItem(STORAGE_KEYS.STORAGE_META, 'migrated_from_v1');
 
-    if (!r1 || !r2 || !r3 || !r4 || !r5 || !r6 || !r7 || !r8 || !r9 || hasUnsavedStorageChanges()) {
+    if (!r1 || !r2 || !r3 || !r4 || !rHidden || !r5 || !r6 || !r7 || !r8 || !r9 || hasUnsavedStorageChanges()) {
       showToast('All data cleared in memory, but some storage changes could not be saved.');
     } else {
       showToast('All data cleared.');
@@ -727,6 +832,11 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     try {
       const userRatingsList = Object.values(ratings);
       const ratedIds = new Set(userRatingsList.map((r) => r.movieId));
+      const hiddenIds = new Set([
+        ...hiddenFilms.map((h) => h.movieId),
+        ...hiddenFilmsRef.current.map((h) => h.movieId),
+      ]);
+      const excludedIds = new Set<number>([...ratedIds, ...hiddenIds]);
 
       // Seeds: top rated movies
       const topSeeds = [...userRatingsList]
@@ -738,7 +848,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const candidatePool = await getCandidateRecommendationPool(
         {
           seedMovieIds: topSeeds,
-          excludeIds: ratedIds,
+          excludeIds: excludedIds,
           preferredEras: aiSettings.preferredEras,
           selectedVibes: aiSettings.selectedVibes,
           userRatings: userRatingsList,
@@ -787,11 +897,15 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           return;
         }
 
+        const latestExcludedIds = new Set<number>([
+          ...excludedIds,
+          ...hiddenFilmsRef.current.map((h) => h.movieId),
+        ]);
         const discoveryRecs: Recommendation[] = [];
         const seenIds = new Set<number>();
 
         for (const { item: discovery, movie } of paired) {
-          if (!ratedIds.has(movie.id) && !seenIds.has(movie.id)) {
+          if (!latestExcludedIds.has(movie.id) && !seenIds.has(movie.id)) {
             seenIds.add(movie.id);
             discoveryRecs.push({
               movie,
@@ -806,7 +920,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
 
         const poolRecs = (result.recommendations || []).filter(
-          (rec) => !seenIds.has(rec.movie.id) && !ratedIds.has(rec.movie.id)
+          (rec) => !seenIds.has(rec.movie.id) && !latestExcludedIds.has(rec.movie.id)
         );
 
         const merged = [...discoveryRecs, ...poolRecs].sort((a, b) => b.score - a.score);
@@ -815,8 +929,12 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           rank: idx + 1,
         }));
       } else {
+        const latestExcludedIds = new Set<number>([
+          ...excludedIds,
+          ...hiddenFilmsRef.current.map((h) => h.movieId),
+        ]);
         finalRecommendations = (result.recommendations || [])
-          .filter((rec) => !ratedIds.has(rec.movie.id))
+          .filter((rec) => !latestExcludedIds.has(rec.movie.id))
           .map((rec, idx) => ({
             ...rec,
             rank: idx + 1,
@@ -860,13 +978,16 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         activeAbortControllerRef.current = null;
       }
     }
-  }, [ratings, aiSettings, cancelGeneration, showToast]);
+  }, [ratings, hiddenFilms, aiSettings, cancelGeneration, showToast]);
 
   return (
     <MovieStoreContext.Provider
       value={{
         ratings,
         watchlist,
+        hiddenFilms,
+        hideFilm,
+        restoreFilm,
         watchlistMovies,
         aiSettings,
         recommendations,
