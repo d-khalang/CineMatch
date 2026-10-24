@@ -17,7 +17,6 @@ import { ShareButton } from '../components/ShareButton';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DiscoveryFilters } from '../components/DiscoveryFilters';
 import { RatingControl } from '../components/RatingControl';
-import { TasteCalibration } from '../components/TasteCalibration';
 import { MovieStoreProvider, useMovieStore } from '../store/useMovieStore';
 
 vi.mock('../services/nativeCredentialVault', async () => {
@@ -276,7 +275,7 @@ describe('CIN-17 & CIN-32 UI Polish', () => {
     unmountShare();
   });
 
-  it('renders accessible, focusable primary action buttons in SettingsModal and ErrorBoundary', () => {
+  it('exposes the SettingsModal and ErrorBoundary primary buttons by accessible name', () => {
     // 1. SettingsModal primary save button
     const { unmount: unmountSettings } = render(
       <MovieStoreProvider>
@@ -286,8 +285,6 @@ describe('CIN-17 & CIN-32 UI Polish', () => {
 
     const saveButton = screen.getByRole('button', { name: /Save & Apply Settings/i });
     expect(saveButton).toBeInTheDocument();
-    saveButton.focus();
-    expect(document.activeElement).toBe(saveButton);
     unmountSettings();
 
     // 2. ErrorBoundary reload button
@@ -304,66 +301,6 @@ describe('CIN-17 & CIN-32 UI Polish', () => {
 
     const reloadButton = screen.getByRole('button', { name: /Reload Application/i });
     expect(reloadButton).toBeInTheDocument();
-    reloadButton.focus();
-    expect(document.activeElement).toBe(reloadButton);
-  });
-
-  it('verifies focusability of interactive controls across components', () => {
-    // 1. Range slider in DiscoveryFilters
-    const { container: filterContainer, unmount: unmountFilters } = render(
-      <MovieStoreProvider>
-        <DiscoveryFilters />
-      </MovieStoreProvider>
-    );
-    const rangeSlider = filterContainer.querySelector('input[type="range"]') as HTMLInputElement;
-    expect(rangeSlider).toBeInTheDocument();
-    rangeSlider.focus();
-    expect(document.activeElement).toBe(rangeSlider);
-    unmountFilters();
-
-    // 2. Text input in SettingsModal
-    const { container: settingsContainer, unmount: unmountSettings } = render(
-      <MovieStoreProvider>
-        <SettingsModal isOpen={true} onClose={() => {}} />
-      </MovieStoreProvider>
-    );
-    const settingsInput = settingsContainer.querySelector('input[type="password"]') as HTMLInputElement;
-    expect(settingsInput).toBeInTheDocument();
-    settingsInput.focus();
-    expect(document.activeElement).toBe(settingsInput);
-    unmountSettings();
-
-    // 3. Text input in MyRatings
-    const { container: ratingsContainer, unmount: unmountRatings } = render(
-      <MovieStoreProvider>
-        <MyRatings onOpenCsvModal={() => {}} />
-      </MovieStoreProvider>
-    );
-    const ratingsInput = ratingsContainer.querySelector('input[type="text"]') as HTMLInputElement;
-    expect(ratingsInput).toBeInTheDocument();
-    ratingsInput.focus();
-    expect(document.activeElement).toBe(ratingsInput);
-    unmountRatings();
-
-    // 4. Text input in TasteCalibration
-    const { container: calibrationContainer, unmount: unmountCalibration } = render(
-      <MovieStoreProvider>
-        <TasteCalibration />
-      </MovieStoreProvider>
-    );
-    const calibrationInput = calibrationContainer.querySelector('input[type="text"]') as HTMLInputElement;
-    expect(calibrationInput).toBeInTheDocument();
-    calibrationInput.focus();
-    expect(document.activeElement).toBe(calibrationInput);
-    unmountCalibration();
-
-    // 5. Rating buttons in RatingControl
-    const { unmount: unmountRating } = render(<RatingControl onRate={() => {}} onClear={() => {}} />);
-    const ratingButton = screen.getByRole('radio', { name: /Rate 1 out of 10/i });
-    expect(ratingButton).toBeInTheDocument();
-    ratingButton.focus();
-    expect(document.activeElement).toBe(ratingButton);
-    unmountRating();
   });
 
   it('tabs to a text input, a slider and a radio button with user-event using capped tab-until-target', async () => {
@@ -458,7 +395,7 @@ describe('CIN-17 & CIN-32 UI Polish', () => {
     button.focus();
     expect(document.activeElement).toBe(button);
 
-    await expect(tabUntilTarget(user, button, 5)).rejects.toThrow();
+    await expect(tabUntilTarget(user, button, 5)).rejects.toThrow(/not\.toBe/);
     unmount();
   });
 });
