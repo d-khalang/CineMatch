@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CineMatch Loop</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --raised: #ffffff;
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10); --wash: rgba(11,11,11,0.04);
+  --s-backlog: #c3c2b7; --s-todo: #2a78d6; --s-progress: #eb6834; --s-review: #6250d6; --s-done: #1baf7a; --s-canceled: #898781;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b; --good-text: #006300;
+  --critical-wash: rgba(208,59,59,0.08); --warning-wash: rgba(250,178,25,0.12);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --raised: #222221;
+    --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.05);
+    --s-backlog: #4a4a46; --s-todo: #3987e5; --s-progress: #d95926; --s-review: #9085e9; --s-done: #199e70; --s-canceled: #6b6a65;
+    --good-text: #0ca30c; --critical-wash: rgba(208,59,59,0.16); --warning-wash: rgba(250,178,25,0.12);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --raised: #222221;
+  --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10); --wash: rgba(255,255,255,0.05);
+  --s-backlog: #4a4a46; --s-todo: #3987e5; --s-progress: #d95926; --s-review: #9085e9; --s-done: #199e70; --s-canceled: #6b6a65;
+  --good-text: #0ca30c; --critical-wash: rgba(208,59,59,0.16); --warning-wash: rgba(250,178,25,0.12);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: inherit; }
+main { max-width: 1280px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 18px; margin: 0; font-weight: 650; }
+h2 { font-size: 13px; margin: 0 0 10px; font-weight: 600; color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; display: flex; gap: 8px; align-items: center; }
+.spacer { flex: 1; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.panel { background: var(--surface); border: 1px solid var(--ring); border-radius: 12px; padding: 14px; min-width: 0; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--ring); background: var(--raised); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+button { font: inherit; color: inherit; background: var(--raised); border: 1px solid var(--ring); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+button:hover { background: var(--wash); }
+button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+
+/* Tiles */
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.tile { cursor: default; }
+.tile .label { font-size: 12px; color: var(--ink-2); font-weight: 600; display: flex; gap: 6px; align-items: center; }
+.tile .value { font-size: 22px; font-weight: 650; margin: 4px 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .sub { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile.alert { border-color: var(--critical); background: var(--critical-wash); }
+.tile.clickable { cursor: pointer; } .tile.clickable:hover { border-color: var(--axis); }
+
+/* Needs you */
+.needs { display: grid; gap: 6px; }
+.need { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 8px; background: var(--critical-wash); cursor: pointer; }
+
+/* Board */
+.board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.col { background: var(--wash); border-radius: 10px; padding: 8px; display: grid; gap: 8px; align-content: start; min-height: 80px; }
+.col-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; padding: 2px 4px; }
+.col-head .n { color: var(--muted); font-weight: 500; }
+.card { background: var(--raised); border: 1px solid var(--ring); border-left: 3px solid var(--state); border-radius: 8px; padding: 8px 10px; cursor: pointer; display: grid; gap: 6px; }
+.card:hover { border-color: var(--axis); border-left-color: var(--state); }
+.card.failed { background: var(--critical-wash); }
+.card .top { display: flex; gap: 6px; align-items: baseline; }
+.card .id { font-weight: 650; font-size: 12px; }
+.card .age { margin-left: auto; font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.card .title { font-size: 13px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.chip { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--wash); color: var(--ink-2); border: 1px solid var(--ring); white-space: nowrap; }
+.chip.bad { color: var(--critical); border-color: currentColor; background: transparent; font-weight: 600; }
+.chip.warn { background: var(--warning-wash); color: var(--ink); }
+.chip.ok { color: var(--good-text); border-color: currentColor; background: transparent; }
+.more { font-size: 12px; color: var(--ink-2); text-align: center; padding: 4px; }
+
+/* Timeline */
+.tl { position: relative; }
+.tl-row { display: grid; grid-template-columns: 220px 1fr; align-items: center; height: 24px; cursor: pointer; }
+.tl-row:hover { background: var(--wash); }
+.tl-name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 8px; }
+.tl-name b { font-weight: 650; }
+.tl-track { position: relative; height: 14px; }
+.seg { position: absolute; top: 0; height: 14px; border-radius: 3px; box-shadow: 0 0 0 1px var(--surface); }
+.seg.open { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.tl-axis { display: grid; grid-template-columns: 220px 1fr; height: 22px; }
+.tl-ticks { position: relative; border-bottom: 1px solid var(--axis); }
+.tick { position: absolute; bottom: 4px; font-size: 11px; color: var(--muted); transform: translateX(-50%); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.vline { position: absolute; top: 22px; bottom: 0; width: 1px; background: var(--grid); pointer-events: none; }
+.cycle-mark { position: absolute; top: 0; width: 2px; height: 10px; background: var(--ink-2); border-radius: 1px; cursor: pointer; }
+.now-line { position: absolute; top: 22px; bottom: 0; width: 2px; background: var(--ink); opacity: .5; pointer-events: none; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.legend span { display: inline-flex; gap: 5px; align-items: center; }
+.sw { width: 10px; height: 10px; border-radius: 2px; }
+
+/* Feed */
+.feed { display: grid; gap: 0; }
+.day { font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 0 4px; }
+.ev { display: grid; grid-template-columns: 70px 112px 64px 1fr; gap: 8px; padding: 5px 6px; border-radius: 6px; align-items: baseline; cursor: pointer; }
+.ev:hover { background: var(--wash); }
+.ev .t { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ev .who { font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ev .iss { font-size: 12px; font-weight: 650; }
+.ev .txt { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev.err .txt { color: var(--critical); }
+.ev.open .txt { white-space: normal; }
+.ev .body { grid-column: 2 / -1; white-space: pre-wrap; font-size: 12.5px; color: var(--ink-2); background: var(--wash); border-radius: 6px; padding: 8px 10px; margin-top: 4px; }
+.drawer .ev { grid-template-columns: 64px 108px 1fr; }
+.drawer .ev .txt { white-space: normal; }
+.drawer .ev .body { grid-column: 1 / -1; }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+/* Drawer */
+.drawer { position: fixed; inset: 0 0 0 auto; width: min(520px, 100vw); background: var(--surface); border-left: 1px solid var(--ring); box-shadow: -8px 0 24px rgba(0,0,0,.12); transform: translateX(100%); transition: transform .18s ease; overflow-y: auto; padding: 16px; z-index: 10; }
+.drawer.on { transform: none; }
+.drawer h3 { margin: 4px 0 8px; font-size: 16px; }
+.kv { display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; font-size: 13px; margin: 10px 0; }
+.kv dt { color: var(--ink-2); }
+.kv dd { margin: 0; }
+.steps { display: grid; gap: 0; margin: 8px 0 14px; }
+.step { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; font-size: 13px; padding: 3px 0; }
+
+#tip { position: fixed; pointer-events: none; background: var(--raised); color: var(--ink); border: 1px solid var(--ring); box-shadow: 0 4px 16px rgba(0,0,0,.15); border-radius: 8px; padding: 6px 9px; font-size: 12px; z-index: 20; display: none; max-width: 320px; }
+.banner { padding: 8px 12px; border-radius: 8px; background: var(--warning-wash); font-size: 13px; }
+
+@media (max-width: 900px) {
+  .tiles, .board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tl-row, .tl-axis { grid-template-columns: 120px 1fr; }
+  .ev { grid-template-columns: 44px 1fr; }
+  .ev .iss, .ev .who { grid-column: 2; }
+  .ev .txt { grid-column: 2; white-space: normal; }
+}
+@media (max-width: 520px) { .tiles, .board { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>CineMatch loop</h1>
+    <span id="status" class="pill">Loading…</span>
+    <span class="spacer"></span>
+    <span id="updated" class="muted small"></span>
+    <button id="refresh" title="Refresh now">Refresh</button>
+  </header>
+  <div id="errors"></div>
+  <section class="tiles" id="tiles"></section>
+  <section class="panel" id="needs-panel" hidden><h2>Needs you</h2><div class="needs" id="needs"></div></section>
+  <section class="panel"><h2>Pipeline <span class="spacer"></span><label class="muted small" style="text-transform:none;letter-spacing:0;font-weight:400"><input type="checkbox" id="show-old"> show stale (&gt;7d untouched)</label></h2><div class="board" id="board"></div></section>
+  <section class="panel">
+    <h2>Timeline
+      <span class="filters" id="range"></span>
+      <span class="spacer"></span>
+      <span class="legend" id="legend"></span>
+    </h2>
+    <div class="tl" id="timeline"></div>
+  </section>
+  <section class="panel">
+    <h2>Activity <span class="spacer"></span><span class="filters" id="actors"></span></h2>
+    <div class="feed" id="feed"></div>
+  </section>
+</main>
+<aside class="drawer" id="drawer" aria-hidden="true"></aside>
+<div id="tip"></div>
+<script>
+const STATES = [
+  ['Backlog', 's-backlog'], ['Todo', 's-todo'], ['In Progress', 's-progress'],
+  ['In Review', 's-review'], ['Done', 's-done'], ['Canceled', 's-canceled'], ['Duplicate', 's-canceled'],
+];
+const stateVar = (name) => `var(--${(STATES.find(([n]) => n === name) || [, 's-backlog'])[1]})`;
+const ACTORS = { Owner: '👤', Coordinator: '🧭', 'Gemini A': '🤖', 'Gemini B': '🤖', Gemini: '🤖', Codex: '🔍', GitHub: '🔗' };
+const RANGES = [['Fit', 0], ['6h', 6], ['24h', 24], ['3d', 72], ['7d', 168]];
+const ui = { range: 0, actor: 'All', open: new Set(), drawer: null };
+try { Object.assign(ui, JSON.parse(localStorage.getItem('loop-ui') || '{}'), { open: new Set(), drawer: null }); } catch {}
+const save = () => { try { localStorage.setItem('loop-ui', JSON.stringify({ range: ui.range, actor: ui.actor })); } catch {} };
+let data = null;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ms = (iso) => new Date(iso).getTime();
+function dur(msec) {
+  const m = Math.max(0, Math.round(msec / 60000));
+  if (m < 1) return '<1m';
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h ${m % 60 ? `${m % 60}m` : ''}`.trim();
+  return `${Math.floor(h / 24)}d`;
+}
+const ago = (iso) => (iso ? `${dur(Date.now() - ms(iso))} ago`.replace('<1m ago', 'just now') : '—');
+const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }).replace(/s/g, ' ');
+const dayName = (iso) => {
+  const d = new Date(iso); const today = new Date(); const y = new Date(Date.now() - 864e5);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+};
+const issueById = (id) => data.issues.find((i) => i.id === id);
+const fresh = (i) => Date.now() - ms(i.updatedAt) < 7 * 864e5;
+
+async function load() {
+  $('refresh').disabled = true;
+  try {
+    const response = await fetch('/api/state', { cache: 'no-store' });
+    const payload = await response.json();
+    if (payload.error) throw new Error(payload.error);
+    data = payload;
+    render();
+  } catch (error) {
+    $('errors').innerHTML = `<div class="banner">Could not load: ${esc(error.message)}. Showing the last data.</div>`;
+  } finally { $('refresh').disabled = false; }
+}
+
+function loopStatus() {
+  const last = data.events[0]?.at;
+  const quiet = last ? Date.now() - ms(last) : Infinity;
+  const workers = ['A', 'B'].filter((l) => data.lanes[l].running);
+  if (data.loop.stopped) return { label: 'Stopped (loop-stop)', color: 'var(--critical)' };
+  if (workers.length) return { label: `Running · ${workers.length}/2 workers up`, color: 'var(--good)' };
+  if (quiet < 15 * 60000) return { label: `Active ${ago(last)} · workers off`, color: 'var(--warning)' };
+  return { label: `Idle · last activity ${ago(last)}`, color: 'var(--warning)' };
+}
+
+function needsYou() {
+  return data.issues.filter((i) => !['Done', 'Canceled', 'Duplicate'].includes(i.state) && (i.needsOwner || i.kind === 'owner'));
+}
+
+function render() {
+  const s = loopStatus();
+  $('status').innerHTML = `<span class="dot" style="background:${s.color}"></span>${esc(s.label)}`;
+  $('updated').textContent = `Data ${ago(data.generatedAt)} · auto-refresh ${Math.round(data.refreshMs / 1000)}s`;
+  $('errors').innerHTML = data.errors.map((e) => `<div class="banner">Partial data — ${esc(e)}</div>`).join('');
+  renderTiles(); renderNeeds(); renderBoard(); renderTimeline(); renderFeed();
+  if (ui.drawer) openDrawer(ui.drawer);
+}
+
+function laneTile(name) {
+  const lane = data.lanes[name];
+  const issue = lane.issue && issueById(lane.issue);
+  let value = 'Idle', sub = 'No issue started yet', alert = false;
+  if (issue) {
+    if (issue.failedAt) { value = `${issue.id} failed`; sub = `${ago(issue.failedAt)} · ${issue.failure || ''}`; alert = true; }
+    else if (issue.state === 'In Progress' && lane.running) { value = `${issue.id} · working`; sub = `${dur(Date.now() - ms(issue.lastStartAt))} · ${lane.logLine || issue.title}`; }
+    else if (issue.state === 'In Progress') { value = `${issue.id} · with Coordinator`; sub = issue.title; }
+    else { value = lane.running ? 'Waiting for work' : 'Worker off'; sub = `Last: ${issue.id} → ${issue.state} ${ago(issue.since)}`; }
+  }
+  const up = lane.running ? '<span class="chip ok">worker up</span>' : '<span class="chip">worker off</span>';
+  return `<div class="panel tile ${alert ? 'alert' : ''} ${issue ? 'clickable' : ''}" data-issue="${issue ? issue.id : ''}">
+    <div class="label">🤖 Gemini lane ${name} <span class="spacer"></span>${up}</div>
+    <div class="value">${esc(value)}</div><div class="sub" title="${esc(sub)}">${esc(sub)}</div></div>`;
+}
+
+function renderTiles() {
+  const needs = needsYou();
+  const cycle = data.loop.cycles?.[0];
+  const merged = data.events.filter((e) => e.type === 'merge' && Date.now() - ms(e.at) < 864e5).length;
+  const review = data.issues.filter((i) => i.state === 'In Review').length;
+  $('tiles').innerHTML = `
+    <div class="panel tile ${needs.length ? 'alert clickable' : ''}" id="tile-needs">
+      <div class="label">👤 Needs you</div>
+      <div class="value">${needs.length ? `${needs.length} open` : 'Nothing'}</div>
+      <div class="sub">${needs.length ? esc(needs.map((i) => i.id).join(', ')) : 'The loop is not waiting on you'}</div></div>
+    ${laneTile('A')}${laneTile('B')}
+    <div class="panel tile clickable" id="tile-cycle">
+      <div class="label">🧭 Coordinator</div>
+      <div class="value">${cycle ? esc(cycle.title.replace(/\(Coordinator.*?\)/, '').trim()) : '—'}</div>
+      <div class="sub">${cycle ? `${ago(cycle.at)} · ${merged} merged in 24h · ${review} in review` : 'No cycle comments'}</div></div>`;
+  document.querySelectorAll('.tile[data-issue]').forEach((el) => el.dataset.issue && (el.onclick = () => openDrawer(el.dataset.issue)));
+  $('tile-needs').onclick = () => needs.length && $('needs-panel').scrollIntoView({ behavior: 'smooth' });
+  $('tile-cycle').onclick = () => data.loop.id && openDrawer(data.loop.id);
+}
+
+function renderNeeds() {
+  const needs = needsYou();
+  $('needs-panel').hidden = !needs.length;
+  $('needs').innerHTML = needs.map((i) => `<div class="need" data-issue="${i.id}">
+    <b>${esc(i.id)}</b><span>${esc(i.title)}</span><span class="spacer"></span>
+    <span class="chip">${i.needsOwner ? 'escalated' : 'your directive'}</span><span class="chip">${esc(i.state)} ${dur(Date.now() - ms(i.since))}</span></div>`).join('');
+  $('needs').querySelectorAll('[data-issue]').forEach((el) => (el.onclick = () => openDrawer(el.dataset.issue)));
+}
+
+function cardHtml(i) {
+  const chips = [];
+  if (i.lane) chips.push(`<span class="chip">lane ${i.lane}</span>`);
+  if (i.attempts > 1) chips.push(`<span class="chip warn">attempt ${i.attempts}</span>`);
+  if (i.failedAt) chips.push('<span class="chip bad">✕ worker failed</span>');
+  if (i.pr) {
+    chips.push(`<span class="chip">PR #${i.pr.number} ${i.pr.state === 'DRAFT' ? 'draft' : i.pr.state === 'MERGED' ? 'merged' : ''}</span>`);
+    const c = i.pr.codex;
+    if (c?.status === 'pending' && i.pr.state === 'OPEN') chips.push('<span class="chip warn">Codex reviewing…</span>');
+    else if (c && i.state !== 'Done') {
+      if (c.p1) chips.push(`<span class="chip bad">Codex ${c.p1} P1</span>`);
+      else if (c.p2) chips.push(`<span class="chip warn">Codex ${c.p2} P2</span>`);
+      else if (!c.findings) chips.push('<span class="chip ok">✓ Codex clean</span>');
+    }
+  }
+  if (i.kind === 'owner') chips.push('<span class="chip">👤 owner</span>');
+  if (i.kind === 'feedback') chips.push('<span class="chip">feedback</span>');
+  const age = i.state === 'Done' ? ago(i.since) : dur(Date.now() - ms(i.since));
+  return `<div class="card ${i.failedAt ? 'failed' : ''}" style="--state:${stateVar(i.state)}" data-issue="${i.id}">
+    <div class="top"><span class="id">${esc(i.id)}</span><span class="age" title="Time in ${esc(i.state)}">${esc(age)}</span></div>
+    <div class="title">${esc(i.title)}</div>${chips.length ? `<div class="chips">${chips.join('')}</div>` : ''}</div>`;
+}
+
+function renderBoard() {
+  const showOld = $('show-old').checked;
+  const pool = data.issues.filter((i) => i.id !== data.loop.id && (showOld || fresh(i) || i.state === 'In Review'));
+  const cols = [
+    ['Todo', pool.filter((i) => i.state === 'Todo')],
+    ['In Progress', pool.filter((i) => i.state === 'In Progress')],
+    ['In Review', pool.filter((i) => i.state === 'In Review')],
+    ['Done', pool.filter((i) => i.state === 'Done' && Date.now() - ms(i.since) < 864e5)],
+  ];
+  const backlog = pool.filter((i) => i.state === 'Backlog').length;
+  $('board').innerHTML = cols.map(([name, items]) => {
+    items.sort((a, b) => (b.failedAt ? 1 : 0) - (a.failedAt ? 1 : 0) || ms(name === 'Done' ? b.since : a.since) - ms(name === 'Done' ? a.since : b.since));
+    const label = name === 'Done' ? 'Done (24h)' : name;
+    return `<div class="col"><div class="col-head"><span class="sw" style="background:${stateVar(name)}"></span>${label} <span class="n">${items.length}</span></div>
+      ${items.slice(0, 8).map(cardHtml).join('') || '<div class="more">empty</div>'}
+      ${items.length > 8 ? `<div class="more">+${items.length - 8} more</div>` : ''}
+      ${name === 'Todo' && backlog ? `<div class="more">${backlog} in Backlog</div>` : ''}</div>`;
+  }).join('');
+  $('board').querySelectorAll('[data-issue]').forEach((el) => (el.onclick = () => openDrawer(el.dataset.issue)));
+}
+
+function renderTimeline() {
+  $('range').innerHTML = RANGES.map(([l, h]) => `<button aria-pressed="${ui.range === h}" data-h="${h}">${l}</button>`).join('');
+  $('range').querySelectorAll('button').forEach((b) => (b.onclick = () => { ui.range = Number(b.dataset.h); save(); renderTimeline(); }));
+  $('legend').innerHTML = STATES.slice(0, 5).map(([n]) => `<span><i class="sw" style="background:${stateVar(n)}"></i>${n}</span>`).join('') + '<span><i class="sw" style="background:var(--ink-2);width:3px"></i>cycle</span>';
+
+  const end = Date.now();
+  let start = end - ui.range * 3600e3;
+  if (!ui.range) {
+    const recent = data.events.filter((e) => e.issue !== data.loop.id && end - ms(e.at) < 7 * 864e5).map((e) => ms(e.at));
+    // start at the current burst: walk back until a gap of more than 6h
+    recent.sort((a, b) => b - a);
+    let first = recent[0] ?? end - 3600e3;
+    for (const t of recent) { if (first - t > 6 * 3600e3) break; first = t; }
+    start = first - Math.max(15 * 60000, (end - first) * 0.03);
+  }
+  const span = (end - start) / 3600e3;
+  const x = (t) => `${((Math.max(start, Math.min(end, t)) - start) / (end - start)) * 100}%`;
+  const rows = data.issues
+    .filter((i) => i.id !== data.loop.id && ($('show-old').checked || fresh(i)) && i.segments.some((s) => s.state !== 'Backlog' && ms(s.to) > start && (s.state !== 'Done' || ms(s.from) > start)))
+    .filter((i) => !(i.segments.at(-1).state === 'Backlog' && i.segments.every((s) => s.state === 'Backlog')))
+    .sort((a, b) => ms(a.segments.find((s) => s.state !== 'Backlog' && ms(s.to) > start)?.from || a.createdAt) - ms(b.segments.find((s) => s.state !== 'Backlog' && ms(s.to) > start)?.from || b.createdAt));
+
+  const step = span <= 3 ? 0.25 : span <= 8 ? 1 : span <= 24 ? 3 : span <= 72 ? 12 : 24;
+  const ticks = [];
+  const first = new Date(start); first.setMinutes(0, 0, 0);
+  for (let t = first.getTime(); t <= end; t += Math.min(step, 1) * 3600e3) {
+    const d = new Date(t);
+    if (t < start || (step >= 1 && d.getHours() % step)) continue;
+    ticks.push({ t, label: step >= 24 || (step >= 3 && d.getHours() === 0) ? d.toLocaleDateString([], { weekday: 'short', day: 'numeric' }) : clock(d.toISOString()) });
+  }
+  const cycles = (data.loop.cycles || []).filter((c) => ms(c.at) >= start);
+  const body = rows.map((i) => {
+    const segs = i.segments.filter((s) => s.state !== 'Backlog' && ms(s.to) > start && ms(s.from) < end).map((s) => {
+      const left = x(ms(s.from)), right = s.state === 'Done' ? x(Math.min(ms(s.from) + (end - start) * 0.006, end)) : x(ms(s.to));
+      return `<div class="seg ${s.open && s.state !== 'Done' ? 'open' : ''}" style="left:${left};width:calc(${right} - ${left});min-width:3px;background:${stateVar(s.state)}"
+        data-tip="${esc(`${i.id} · ${s.state}\n${clock(s.from)} → ${s.open ? 'now' : clock(s.to)} (${dur(ms(s.to) - ms(s.from))})`)}"></div>`;
+    }).join('');
+    return `<div class="tl-row" data-issue="${i.id}"><div class="tl-name" title="${esc(i.title)}"><b>${esc(i.id)}</b> ${esc(i.title)}</div><div class="tl-track">${segs}</div></div>`;
+  }).join('');
+  $('timeline').innerHTML = `<div class="tl-axis"><div class="muted small">${rows.length} issues</div><div class="tl-ticks">
+      ${ticks.map((t) => `<span class="tick" style="left:${x(t.t)}">${esc(t.label)}</span>`).join('')}
+      ${cycles.map((c) => `<span class="cycle-mark" style="left:${x(ms(c.at))}" data-tip="${esc(`${clock(c.at)} · ${c.title}`)}"></span>`).join('')}
+    </div></div>
+    <div style="position:relative">${body || '<div class="muted small" style="padding:10px 0">No activity in this window.</div>'}</div>`;
+  const track = $('timeline').querySelector('.tl-ticks');
+  // gridlines and the now line live in the track column
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:absolute;top:0;bottom:0;pointer-events:none;';
+  const offset = $('timeline').querySelector('.tl-axis > div').getBoundingClientRect().width;
+  overlay.style.left = `${offset}px`; overlay.style.right = '0';
+  overlay.innerHTML = ticks.map((t) => `<div class="vline" style="left:${x(t.t)}"></div>`).join('') + '<div class="now-line" style="right:0"></div>';
+  $('timeline').prepend(overlay);
+  $('timeline').querySelectorAll('.tl-row').forEach((el) => (el.onclick = () => openDrawer(el.dataset.issue)));
+  $('timeline').querySelectorAll('.cycle-mark').forEach((el) => (el.onclick = () => openDrawer(data.loop.id)));
+  if (!track) return;
+}
+
+function eventHtml(e, withIssue = true) {
+  const key = `${e.at}|${e.issue}|${e.type}|${e.text}`;
+  const open = ui.open.has(key) && e.body;
+  const err = e.type === 'error';
+  const icon = { merge: '✅ ', error: '✕ ', review: '', pr: '', cycle: '' }[e.type] || '';
+  return `<div class="ev ${err ? 'err' : ''} ${open ? 'open' : ''}" data-key="${esc(key)}" data-issue="${esc(e.issue || '')}">
+    <span class="t">${clock(e.at)}</span>
+    <span class="who">${ACTORS[e.actor] || '•'} ${esc(e.actor)}</span>
+    ${withIssue ? `<span class="iss">${esc(e.pr && !e.issue ? `#${e.pr}` : e.issue || '')}</span>` : ''}
+    <span class="txt" title="${esc(e.text)}">${icon}${esc(e.text)}${e.body && !open ? ' <span class="muted">▸</span>' : ''}</span>
+    ${open ? `<div class="body">${esc(e.body)}</div>` : ''}</div>`;
+}
+
+function wireEvents(root) {
+  root.querySelectorAll('.ev').forEach((el) => (el.onclick = (event) => {
+    const key = el.dataset.key;
+    const ev = data.events.find((e) => `${e.at}|${e.issue}|${e.type}|${e.text}` === key);
+    if (ev?.body) { ui.open.has(key) ? ui.open.delete(key) : ui.open.add(key); renderFeed(); if (ui.drawer) openDrawer(ui.drawer); }
+    else if (el.dataset.issue && !root.closest('.drawer')) openDrawer(el.dataset.issue);
+    event.stopPropagation();
+  }));
+}
+
+function renderFeed() {
+  const names = ['All', 'Owner', 'Coordinator', 'Gemini', 'Codex'];
+  $('actors').innerHTML = names.map((n) => `<button aria-pressed="${ui.actor === n}" data-a="${n}">${n === 'All' ? 'All' : `${ACTORS[n]} ${n}`}</button>`).join('');
+  $('actors').querySelectorAll('button').forEach((b) => (b.onclick = () => { ui.actor = b.dataset.a; save(); renderFeed(); }));
+  const list = data.events.filter((e) => ui.actor === 'All' || e.actor.startsWith(ui.actor)).slice(0, 120);
+  let lastDay = '';
+  $('feed').innerHTML = list.map((e) => {
+    const d = dayName(e.at);
+    const head = d !== lastDay ? `<div class="day">${d}</div>` : '';
+    lastDay = d;
+    return head + eventHtml(e);
+  }).join('') || '<div class="muted">No activity.</div>';
+  wireEvents($('feed'));
+}
+
+function openDrawer(id) {
+  const i = issueById(id);
+  if (!i) return;
+  ui.drawer = id;
+  const events = data.events.filter((e) => e.issue === id);
+  const steps = i.segments.map((s) => `<div class="step"><span class="sw" style="background:${stateVar(s.state)}"></span>
+    <span>${esc(s.state)} <span class="muted small">${clock(s.from)} ${dayName(s.from) !== 'Today' ? dayName(s.from) : ''}</span></span>
+    <span class="small" style="font-variant-numeric:tabular-nums">${s.open && s.state !== 'Done' ? `${dur(ms(s.to) - ms(s.from))} so far` : s.open ? '' : dur(ms(s.to) - ms(s.from))}</span></div>`).join('');
+  const isMilestone = id === data.loop.id;
+  $('drawer').innerHTML = `<div style="display:flex;gap:8px;align-items:center"><span class="pill"><span class="dot" style="background:${stateVar(i.state)}"></span>${esc(i.state)}</span>
+      <span class="spacer" style="flex:1"></span><a class="small" href="${esc(i.url)}" target="_blank" rel="noopener">Open in Linear ↗</a><button id="close">Close</button></div>
+    <h3>${esc(i.id)} · ${esc(i.title)}</h3>
+    ${isMilestone && data.loop.stateLine ? `<div class="banner" style="margin:8px 0">${esc(data.loop.stateLine)}</div>` : ''}
+    <dl class="kv">
+      <dt>Owner of work</dt><dd>${i.lane ? `🤖 Gemini lane ${i.lane}` : i.kind === 'owner' ? '👤 You' : '🧭 Coordinator'}</dd>
+      <dt>Time in state</dt><dd>${dur(Date.now() - ms(i.since))}</dd>
+      <dt>Total age</dt><dd>${dur(Date.now() - ms(i.createdAt))}</dd>
+      ${i.attempts ? `<dt>Worker runs</dt><dd>${i.attempts}${i.failedAt ? ' · <b style="color:var(--critical)">last run failed</b>' : ''}</dd>` : ''}
+      ${i.pr ? `<dt>Pull request</dt><dd><a href="${esc(i.pr.url)}" target="_blank" rel="noopener">#${i.pr.number}</a> · ${esc(i.pr.state.toLowerCase())}${i.pr.codex?.status === 'completed' ? ` · Codex ${i.pr.codex.p1} P1 / ${i.pr.codex.p2} P2` : i.pr.codex ? ' · Codex pending' : ''}</dd>` : ''}
+      ${i.parent ? `<dt>Parent</dt><dd>${esc(i.parent)}</dd>` : ''}
+    </dl>
+    ${isMilestone ? '' : `<h2>State history</h2><div class="steps">${steps}</div>`}
+    <h2>${isMilestone ? 'Coordinator cycles' : 'Interactions'}</h2>
+    <div class="feed" id="drawer-feed">${events.map((e) => eventHtml(e, false)).join('') || '<div class="muted">None yet.</div>'}</div>`;
+  $('drawer').classList.add('on');
+  $('drawer').setAttribute('aria-hidden', 'false');
+  $('close').onclick = closeDrawer;
+  wireEvents($('drawer-feed'));
+}
+function closeDrawer() { ui.drawer = null; $('drawer').classList.remove('on'); $('drawer').setAttribute('aria-hidden', 'true'); }
+document.addEventListener('keydown', (e) => e.key === 'Escape' && closeDrawer());
+
+document.addEventListener('mousemove', (e) => {
+  const target = e.target.closest?.('[data-tip]');
+  const tip = $('tip');
+  if (!target) { tip.style.display = 'none'; return; }
+  tip.textContent = target.dataset.tip;
+  tip.style.whiteSpace = 'pre-line';
+  tip.style.display = 'block';
+  const x = Math.min(e.clientX + 12, window.innerWidth - tip.offsetWidth - 8);
+  tip.style.left = `${x}px`; tip.style.top = `${e.clientY + 14}px`;
+});
+$('refresh').onclick = load;
+$('show-old').onchange = () => { renderBoard(); renderTimeline(); };
+load();
+setInterval(load, 60000);
+setInterval(() => data && ($('updated').textContent = `Data ${ago(data.generatedAt)} · auto-refresh ${Math.round(data.refreshMs / 1000)}s`), 15000);
+</script>
+</body>
+</html>
