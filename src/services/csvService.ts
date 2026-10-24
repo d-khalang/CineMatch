@@ -9,6 +9,7 @@ export interface ParsedCsvMovie {
   tmdbId?: number; // Parsed from CineMatch export (TMDB_ID)
   director?: string;
   genres?: string[];
+  ratedAt?: number; // epoch ms
 }
 
 export interface CsvParseResult {
@@ -28,6 +29,76 @@ export function sanitizeCsvFormula(value: string): string {
     return `'${trimmed}`;
   }
   return trimmed;
+}
+
+/**
+ * Strict YYYY-MM-DD parsing as UTC midnight.
+ * An unparseable date or one in the future returns undefined.
+ */
+function parseYmdDate(raw?: string): number | undefined {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) return undefined;
+
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return undefined;
+  }
+
+  const d = new Date(0);
+  d.setUTCFullYear(year, month - 1, day);
+  d.setUTCHours(0, 0, 0, 0);
+
+  if (
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day
+  ) {
+    return undefined;
+  }
+
+  const utcMs = d.getTime();
+  const now = new Date(Date.now());
+  const tomorrowUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  const tomorrowLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+  const futureThreshold = Math.max(tomorrowUtc, tomorrowLocal);
+
+  if (utcMs >= futureThreshold) {
+    return undefined;
+  }
+
+  return utcMs;
+}
+
+/**
+ * Parses ISO string (written by CineMatch export) or YYYY-MM-DD.
+ * An unparseable date or one in the future returns undefined.
+ */
+function parseIsoDate(raw?: string): number | undefined {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return parseYmdDate(trimmed);
+  }
+
+  const ms = Date.parse(trimmed);
+  if (isNaN(ms) || !Number.isFinite(ms)) {
+    return undefined;
+  }
+
+  if (ms > Date.now()) {
+    return undefined;
+  }
+
+  return ms;
 }
 
 /**
@@ -73,6 +144,7 @@ export function parseMovieCsv(csvContent: string): CsvParseResult {
     let rawGenres: string | undefined;
     let rawDirector: string | undefined;
     let tmdbId: number | undefined;
+    let ratedAt: number | undefined;
 
     const rawTmdbId = row['tmdb_id'] || row['tmdb id'] || row['movie_id'] || row['movieid'];
     if (rawTmdbId) {
@@ -89,11 +161,13 @@ export function parseMovieCsv(csvContent: string): CsvParseResult {
       sourceId = row['const']; // e.g. tt1234567
       rawGenres = row['genres'];
       rawDirector = row['directors'];
+      ratedAt = parseYmdDate(row['date rated']);
     } else if (format === 'letterboxd') {
       rawTitle = row['name'] || '';
       rawYear = row['year'] || '';
       rawRating = row['rating'] || '';
       sourceId = row['letterboxd uri'];
+      ratedAt = parseYmdDate(row['watched date']) ?? parseYmdDate(row['date']);
     } else {
       // Generic fallback
       rawTitle = row['title'] || row['name'] || row['film'] || '';
@@ -101,6 +175,9 @@ export function parseMovieCsv(csvContent: string): CsvParseResult {
       rawRating = row['rating'] || row['user_rating'] || row['score'] || '';
       rawDirector = row['director'];
       rawGenres = row['genres'] || row['genre'];
+      if (row['rated_at'] || row['rated at']) {
+        ratedAt = parseIsoDate(row['rated_at'] || row['rated at']);
+      }
     }
 
     const title = rawTitle.trim();
@@ -150,6 +227,7 @@ export function parseMovieCsv(csvContent: string): CsvParseResult {
       tmdbId,
       director: rawDirector ? rawDirector.trim() : undefined,
       genres,
+      ratedAt,
     });
   });
 

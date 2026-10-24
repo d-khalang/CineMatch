@@ -145,4 +145,134 @@ tt0816692,9,2023-02-01,Interstellar,https://www.imdb.com/title/tt0816692/,movie,
     expect(parsed.accepted[79].title).toBe('Film 80');
     expect(parsed.accepted[79].tmdbId).toBe(1079);
   });
+
+  it('parses Letterboxd date giving priority to Watched Date over Date as UTC midnight', () => {
+    const csv = `Date,Name,Year,Letterboxd URI,Rating,Watched Date
+2023-01-01,Inception,2010,https://boxd.it/test,4.5,2023-05-15`;
+    const result = parseMovieCsv(csv);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].ratedAt).toBe(Date.UTC(2023, 4, 15));
+  });
+
+  it('parses Letterboxd date using Date when Watched Date is absent', () => {
+    const csv = `Date,Name,Year,Letterboxd URI,Rating
+2023-01-01,Inception,2010,https://boxd.it/test,4.5`;
+    const result = parseMovieCsv(csv);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].ratedAt).toBe(Date.UTC(2023, 0, 1));
+  });
+
+  it('parses Letterboxd date falling back to Date when Watched Date is invalid or future', () => {
+    const csv = `Date,Name,Year,Letterboxd URI,Rating,Watched Date
+2023-01-01,Inception,2010,https://boxd.it/test,4.5,invalid-date
+2023-01-01,Interstellar,2014,https://boxd.it/test2,4.5,2099-01-01`;
+    const result = parseMovieCsv(csv);
+    expect(result.accepted).toHaveLength(2);
+    expect(result.accepted[0].ratedAt).toBe(Date.UTC(2023, 0, 1));
+    expect(result.accepted[1].ratedAt).toBe(Date.UTC(2023, 0, 1));
+  });
+
+  it('parses IMDb Date Rated as UTC midnight', () => {
+    const csv = `Const,Your Rating,Date Rated,Title
+tt1375666,10,2022-11-20,Inception`;
+    const result = parseMovieCsv(csv);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].ratedAt).toBe(Date.UTC(2022, 10, 20));
+  });
+
+  it('round-trips CineMatch Rated_At ISO string through export then parse', () => {
+    const fixedTimestamp = 1672531199000; // 2022-12-31T23:59:59.000Z
+    const originalRatings: Record<number, UserRating> = {
+      123: {
+        movieId: 123,
+        title: 'Memento',
+        rating: 9,
+        genres: ['Mystery'],
+        posterPath: null,
+        ratedAt: fixedTimestamp,
+      },
+    };
+    const exported = generateRatingsCsv(originalRatings);
+    const parsed = parseMovieCsv(exported);
+    expect(parsed.accepted).toHaveLength(1);
+    expect(parsed.accepted[0].ratedAt).toBe(fixedTimestamp);
+  });
+
+  it('leaves ratedAt undefined when date is bad or in the future and accepts the row', () => {
+    const csv = `Date,Name,Year,Letterboxd URI,Rating,Watched Date
+not-a-date,Film Bad Date,2020,https://boxd.it/1,4.0,2024-02-30
+2099-01-01,Film Future Date,2020,https://boxd.it/2,4.0,2099-01-02
+2020-01-01,Film Valid Date,2020,https://boxd.it/3,4.0,`;
+
+    const result = parseMovieCsv(csv);
+    expect(result.rejected).toHaveLength(0);
+    expect(result.accepted).toHaveLength(3);
+
+    expect(result.accepted[0].title).toBe('Film Bad Date');
+    expect(result.accepted[0].ratedAt).toBeUndefined();
+
+    expect(result.accepted[1].title).toBe('Film Future Date');
+    expect(result.accepted[1].ratedAt).toBeUndefined();
+
+    expect(result.accepted[2].title).toBe('Film Valid Date');
+    expect(result.accepted[2].ratedAt).toBe(Date.UTC(2020, 0, 1));
+  });
+
+  it('parses Letterboxd date using Watched Date when Date column is absent', () => {
+    const csv = `Name,Year,Letterboxd URI,Rating,Watched Date
+Inception,2010,https://boxd.it/test,4.5,2023-08-12`;
+    const result = parseMovieCsv(csv);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].ratedAt).toBe(Date.UTC(2023, 7, 12));
+  });
+
+  it('leaves ratedAt undefined for IMDb rows with bad or future Date Rated and accepts the row', () => {
+    const csv = `Const,Your Rating,Date Rated,Title
+tt1375666,10,not-a-date,Film Bad Date
+tt0816692,9,2099-01-01,Film Future Date
+tt0137523,8,2023-02-29,Film Invalid Leap Day`;
+    const result = parseMovieCsv(csv);
+    expect(result.rejected).toHaveLength(0);
+    expect(result.accepted).toHaveLength(3);
+    expect(result.accepted[0].ratedAt).toBeUndefined();
+    expect(result.accepted[1].ratedAt).toBeUndefined();
+    expect(result.accepted[2].ratedAt).toBeUndefined();
+  });
+
+  it('leaves ratedAt undefined for CineMatch export rows with bad or future Rated_At and accepts the row', () => {
+    const csv = `Title,Year,Rating,TMDB_ID,Rated_At
+Bad Date Movie,2020,8,123,not-an-iso-date
+Future Movie,2021,9,456,2099-01-01T00:00:00.000Z`;
+    const result = parseMovieCsv(csv);
+    expect(result.rejected).toHaveLength(0);
+    expect(result.accepted).toHaveLength(2);
+    expect(result.accepted[0].ratedAt).toBeUndefined();
+    expect(result.accepted[1].ratedAt).toBeUndefined();
+  });
+
+  it('leaves ratedAt undefined for generic CSV rows even when date columns are present', () => {
+    const csv = `Title,Year,Rating,Date,Watched Date,Date Rated
+The Matrix,1999,9,2020-01-01,2020-01-01,2020-01-01`;
+    const result = parseMovieCsv(csv);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].ratedAt).toBeUndefined();
+  });
+
+  it('accepts valid leap day (2024-02-29) and rejects invalid leap day (2023-02-29)', () => {
+    const csv = `Const,Your Rating,Date Rated,Title
+tt1111111,10,2024-02-29,Leap Year Film
+tt2222222,9,2023-02-29,Non Leap Year Film`;
+    const result = parseMovieCsv(csv);
+    expect(result.accepted).toHaveLength(2);
+    expect(result.accepted[0].ratedAt).toBe(Date.UTC(2024, 1, 29));
+    expect(result.accepted[1].ratedAt).toBeUndefined();
+  });
+
+  it('leaves ratedAt undefined for generic CSV rows without Rated_At', () => {
+    const csv = `Title,Year,Rating
+The Matrix,1999,9`;
+    const result = parseMovieCsv(csv);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.accepted[0].ratedAt).toBeUndefined();
+  });
 });
