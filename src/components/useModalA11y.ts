@@ -136,7 +136,7 @@ export function useModalA11y<T extends HTMLElement = HTMLDivElement>(
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' || e.key === 'Esc') {
+      if ((e.key === 'Escape' || e.key === 'Esc') && !e.defaultPrevented && !e.isComposing) {
         e.preventDefault();
         e.stopPropagation();
         onCloseRef.current?.();

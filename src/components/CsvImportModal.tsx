@@ -332,14 +332,13 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-fadeIn" onClick={handleClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-fadeIn">
       <div
         ref={modalRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="csv-import-modal-title"
         className="relative w-full max-w-xl max-h-[90dvh] flex flex-col rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-lg overflow-hidden p-6 sm:p-8 space-y-5"
-        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between pb-2 border-b border-[var(--border-subtle)]">
