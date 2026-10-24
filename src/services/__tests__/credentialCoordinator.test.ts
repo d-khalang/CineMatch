@@ -254,6 +254,63 @@ describe('credentialCoordinator', () => {
       expect(credentialCoordinator.getState().rememberEnabled).toBe(true);
     });
 
+    it('forgetAll empties every provider in the real credentialStore and calls clearVault when vault is supported', async () => {
+      vi.mocked(nativeVault.clearVault).mockResolvedValue();
+
+      expect(credentialStore.getCredentials().tmdbValue).toBe('tmdb-token');
+      expect(credentialStore.getCredentials().geminiApiKey).toBe('gemini-key');
+      expect(credentialStore.getCredentials().openRouterApiKey).toBe('openrouter-key');
+      expect(credentialStore.hasTmdb()).toBe(true);
+      expect(credentialStore.hasGemini()).toBe(true);
+      expect(credentialStore.hasOpenRouter()).toBe(true);
+
+      await credentialCoordinator.forgetAll();
+
+      const creds = credentialStore.getCredentials();
+      expect(creds.tmdbValue).toBe('');
+      expect(creds.geminiApiKey).toBe('');
+      expect(creds.openRouterApiKey).toBe('');
+      expect(credentialStore.hasTmdb()).toBe(false);
+      expect(credentialStore.hasGemini()).toBe(false);
+      expect(credentialStore.hasOpenRouter()).toBe(false);
+
+      expect(nativeVault.clearVault).toHaveBeenCalledTimes(1);
+
+      const state = credentialCoordinator.getState();
+      expect(state.isRemembered).toBe(false);
+      expect(state.rememberEnabled).toBe(true);
+      expect(state.deletionFailureWarning).toBeNull();
+    });
+
+    it('resetVault (vault-clear path at L205) empties the keys across all providers in real credentialStore and clears vault', async () => {
+      vi.mocked(nativeVault.clearVault).mockResolvedValue();
+      vi.mocked(nativeVault.setRememberEnabled).mockResolvedValue();
+
+      expect(credentialStore.getCredentials().tmdbValue).toBe('tmdb-token');
+      expect(credentialStore.getCredentials().geminiApiKey).toBe('gemini-key');
+      expect(credentialStore.getCredentials().openRouterApiKey).toBe('openrouter-key');
+
+      await credentialCoordinator.resetVault();
+
+      expect(nativeVault.clearVault).toHaveBeenCalled();
+      expect(nativeVault.setRememberEnabled).toHaveBeenCalledWith(true);
+
+      const creds = credentialStore.getCredentials();
+      expect(creds.tmdbValue).toBe('');
+      expect(creds.geminiApiKey).toBe('');
+      expect(creds.openRouterApiKey).toBe('');
+      expect(credentialStore.hasTmdb()).toBe(false);
+      expect(credentialStore.hasGemini()).toBe(false);
+      expect(credentialStore.hasOpenRouter()).toBe(false);
+
+      const state = credentialCoordinator.getState();
+      expect(state.status).toBe('ready');
+      expect(state.isRemembered).toBe(false);
+      expect(state.rememberEnabled).toBe(true);
+      expect(state.deletionFailureWarning).toBeNull();
+      expect(state.lastError).toBeNull();
+    });
+
     it('clearAllData purges session keys, clears vault, and resets rememberEnabled preference to default true', async () => {
       vi.mocked(nativeVault.clearVault).mockResolvedValue();
       vi.mocked(nativeVault.setRememberEnabled).mockResolvedValue();
@@ -269,6 +326,54 @@ describe('credentialCoordinator', () => {
       expect(state.isRemembered).toBe(false);
       expect(state.rememberEnabled).toBe(true);
       expect(state.deletionFailureWarning).toBeNull();
+    });
+
+    it('when clearVault rejects during forgetAll, session keys are still emptied and error surfaces as sticky warning', async () => {
+      vi.mocked(nativeVault.clearVault).mockRejectedValue(
+        new nativeVault.VaultBridgeError('DELETE_FAILED', 'Disk locked')
+      );
+
+      expect(credentialStore.getCredentials().tmdbValue).toBe('tmdb-token');
+      expect(credentialStore.getCredentials().geminiApiKey).toBe('gemini-key');
+      expect(credentialStore.getCredentials().openRouterApiKey).toBe('openrouter-key');
+
+      await credentialCoordinator.forgetAll();
+
+      const creds = credentialStore.getCredentials();
+      expect(creds.tmdbValue).toBe('');
+      expect(creds.geminiApiKey).toBe('');
+      expect(creds.openRouterApiKey).toBe('');
+      expect(credentialStore.hasTmdb()).toBe(false);
+      expect(credentialStore.hasGemini()).toBe(false);
+      expect(credentialStore.hasOpenRouter()).toBe(false);
+
+      expect(credentialCoordinator.getState().deletionFailureWarning).toBe(
+        'Saved keys could not be removed. Retry before closing the app.'
+      );
+    });
+
+    it('when clearVault rejects during clearAllData, session keys are still emptied and error surfaces as sticky warning', async () => {
+      vi.mocked(nativeVault.clearVault).mockRejectedValue(
+        new nativeVault.VaultBridgeError('DELETE_FAILED', 'Disk locked')
+      );
+
+      expect(credentialStore.getCredentials().tmdbValue).toBe('tmdb-token');
+      expect(credentialStore.getCredentials().geminiApiKey).toBe('gemini-key');
+      expect(credentialStore.getCredentials().openRouterApiKey).toBe('openrouter-key');
+
+      await credentialCoordinator.clearAllData();
+
+      const creds = credentialStore.getCredentials();
+      expect(creds.tmdbValue).toBe('');
+      expect(creds.geminiApiKey).toBe('');
+      expect(creds.openRouterApiKey).toBe('');
+      expect(credentialStore.hasTmdb()).toBe(false);
+      expect(credentialStore.hasGemini()).toBe(false);
+      expect(credentialStore.hasOpenRouter()).toBe(false);
+
+      expect(credentialCoordinator.getState().deletionFailureWarning).toBe(
+        'Saved keys could not be removed. Retry before closing the app.'
+      );
     });
 
     it('sets sticky warning on deletion failure and clears it on successful retry', async () => {

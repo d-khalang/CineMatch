@@ -5,42 +5,63 @@ import { getMovieDetails, BACKDROP_BASE_URL } from '../services/tmdb';
 import { useMovieStore } from '../store/useMovieStore';
 import { RatingControl } from './RatingControl';
 import { ShareButton } from './ShareButton';
+import { useModalA11y } from './useModalA11y';
 
-export const MovieDetailsModal: React.FC = () => {
+interface MovieDetailsModalProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+  movie?: Movie | null;
+}
+
+export const MovieDetailsModal: React.FC<MovieDetailsModalProps> = ({
+  isOpen: propIsOpen,
+  onClose: propOnClose,
+  movie: propMovie,
+}) => {
   const { selectedMovieForModal, setSelectedMovieForModal, ratings, setRating, removeRating, watchlist, toggleWatchlist } = useMovieStore();
   const [movieDetails, setMovieDetails] = useState<Movie | null>(null);
   const [showTrailer, setShowTrailer] = useState<boolean>(false);
 
+  const isControlled = propIsOpen !== undefined;
+  const isOpen = isControlled ? propIsOpen : Boolean(selectedMovieForModal);
+  const handleClose = propOnClose !== undefined ? propOnClose : () => setSelectedMovieForModal(null);
+  const modalRef = useModalA11y(isOpen, handleClose);
+  const targetMovie = propMovie !== undefined ? propMovie : selectedMovieForModal;
+  const movieId = targetMovie?.id;
+
   useEffect(() => {
-    if (!selectedMovieForModal) {
+    if (!targetMovie || !movieId) {
       setMovieDetails(null);
       setShowTrailer(false);
       return;
     }
 
+    const abortController = new AbortController();
     let isMounted = true;
 
-    getMovieDetails(selectedMovieForModal.id)
+    getMovieDetails(movieId, abortController.signal)
       .then((details) => {
         if (isMounted) {
           setMovieDetails(details);
         }
       })
       .catch((err) => {
+        if (abortController.signal.aborted) return;
         console.error('Failed to load full movie details', err);
         if (isMounted) {
-          setMovieDetails(selectedMovieForModal);
+          setMovieDetails(targetMovie);
         }
       });
 
     return () => {
       isMounted = false;
+      abortController.abort();
     };
-  }, [selectedMovieForModal]);
+  }, [movieId, targetMovie]);
 
-  if (!selectedMovieForModal) return null;
+  if (!isOpen || !targetMovie) return null;
 
-  const movie = movieDetails || selectedMovieForModal;
+  const movie = movieDetails || targetMovie;
   const userRating = ratings[movie.id]?.rating;
   const inWatchlist = watchlist.includes(movie.id);
   const backdropUrl = movie.backdrop_path ? `${BACKDROP_BASE_URL}${movie.backdrop_path}` : null;
@@ -49,15 +70,20 @@ export const MovieDetailsModal: React.FC = () => {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-[var(--bg-canvas)]/85 overflow-y-auto animate-fadeIn"
-      onClick={() => setSelectedMovieForModal(null)}
+      onClick={handleClose}
     >
       <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="movie-details-modal-title"
         className="relative w-full max-w-3xl rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-lg overflow-hidden my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close Button */}
         <button
-          onClick={() => setSelectedMovieForModal(null)}
+          onClick={handleClose}
+          aria-label="Close movie details"
           className="absolute top-4 right-4 z-20 p-2 rounded-full bg-[var(--bg-surface-elevated)] text-slate-300 hover:text-white hover:border-[var(--border-focus)] transition-colors border border-[var(--border-subtle)] cursor-pointer"
         >
           <X className="w-5 h-5" />
@@ -100,7 +126,7 @@ export const MovieDetailsModal: React.FC = () => {
           {/* Main Title & Action Row */}
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
             <div className="space-y-1">
-              <h2 className="font-heading text-xl sm:text-3xl font-extrabold text-white tracking-tight">
+              <h2 id="movie-details-modal-title" className="font-heading text-xl sm:text-3xl font-extrabold text-white tracking-tight">
                 {movie.title}
               </h2>
               <div className="flex flex-wrap items-center gap-3 text-xs sm:text-sm text-slate-400">

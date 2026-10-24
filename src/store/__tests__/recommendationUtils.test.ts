@@ -45,6 +45,7 @@ vi.mock('../../services/credentialStore', () => ({
     getVersion: vi.fn().mockReturnValue(1),
     subscribe: vi.fn().mockReturnValue(() => {}),
     forgetAll: vi.fn(),
+    clearAllData: vi.fn(),
   },
 }));
 
