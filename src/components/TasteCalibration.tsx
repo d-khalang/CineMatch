@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Sparkles,
   Search,
@@ -29,7 +29,7 @@ import { ShareButton } from './ShareButton';
 import { useDebounce } from '../hooks/useDebounce';
 
 export const TasteCalibration: React.FC = () => {
-  const { ratings, watchlist, toggleWatchlist, setRating, removeRating, setSelectedMovieForModal, setActiveTab, generateRankings } = useMovieStore();
+  const { ratings, watchlist, hiddenFilms, toggleWatchlist, setRating, removeRating, setSelectedMovieForModal, setActiveTab, generateRankings } = useMovieStore();
   
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [movies, setMovies] = useState<Movie[]>([]);
@@ -299,10 +299,18 @@ export const TasteCalibration: React.FC = () => {
     fetchCategoryMovies(activeCategory, randomPage, false);
   };
 
+  const notForMeIds = useMemo(() => {
+    return new Set(
+      (hiddenFilms || [])
+        .filter((film) => film?.reason === 'not_for_me')
+        .map((film) => film.movieId)
+    );
+  }, [hiddenFilms]);
+
   // When hideRated is active, quietly append next page in background only when remaining unrated films get critically low (< 4)
   useEffect(() => {
     if (hideRated && searchResults === null && !isLoading && !isShuffling && hasMore && movies.length > 0) {
-      const unratedCount = movies.filter((m) => !ratingsRef.current[m.id]).length;
+      const unratedCount = movies.filter((m) => !ratingsRef.current[m.id] && !notForMeIds.has(m.id)).length;
       if (unratedCount < 4) {
         setPage((prevPage) => {
           const nextPage = prevPage + 1;
@@ -311,14 +319,16 @@ export const TasteCalibration: React.FC = () => {
         });
       }
     }
-  }, [movies.length, hideRated, searchResults, isLoading, isShuffling, hasMore, activeCategory, fetchCategoryMovies]);
+  }, [movies.length, hideRated, searchResults, isLoading, isShuffling, hasMore, activeCategory, fetchCategoryMovies, notForMeIds]);
 
   // Search results are 100% uncapped; browse grid applies hideRated filter but retains pending removal items during grace window
-  const displayedMovies = searchResults !== null
+  const displayedMovies = (
+    searchResults !== null
     ? searchResults
     : (hideRated
         ? movies.filter((m) => !ratings[m.id] || Boolean(pendingRemovalIds[m.id]))
-        : movies);
+        : movies)
+  ).filter((m) => !notForMeIds.has(m.id));
 
   const getCategoryIcon = (iconName: string) => {
     switch (iconName) {
@@ -682,7 +692,7 @@ export const TasteCalibration: React.FC = () => {
         {/* Clear Search filter state */}
         {searchResults !== null && (
           <div className="flex items-center justify-between py-1 text-sm text-slate-400">
-            <span>Search Results for "{searchQuery}" ({searchResults.length} found)</span>
+            <span>Search Results for "{searchQuery}" ({displayedMovies.length} found)</span>
             <button
               onClick={handleClearSearch}
               className="text-[var(--accent-primary)] hover:text-[var(--accent-hover)] text-xs font-semibold underline cursor-pointer"

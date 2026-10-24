@@ -7,6 +7,7 @@ const domTsTests = [
   'src/services/__tests__/storage.test.ts',
   'src/services/__tests__/storageHidden.frozen.test.ts',
   'src/store/__tests__/recommendationUtils.test.ts',
+  'src/services/__tests__/storageInvalidHiddenAt.test.ts',
   'src/store/__tests__/recommendationCache.test.ts',
   'src/test/smoke.test.ts',
 ];
