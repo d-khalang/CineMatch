@@ -235,7 +235,7 @@ export const Watchlist: React.FC = () => {
                 placeholder="Search movies in your watchlist..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus:border-[var(--border-focus)]"
+                className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-200 focus-ring"
               />
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             </div>
@@ -246,7 +246,7 @@ export const Watchlist: React.FC = () => {
               <select
                 value={sortBy}
                 onChange={(e: any) => setSortBy(e.target.value)}
-                className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus:border-[var(--border-focus)] cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-xs text-slate-300 focus-ring cursor-pointer"
               >
                 <option value="recent">Recently Added</option>
                 <option value="rating-desc">Highest TMDB Rating</option>
