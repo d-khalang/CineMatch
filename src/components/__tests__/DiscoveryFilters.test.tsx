@@ -98,8 +98,8 @@ describe('DiscoveryFilters "Settings changed" state (CIN-40)', () => {
       </MovieStoreProvider>
     );
 
-    // Initial state: settings match the fingerprint -> label must not appear
-    expect(screen.queryByRole('status')).toBeNull();
+    // Initial state: status region exists and is empty
+    expect(screen.getByRole('status').textContent).toBe('');
     expect(screen.queryByText(/Settings changed — re-rank to apply/i)).toBeNull();
 
     // Change serendipity setting
@@ -129,8 +129,9 @@ describe('DiscoveryFilters "Settings changed" state (CIN-40)', () => {
       </MovieStoreProvider>
     );
 
-    // Not stale anymore: label disappears
-    expect(screen.queryByRole('status')).toBeNull();
+    // Not stale anymore: status region is empty
+    expect(screen.getByRole('status').textContent).toBe('');
+    expect(screen.queryByText(/Settings changed — re-rank to apply/i)).toBeNull();
   });
 
   it('does not show the status label when isGeneratingRecs is true even if settings differ', async () => {
@@ -193,7 +194,7 @@ describe('DiscoveryFilters "Settings changed" state (CIN-40)', () => {
       </MovieStoreProvider>
     );
 
-    expect(screen.getByRole('status')).toBeDefined();
+    expect(screen.getByRole('status').textContent).toBe('Settings changed — re-rank to apply');
 
     // Start generation (in-flight)
     act(() => {
@@ -206,8 +207,9 @@ describe('DiscoveryFilters "Settings changed" state (CIN-40)', () => {
       </MovieStoreProvider>
     );
 
-    // While generating, status label must not be rendered
-    expect(screen.queryByRole('status')).toBeNull();
+    // While generating, status label text is empty
+    expect(screen.getByRole('status').textContent).toBe('');
+    expect(screen.queryByText(/Settings changed — re-rank to apply/i)).toBeNull();
 
     // Clean up pending promise
     await act(async () => {

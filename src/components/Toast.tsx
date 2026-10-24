@@ -15,6 +15,7 @@ export const Toast: React.FC = () => {
         </div>
         <p className="flex-grow font-medium leading-snug">{toastMessage}</p>
         <button
+          aria-label="Dismiss notification"
           onClick={clearToast}
           className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-[var(--bg-surface-hover)] transition-colors shrink-0 cursor-pointer"
         >

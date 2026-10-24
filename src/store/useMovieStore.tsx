@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Movie, UserRating, HiddenFilm, Recommendation, AISettings, TasteStats } from '../types';
 import { aiManager } from '../services/ai/aiManager';
-import { getMovieDetails, hydrateBatchWithDiscoveries, getEraDateRange } from '../services/tmdb';
+import { getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
+import { matchesPreferredEras, sortAndRankRecommendations, coerceScore } from './recommendationUtils';
 import { getCandidateRecommendationPool } from '../services/recommendation/candidateSources';
 import { recsSettingsFingerprint } from '../services/recommendation/settingsFingerprint';
 import { credentialStore } from '../services/credentialStore';
@@ -136,69 +137,25 @@ const removeLegacyWatchlistRecord = (movieId: number): void => {
 };
 
 /**
- * Checks whether a movie's release date falls into the user's preferred eras.
- * When preferredEras is empty, returns true (no era filtering).
+ * Helper to preserve settingsFingerprint and ratedCount from cached recommendations,
+ * falling back to in-memory lastRun values if available.
  */
-export function matchesPreferredEras(
-  releaseDate: string | undefined,
-  preferredEras: string[] | undefined
-): boolean {
-  if (!preferredEras || preferredEras.length === 0) return true;
-  if (!releaseDate || typeof releaseDate !== 'string') return false;
-
-  const match = releaseDate.match(/\b(\d{4})\b/);
-  if (!match) return false;
-  const year = parseInt(match[1], 10);
-  if (!Number.isFinite(year)) return false;
-
-  const decadeStart = Math.floor(year / 10) * 10;
-  const decade4Digit = `${decadeStart}s`.toLowerCase();
-  const decade2Digit = `${String(decadeStart).slice(-2)}s`.toLowerCase();
-
-  return preferredEras.some((era) => {
-    if (typeof era !== 'string') return false;
-    const trimmed = era.trim().toLowerCase();
-    if (trimmed === decade4Digit || trimmed === decade2Digit) {
-      return true;
-    }
-    const range = getEraDateRange(era);
-    if (range) {
-      const startYear = parseInt(range.gte.slice(0, 4), 10);
-      const endYear = parseInt(range.lte.slice(0, 4), 10);
-      return year >= startYear && year <= endYear;
-    }
-    return false;
-  });
-}
-
-/**
- * Sorts recommendations ensuring items with origin === 'local_backfill' sort after
- * all other recommendations (AI pool picks and AI discoveries). Within each group,
- * items sort by score descending. Ranks are renumbered 1..n in final order.
- */
-export function sortAndRankRecommendations(recs: Recommendation[]): Recommendation[] {
-  const nonBackfill: Recommendation[] = [];
-  const backfill: Recommendation[] = [];
-
-  for (const r of recs) {
-    if (r.origin === 'local_backfill') {
-      backfill.push(r);
-    } else {
-      nonBackfill.push(r);
-    }
-  }
-
-  const scoreOf = (r: Recommendation) =>
-    typeof r.score === 'number' && Number.isFinite(r.score) ? r.score : 0;
-
-  nonBackfill.sort((a, b) => scoreOf(b) - scoreOf(a));
-  backfill.sort((a, b) => scoreOf(b) - scoreOf(a));
-
-  return [...nonBackfill, ...backfill].map((rec, idx) => ({
-    ...rec,
-    rank: idx + 1,
-  }));
-}
+const getFingerprintAndRatedCountFallbacks = (
+  cached: Record<string, unknown>,
+  fallbackFingerprint: string | null,
+  fallbackRatedCount: number | null
+): { settingsFingerprint?: string; ratedCount?: number } => ({
+  ...(cached.settingsFingerprint !== undefined
+    ? { settingsFingerprint: cached.settingsFingerprint as string }
+    : fallbackFingerprint !== null
+    ? { settingsFingerprint: fallbackFingerprint }
+    : {}),
+  ...(cached.ratedCount !== undefined
+    ? { ratedCount: cached.ratedCount as number }
+    : fallbackRatedCount !== null
+    ? { ratedCount: fallbackRatedCount }
+    : {}),
+});
 
 export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // 1. User Ratings State
@@ -633,24 +590,15 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         JSON.stringify({
           ...existingParsed,
           recommendations: next,
-          generatedAt: existingParsed.generatedAt ?? Date.now(),
+          generatedAt: existingParsed.generatedAt ?? cachedRecsTimestamp ?? Date.now(),
           usedProvider: existingParsed.usedProvider ?? lastProviderUsed,
           tasteAnalysis: existingParsed.tasteAnalysis ?? aiTasteAnalysis,
-          ...(existingParsed.settingsFingerprint !== undefined
-            ? { settingsFingerprint: existingParsed.settingsFingerprint }
-            : lastRunFingerprint !== null
-            ? { settingsFingerprint: lastRunFingerprint }
-            : {}),
-          ...(existingParsed.ratedCount !== undefined
-            ? { ratedCount: existingParsed.ratedCount }
-            : lastRunRatedCount !== null
-            ? { ratedCount: lastRunRatedCount }
-            : {}),
+          ...getFingerprintAndRatedCountFallbacks(existingParsed, lastRunFingerprint, lastRunRatedCount),
         })
       );
       return next;
     });
-  }, [lastProviderUsed, aiTasteAnalysis, lastRunFingerprint, lastRunRatedCount]);
+  }, [lastProviderUsed, aiTasteAnalysis, lastRunFingerprint, lastRunRatedCount, cachedRecsTimestamp]);
 
   const hideFilm = useCallback(
     (movieId: number, reason: HiddenFilm['reason'], title?: string) => {
@@ -694,16 +642,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                   JSON.stringify({
                     ...parsed,
                     recommendations: filteredRecs,
-                    ...(parsed.settingsFingerprint !== undefined
-                      ? { settingsFingerprint: parsed.settingsFingerprint }
-                      : lastRunFingerprint !== null
-                      ? { settingsFingerprint: lastRunFingerprint }
-                      : {}),
-                    ...(parsed.ratedCount !== undefined
-                      ? { ratedCount: parsed.ratedCount }
-                      : lastRunRatedCount !== null
-                      ? { ratedCount: lastRunRatedCount }
-                      : {}),
+                    ...getFingerprintAndRatedCountFallbacks(parsed, lastRunFingerprint, lastRunRatedCount),
                   })
                 );
               }
@@ -736,16 +675,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             generatedAt: existingParsed.generatedAt ?? cachedRecsTimestamp ?? Date.now(),
             usedProvider: existingParsed.usedProvider ?? lastProviderUsed,
             tasteAnalysis: existingParsed.tasteAnalysis ?? aiTasteAnalysis,
-            ...(existingParsed.settingsFingerprint !== undefined
-              ? { settingsFingerprint: existingParsed.settingsFingerprint }
-              : lastRunFingerprint !== null
-              ? { settingsFingerprint: lastRunFingerprint }
-              : {}),
-            ...(existingParsed.ratedCount !== undefined
-              ? { ratedCount: existingParsed.ratedCount }
-              : lastRunRatedCount !== null
-              ? { ratedCount: lastRunRatedCount }
-              : {}),
+            ...getFingerprintAndRatedCountFallbacks(existingParsed, lastRunFingerprint, lastRunRatedCount),
           })
         );
         return next;
@@ -863,7 +793,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     storeEpochRef.current++;
     ratingVersionsRef.current.clear();
     failedWatchlistIdsRef.current.clear();
-    credentialCoordinator.clearAllData();
+    credentialCoordinator.clearAllData?.()?.catch?.(() => {});
     setRatings({});
     setWatchlist([]);
     setWatchlistMovies({});
@@ -1046,6 +976,10 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
 
       let finalRecommendations: Recommendation[] = [];
+      const mappedPoolRecs = (result.recommendations || []).map((rec) => ({
+        ...rec,
+        score: coerceScore(rec.score),
+      }));
 
       // 3. Hydrate AI unconstrained discoveries if present
       if (result.unconstrainedDiscoveries && result.unconstrainedDiscoveries.length > 0 && credentialStore.hasTmdb()) {
@@ -1070,7 +1004,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             seenIds.add(movie.id);
             discoveryRecs.push({
               movie,
-              score: discovery.score,
+              score: coerceScore(discovery.score),
               rank: 0,
               reason: discovery.reason,
               serendipityType: 'ai_cinephile_discovery',
@@ -1080,7 +1014,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           }
         }
 
-        const poolRecs = (result.recommendations || []).filter(
+        const poolRecs = mappedPoolRecs.filter(
           (rec) => !seenIds.has(rec.movie.id) && !latestExcludedIds.has(rec.movie.id)
         );
 
@@ -1090,7 +1024,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           ...excludedIds,
           ...hiddenFilmsRef.current.map((h) => h.movieId),
         ]);
-        const poolRecs = (result.recommendations || []).filter(
+        const poolRecs = mappedPoolRecs.filter(
           (rec) => !latestExcludedIds.has(rec.movie.id)
         );
         finalRecommendations = sortAndRankRecommendations(poolRecs);

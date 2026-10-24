@@ -205,7 +205,7 @@ class CredentialCoordinator {
         await clearVault();
         await nativeSetRememberEnabled(true);
         if (opRev === this.operationRevision) {
-          credentialStore.forgetAll();
+          credentialStore.forgetAll?.();
           this.isRemembered = false;
           this.rememberEnabled = true;
           this.deletionFailureWarning = null;
@@ -356,7 +356,7 @@ class CredentialCoordinator {
    */
   public async forgetAll(): Promise<void> {
     const opRev = ++this.operationRevision;
-    credentialStore.forgetAll();
+    credentialStore.forgetAll?.();
 
     if (!isVaultSupported()) {
       this.isRemembered = false;
@@ -387,7 +387,7 @@ class CredentialCoordinator {
    */
   public async clearAllData(): Promise<void> {
     const opRev = ++this.operationRevision;
-    credentialStore.forgetAll();
+    credentialStore.forgetAll?.();
 
     if (!isVaultSupported()) {
       this.isRemembered = false;
