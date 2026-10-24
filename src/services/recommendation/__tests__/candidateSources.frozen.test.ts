@@ -23,9 +23,12 @@
 //      primary_release_date) are tagged exactly ['era']; vibe discover streams (with_genres /
 //      with_keywords only, no era dates, no vote_average.gte) exactly ['vibe']; base streams stay
 //      'acclaimed_baseline'.
-//    - Among the FIRST 40 candidates returned, at most 12 may carry an 'era' or 'vibe' source tag,
-//      but at least one era and one vibe candidate stay in those 40, and at least 8 seed_graph and
-//      at least 8 hidden_gem candidates must be present in the first 40.
+//    - Among the FIRST 40 candidates returned (amended 2026-10-24 so it agrees with the CIN-28 frozen
+//      test eraPriority.test.ts, which requires preferred eras to fill at least half the window):
+//        * at most 20 carry 'era'
+//        * at most 4 carry 'vibe' when preferredEras is non-empty, otherwise at most 12
+//        * at least one era (when eras are selected) and one vibe candidate stay in those 40
+//        * at least 8 seed_graph and at least 8 hidden_gem candidates are present
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
@@ -287,7 +290,7 @@ describe('CIN-30 frozen: era/vibe tags and cap', () => {
     for (const c of bases) expect(c.sources).toEqual(['acclaimed_baseline']);
   });
 
-  it('caps era+vibe at 12 of the first 40 and keeps seed_graph and hidden_gem represented', async () => {
+  it('caps era at 20 and vibe at 4 of the first 40 when eras are selected, keeping seed_graph and hidden_gem', async () => {
     installFetch({ n: 20 });
     const result = await generateCandidates(makeRatings(8), {
       seedCount: 8,
@@ -299,12 +302,29 @@ describe('CIN-30 frozen: era/vibe tags and cap', () => {
     expect(result.length).toBeGreaterThan(40);
     const first40 = result.slice(0, 40);
     const count = (tag: string) => first40.filter((c) => c.sources.includes(tag as any)).length;
-    const eraVibe = first40.filter(
-      (c) => c.sources.includes('era') || c.sources.includes('vibe')
-    ).length;
-
-    expect(eraVibe).toBeLessThanOrEqual(12);
+    expect(count('era')).toBeLessThanOrEqual(20);
+    expect(count('vibe')).toBeLessThanOrEqual(4);
     expect(count('era')).toBeGreaterThanOrEqual(1);
+    expect(count('vibe')).toBeGreaterThanOrEqual(1);
+    expect(count('seed_graph')).toBeGreaterThanOrEqual(8);
+    expect(count('hidden_gem')).toBeGreaterThanOrEqual(8);
+  });
+
+  it('caps vibe at 12 of the first 40 when no eras are selected', async () => {
+    installFetch({ n: 20 });
+    const result = await generateCandidates(makeRatings(8), {
+      seedCount: 8,
+      preferredEras: [],
+      selectedVibes: ['mind-bending', 'dark & gritty'],
+      randomFn: seq(),
+    });
+
+    expect(result.length).toBeGreaterThan(40);
+    const first40 = result.slice(0, 40);
+    const count = (tag: string) => first40.filter((c) => c.sources.includes(tag as any)).length;
+
+    expect(count('era')).toBe(0);
+    expect(count('vibe')).toBeLessThanOrEqual(12);
     expect(count('vibe')).toBeGreaterThanOrEqual(1);
     expect(count('seed_graph')).toBeGreaterThanOrEqual(8);
     expect(count('hidden_gem')).toBeGreaterThanOrEqual(8);
