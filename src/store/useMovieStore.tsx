@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Movie, UserRating, HiddenFilm, Recommendation, AISettings, TasteStats } from '../types';
 import { aiManager } from '../services/ai/aiManager';
-import { getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
+import { getMovieDetails, hydrateBatchWithDiscoveries, getEraDateRange } from '../services/tmdb';
 import { getCandidateRecommendationPool } from '../services/recommendation/candidateSources';
 import { credentialStore } from '../services/credentialStore';
 import { credentialCoordinator } from '../services/credentialCoordinator';
@@ -131,6 +131,71 @@ const removeLegacyWatchlistRecord = (movieId: number): void => {
     }
   }
 };
+
+/**
+ * Checks whether a movie's release date falls into the user's preferred eras.
+ * When preferredEras is empty, returns true (no era filtering).
+ */
+export function matchesPreferredEras(
+  releaseDate: string | undefined,
+  preferredEras: string[] | undefined
+): boolean {
+  if (!preferredEras || preferredEras.length === 0) return true;
+  if (!releaseDate || typeof releaseDate !== 'string') return false;
+
+  const match = releaseDate.match(/\b(\d{4})\b/);
+  if (!match) return false;
+  const year = parseInt(match[1], 10);
+  if (!Number.isFinite(year)) return false;
+
+  const decadeStart = Math.floor(year / 10) * 10;
+  const decade4Digit = `${decadeStart}s`.toLowerCase();
+  const decade2Digit = `${String(decadeStart).slice(-2)}s`.toLowerCase();
+
+  return preferredEras.some((era) => {
+    if (typeof era !== 'string') return false;
+    const trimmed = era.trim().toLowerCase();
+    if (trimmed === decade4Digit || trimmed === decade2Digit) {
+      return true;
+    }
+    const range = getEraDateRange(era);
+    if (range) {
+      const startYear = parseInt(range.gte.slice(0, 4), 10);
+      const endYear = parseInt(range.lte.slice(0, 4), 10);
+      return year >= startYear && year <= endYear;
+    }
+    return false;
+  });
+}
+
+/**
+ * Sorts recommendations ensuring items with origin === 'local_backfill' sort after
+ * all other recommendations (AI pool picks and AI discoveries). Within each group,
+ * items sort by score descending. Ranks are renumbered 1..n in final order.
+ */
+export function sortAndRankRecommendations(recs: Recommendation[]): Recommendation[] {
+  const nonBackfill: Recommendation[] = [];
+  const backfill: Recommendation[] = [];
+
+  for (const r of recs) {
+    if (r.origin === 'local_backfill') {
+      backfill.push(r);
+    } else {
+      nonBackfill.push(r);
+    }
+  }
+
+  const scoreOf = (r: Recommendation) =>
+    typeof r.score === 'number' && Number.isFinite(r.score) ? r.score : 0;
+
+  nonBackfill.sort((a, b) => scoreOf(b) - scoreOf(a));
+  backfill.sort((a, b) => scoreOf(b) - scoreOf(a));
+
+  return [...nonBackfill, ...backfill].map((rec, idx) => ({
+    ...rec,
+    rank: idx + 1,
+  }));
+}
 
 export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // 1. User Ratings State
@@ -905,7 +970,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const seenIds = new Set<number>();
 
         for (const { item: discovery, movie } of paired) {
-          if (!latestExcludedIds.has(movie.id) && !seenIds.has(movie.id)) {
+          if (!latestExcludedIds.has(movie.id) && !seenIds.has(movie.id) && matchesPreferredEras(movie.release_date, aiSettings.preferredEras)) {
             seenIds.add(movie.id);
             discoveryRecs.push({
               movie,
@@ -923,22 +988,25 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           (rec) => !seenIds.has(rec.movie.id) && !latestExcludedIds.has(rec.movie.id)
         );
 
-        const merged = [...discoveryRecs, ...poolRecs].sort((a, b) => b.score - a.score);
-        finalRecommendations = merged.map((rec, idx) => ({
-          ...rec,
-          rank: idx + 1,
-        }));
+        finalRecommendations = sortAndRankRecommendations([...discoveryRecs, ...poolRecs]);
+
+
+
+
       } else {
         const latestExcludedIds = new Set<number>([
           ...excludedIds,
           ...hiddenFilmsRef.current.map((h) => h.movieId),
         ]);
-        finalRecommendations = (result.recommendations || [])
-          .filter((rec) => !latestExcludedIds.has(rec.movie.id))
-          .map((rec, idx) => ({
-            ...rec,
-            rank: idx + 1,
-          }));
+        const poolRecs = (result.recommendations || []).filter(
+          (rec) => !latestExcludedIds.has(rec.movie.id)
+        );
+        finalRecommendations = sortAndRankRecommendations(poolRecs);
+
+
+  
+  
+  
       }
 
       if (activeGenerationIdRef.current === generationId && !controller.signal.aborted) {
