@@ -6,6 +6,7 @@ import { searchMovies, findMovieByExternalId } from '../services/tmdb';
 import { credentialStore } from '../services/credentialStore';
 import { parseMovieCsv, CsvParseResult, ParsedCsvMovie } from '../services/csvService';
 import { titlesMatch } from '../services/titleMatcher';
+import { useModalA11y } from './useModalA11y';
 
 interface CsvImportModalProps {
   isOpen: boolean;
@@ -47,6 +48,8 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
     cancelImport();
     onClose();
   }, [cancelImport, onClose]);
+
+  const modalRef = useModalA11y(isOpen, handleClose);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -329,8 +332,15 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-fadeIn">
-      <div className="relative w-full max-w-xl max-h-[90dvh] flex flex-col rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-lg overflow-hidden p-6 sm:p-8 space-y-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-fadeIn" onClick={handleClose}>
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="csv-import-modal-title"
+        className="relative w-full max-w-xl max-h-[90dvh] flex flex-col rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-lg overflow-hidden p-6 sm:p-8 space-y-5"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="flex items-center justify-between pb-2 border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-3">
@@ -338,7 +348,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
               <Upload className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold tracking-tight text-white">
+              <h2 id="csv-import-modal-title" className="text-xl font-bold tracking-tight text-white">
                 Import Movie Ratings
               </h2>
               <p className="text-xs text-slate-400">
@@ -348,6 +358,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
           </div>
           <button
             onClick={handleClose}
+            aria-label="Close import dialog"
             className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-[var(--bg-surface-hover)] transition-colors"
           >
             <X className="w-5 h-5" />
@@ -380,6 +391,9 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                   accept=".csv,text/csv"
                   onChange={handleFileChange}
                   className="hidden"
+                  style={{ display: 'none' }}
+                  tabIndex={-1}
+                  aria-hidden="true"
                 />
               </label>
             </div>
