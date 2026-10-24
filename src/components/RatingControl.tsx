@@ -163,6 +163,7 @@ export const RatingControl: React.FC<RatingControlProps> = ({
         <button
           type="button"
           onClick={handleClear}
+          disabled={!currentRating}
           className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors border ${
             currentRating
               ? 'text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 border-[var(--border-subtle)] hover:border-rose-900/50'
