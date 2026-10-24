@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { RankedFeed } from '../RankedFeed';
 import { MovieStoreProvider } from '../../store/useMovieStore';
-import { STORAGE_KEYS } from '../../services/storage';
+import { STORAGE_KEYS, clearInMemoryStoreForTesting } from '../../services/storage';
 import { aiManager } from '../../services/ai/aiManager';
 
 // Mock dependencies
@@ -109,5 +109,115 @@ describe('RankedFeed Auto-Generation & Infinite Retry Guard', () => {
     });
 
     expect(aiManager.generateRecommendations).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('RankedFeed Header Rating Count & New Since (CIN-40)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    clearInMemoryStoreForTesting();
+    vi.clearAllMocks();
+  });
+
+  it('shows last-run count and "K new since" when ratedCount > lastRunRatedCount', () => {
+    const seededRatings: Record<number, unknown> = {};
+    for (let i = 1; i <= 5; i++) {
+      seededRatings[i] = {
+        movieId: i,
+        title: `Film ${i}`,
+        rating: 8,
+        ratedAt: 1000 * i,
+        genres: ['Drama'],
+      };
+    }
+    localStorage.setItem(STORAGE_KEYS.RATINGS, JSON.stringify(seededRatings));
+
+    const cachedData = {
+      recommendations: [
+        {
+          movie: {
+            id: 999,
+            title: 'Rec Film',
+            overview: '',
+            release_date: '2020-01-01',
+            vote_average: 8.0,
+            vote_count: 100,
+            poster_path: null,
+            backdrop_path: null,
+            genres: [],
+          },
+          score: 95,
+          rank: 1,
+          reason: 'Match',
+          serendipityType: 'safe_bet',
+          highlightTags: [],
+        },
+      ],
+      generatedAt: 100000,
+      usedProvider: 'gemini',
+      settingsFingerprint: 'test-fp',
+      ratedCount: 3,
+    };
+    localStorage.setItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS, JSON.stringify(cachedData));
+
+    render(
+      <MovieStoreProvider>
+        <RankedFeed />
+      </MovieStoreProvider>
+    );
+
+    expect(screen.getByText(/analyzing 3 of your ratings/i)).toBeDefined();
+    expect(screen.getByText(/2 new since/i)).toBeDefined();
+  });
+
+  it('shows only last-run count when ratedCount === lastRunRatedCount', () => {
+    const seededRatings: Record<number, unknown> = {};
+    for (let i = 1; i <= 4; i++) {
+      seededRatings[i] = {
+        movieId: i,
+        title: `Film ${i}`,
+        rating: 8,
+        ratedAt: 1000 * i,
+        genres: ['Drama'],
+      };
+    }
+    localStorage.setItem(STORAGE_KEYS.RATINGS, JSON.stringify(seededRatings));
+
+    const cachedData = {
+      recommendations: [
+        {
+          movie: {
+            id: 999,
+            title: 'Rec Film',
+            overview: '',
+            release_date: '2020-01-01',
+            vote_average: 8.0,
+            vote_count: 100,
+            poster_path: null,
+            backdrop_path: null,
+            genres: [],
+          },
+          score: 95,
+          rank: 1,
+          reason: 'Match',
+          serendipityType: 'safe_bet',
+          highlightTags: [],
+        },
+      ],
+      generatedAt: 100000,
+      usedProvider: 'gemini',
+      settingsFingerprint: 'test-fp',
+      ratedCount: 4,
+    };
+    localStorage.setItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS, JSON.stringify(cachedData));
+
+    render(
+      <MovieStoreProvider>
+        <RankedFeed />
+      </MovieStoreProvider>
+    );
+
+    expect(screen.getByText(/analyzing 4 of your ratings/i)).toBeDefined();
+    expect(screen.queryByText(/new since/i)).toBeNull();
   });
 });

@@ -18,7 +18,7 @@ const VIBE_OPTIONS = [
 const ERA_OPTIONS = ['70s', '80s', '90s', '2000s', '2010s', '2020s'];
 
 export const DiscoveryFilters: React.FC = () => {
-  const { aiSettings, updateAISettings, generateRankings, isGeneratingRecs } = useMovieStore();
+  const { aiSettings, updateAISettings, generateRankings, isGeneratingRecs, recsSettingsStale } = useMovieStore();
 
   const handleSerendipityChange = (val: number) => {
     updateAISettings({ serendipityLevel: val });
@@ -58,14 +58,24 @@ export const DiscoveryFilters: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={generateRankings}
-          disabled={isGeneratingRecs}
-          className="btn-tactile btn-tactile-primary self-start md:self-auto px-5 py-2.5 text-xs font-bold disabled:opacity-50"
-        >
-          <Sparkles className={`w-4 h-4 ${isGeneratingRecs ? 'animate-spin' : ''}`} />
-          <span>{isGeneratingRecs ? 'Re-Ranking Taste Profile...' : 'Re-Rank with AI'}</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
+          {recsSettingsStale && !isGeneratingRecs && (
+            <span
+              role="status"
+              className="text-xs text-[var(--accent-secondary)] font-medium"
+            >
+              Settings changed — re-rank to apply
+            </span>
+          )}
+          <button
+            onClick={generateRankings}
+            disabled={isGeneratingRecs}
+            className="btn-tactile btn-tactile-primary px-5 py-2.5 text-xs font-bold disabled:opacity-50"
+          >
+            <Sparkles className={`w-4 h-4 ${isGeneratingRecs ? 'animate-spin' : ''}`} />
+            <span>{isGeneratingRecs ? 'Re-Ranking Taste Profile...' : 'Re-Rank with AI'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Serendipity Slider Section */}
