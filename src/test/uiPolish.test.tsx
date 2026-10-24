@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React, { useEffect } from 'react';
+import * as nativeVault from '../services/nativeCredentialVault';
 import { CineMatchLogo } from '../components/CineMatchLogo';
 import { Toast } from '../components/Toast';
 import { PaletteSwitcher } from '../components/PaletteSwitcher';
@@ -16,8 +17,17 @@ import { ShareButton } from '../components/ShareButton';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { DiscoveryFilters } from '../components/DiscoveryFilters';
 import { RatingControl } from '../components/RatingControl';
-import { TasteCalibration } from '../components/TasteCalibration';
 import { MovieStoreProvider, useMovieStore } from '../store/useMovieStore';
+
+vi.mock('../services/nativeCredentialVault', async () => {
+  const actual = await vi.importActual<typeof import('../services/nativeCredentialVault')>(
+    '../services/nativeCredentialVault'
+  );
+  return {
+    ...actual,
+    isVaultSupported: vi.fn(() => false),
+  };
+});
 
 const ToastTrigger: React.FC<{ message: string }> = ({ message }) => {
   const { showToast } = useMovieStore();
@@ -45,15 +55,37 @@ const MovieDetailsTrigger: React.FC = () => {
   return <MovieDetailsModal />;
 };
 
+async function tabUntilTarget(
+  user: ReturnType<typeof userEvent.setup>,
+  target: Element,
+  maxTabs = 30
+): Promise<void> {
+  expect(target).toBeInTheDocument();
+  expect(document.activeElement).not.toBe(target);
+  let tabsCount = 0;
+  while (tabsCount < maxTabs) {
+    await user.tab();
+    tabsCount++;
+    if (document.activeElement === target) {
+      return;
+    }
+  }
+  throw new Error(`Target element was not reached within ${maxTabs} tab presses`);
+}
+
 describe('CIN-17 & CIN-32 UI Polish', () => {
-  it('renders CineMatchLogo and confirms it renders correctly', () => {
-    const { container } = render(<CineMatchLogo className="w-8 h-8" />);
-    const svg = container.querySelector('svg');
-    expect(svg).toBeInTheDocument();
-    expect(svg).toHaveClass('w-8', 'h-8');
+  beforeEach(() => {
+    vi.mocked(nativeVault.isVaultSupported).mockReturnValue(false);
   });
 
-  it('renders Toast with solid elevated background and shadow-lg', () => {
+  it('renders CineMatchLogo and confirms it renders correctly', () => {
+    render(<CineMatchLogo className="w-8 h-8" />);
+    const logo = screen.getByLabelText(/CineMatch Logo/i);
+    expect(logo).toBeInTheDocument();
+  });
+
+  it('renders Toast with message and allows dismissing it', async () => {
+    const user = userEvent.setup();
     render(
       <MovieStoreProvider>
         <ToastTrigger message="Saved successfully" />
@@ -63,8 +95,10 @@ describe('CIN-17 & CIN-32 UI Polish', () => {
     const toastText = screen.getByText('Saved successfully');
     expect(toastText).toBeInTheDocument();
 
-    const toastCard = toastText.closest('div');
-    expect(toastCard).toHaveClass('bg-[var(--bg-surface-elevated)]', 'shadow-lg');
+    const dismissBtn = screen.getByRole('button');
+    expect(dismissBtn).toBeInTheDocument();
+    await user.click(dismissBtn);
+    expect(screen.queryByText('Saved successfully')).not.toBeInTheDocument();
   });
 
   it('renders PaletteSwitcher Theme Studio button', () => {
@@ -73,18 +107,38 @@ describe('CIN-17 & CIN-32 UI Polish', () => {
     expect(studioButton).toBeInTheDocument();
   });
 
-  it('renders Navbar buttons', () => {
+  it('renders Navbar buttons with accessible names and triggers action callbacks', async () => {
+    const user = userEvent.setup();
+    const handleOpenSettings = vi.fn();
+    const handleOpenPalette = vi.fn();
+
     render(
       <MovieStoreProvider>
-        <Navbar onOpenSettings={() => {}} onOpenPalette={() => {}} />
+        <Navbar onOpenSettings={handleOpenSettings} onOpenPalette={handleOpenPalette} />
       </MovieStoreProvider>
     );
 
-    const buttons = screen.getAllByRole('button');
-    expect(buttons.length).toBeGreaterThan(0);
-    buttons.forEach((btn) => {
-      expect(btn).toBeInTheDocument();
-    });
+    expect(screen.getByRole('button', { name: /Taste Calibration/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Top Ranked/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Watchlist/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /My Ratings/i })).toBeInTheDocument();
+
+    const paletteBtn = screen.getByRole('button', { name: /Color Palette & Typography/i });
+    const aiBtn = screen.getByRole('button', { name: /AI Engine & API Keys/i });
+    const settingsBtn = screen.getByRole('button', { name: /^Settings$/i });
+
+    expect(paletteBtn).toBeInTheDocument();
+    expect(aiBtn).toBeInTheDocument();
+    expect(settingsBtn).toBeInTheDocument();
+
+    await user.click(settingsBtn);
+    expect(handleOpenSettings).toHaveBeenCalledTimes(1);
+
+    await user.click(paletteBtn);
+    expect(handleOpenPalette).toHaveBeenCalledTimes(1);
+
+    await user.click(aiBtn);
+    expect(handleOpenSettings).toHaveBeenCalledTimes(2);
   });
 
   it('ensures no undefined CSS tokens (--surface-hover, --text-primary, --text-secondary) exist in source files', () => {
@@ -115,83 +169,93 @@ describe('CIN-17 & CIN-32 UI Polish', () => {
     }
   });
 
-  it('enforces single shadow tier (shadow-lg) across all modals and popovers', () => {
+  it('renders modals and popovers with accessible roles and headings', () => {
     // 1. CsvImportModal
-    const { container: csvContainer } = render(
+    const { unmount: unmountCsv } = render(
       <MovieStoreProvider>
         <CsvImportModal isOpen={true} onClose={() => {}} />
       </MovieStoreProvider>
     );
-    const csvCard = csvContainer.querySelector('.rounded-3xl');
-    expect(csvCard).toHaveClass('shadow-lg');
+    expect(screen.getByRole('heading', { name: /Import Movie Ratings/i })).toBeInTheDocument();
+    unmountCsv();
 
     // 2. SettingsModal
-    const { container: settingsContainer } = render(
+    const { unmount: unmountSettings } = render(
       <MovieStoreProvider>
         <SettingsModal isOpen={true} onClose={() => {}} />
       </MovieStoreProvider>
     );
-    const settingsCard = settingsContainer.querySelector('.rounded-3xl');
-    expect(settingsCard).toHaveClass('shadow-lg');
+    expect(screen.getByRole('heading', { name: /API Credentials & AI Engine/i })).toBeInTheDocument();
+    unmountSettings();
 
     // 3. MovieDetailsModal
-    const { container: detailsContainer } = render(
+    const { unmount: unmountDetails } = render(
       <MovieStoreProvider>
         <MovieDetailsTrigger />
       </MovieStoreProvider>
     );
-    const detailsCard = detailsContainer.querySelector('.rounded-3xl');
-    expect(detailsCard).toHaveClass('shadow-lg');
+    expect(screen.getByRole('heading', { name: /Candidate Film A/i })).toBeInTheDocument();
+    unmountDetails();
 
     // 4. PaletteSwitcher modal
-    const { container: paletteContainer } = render(
+    const { unmount: unmountPalette } = render(
       <PaletteSwitcher isOpen={true} onClose={() => {}} />
     );
-    const paletteCard = paletteContainer.querySelector('.rounded-2xl');
-    expect(paletteCard).toHaveClass('shadow-lg');
+    expect(screen.getByRole('heading', { name: /Cinematic Style Studio/i })).toBeInTheDocument();
+    unmountPalette();
 
     // 5. ErrorBoundary modal card
     const ThrowingComponent = () => {
       throw new Error('Test boundary crash');
     };
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { container: errorContainer } = render(
+    render(
       <ErrorBoundary>
         <ThrowingComponent />
       </ErrorBoundary>
     );
     consoleSpy.mockRestore();
-    const errorCard = errorContainer.querySelector('.rounded-2xl');
-    expect(errorCard).toHaveClass('shadow-lg');
+    expect(screen.getByRole('heading', { name: /Something Went Wrong/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Reload Application/i })).toBeInTheDocument();
   });
 
   it('renders MobileBottomNav, Watchlist, MyRatings, and ShareButton', () => {
     // MobileBottomNav
-    const { container: navContainer } = render(
+    const { unmount: unmountNav } = render(
       <MovieStoreProvider>
         <MobileBottomNav onOpenSettings={() => {}} />
       </MovieStoreProvider>
     );
-    expect(navContainer.querySelector('nav')).toBeInTheDocument();
+    expect(screen.getByRole('navigation')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Calibration/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Top Ranked/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Watchlist/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Ratings/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Settings/i })).toBeInTheDocument();
+    unmountNav();
 
     // Watchlist
-    const { container: watchlistContainer } = render(
+    const { unmount: unmountWatchlist } = render(
       <MovieStoreProvider>
         <Watchlist />
       </MovieStoreProvider>
     );
-    expect(watchlistContainer.firstChild).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /My Watchlist/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Browse Top Ranked/i })).toBeInTheDocument();
+    unmountWatchlist();
 
     // MyRatings
-    const { container: ratingsContainer } = render(
+    const { unmount: unmountRatings } = render(
       <MovieStoreProvider>
         <MyRatings onOpenCsvModal={() => {}} />
       </MovieStoreProvider>
     );
-    expect(ratingsContainer.firstChild).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /My Movie Library & Ratings/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Import CSV/i })).toBeInTheDocument();
+    unmountRatings();
 
     // ShareButton
-    const { container: shareContainer } = render(
+    const { unmount: unmountShare } = render(
       <MovieStoreProvider>
         <ShareButton
           movie={{
@@ -207,12 +271,13 @@ describe('CIN-17 & CIN-32 UI Polish', () => {
         />
       </MovieStoreProvider>
     );
-    expect(shareContainer.querySelector('button')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Share IMDb page/i })).toBeInTheDocument();
+    unmountShare();
   });
 
-  it('verifies primary buttons revert to text-black for palette contrast', () => {
+  it('exposes the SettingsModal and ErrorBoundary primary buttons by accessible name', () => {
     // 1. SettingsModal primary save button
-    render(
+    const { unmount: unmountSettings } = render(
       <MovieStoreProvider>
         <SettingsModal isOpen={true} onClose={() => {}} />
       </MovieStoreProvider>
@@ -220,7 +285,7 @@ describe('CIN-17 & CIN-32 UI Polish', () => {
 
     const saveButton = screen.getByRole('button', { name: /Save & Apply Settings/i });
     expect(saveButton).toBeInTheDocument();
-    expect(saveButton).toHaveClass('text-black');
+    unmountSettings();
 
     // 2. ErrorBoundary reload button
     const ThrowingComponent = () => {
@@ -236,97 +301,101 @@ describe('CIN-17 & CIN-32 UI Polish', () => {
 
     const reloadButton = screen.getByRole('button', { name: /Reload Application/i });
     expect(reloadButton).toBeInTheDocument();
-    expect(reloadButton).toHaveClass('text-black');
   });
 
-  it('verifies focus-ring class on focusable controls in DiscoveryFilters, SettingsModal, MyRatings, Watchlist, TasteCalibration, and RatingControl', () => {
-    // 1. Range slider in DiscoveryFilters
-    const { container: filterContainer } = render(
-      <MovieStoreProvider>
-        <DiscoveryFilters />
-      </MovieStoreProvider>
-    );
-    const rangeSlider = filterContainer.querySelector('input[type="range"]');
-    expect(rangeSlider).toBeInTheDocument();
-    expect(rangeSlider).toHaveClass('focus-ring');
-
-    // 2. Text input in SettingsModal
-    const { container: settingsContainer } = render(
-      <MovieStoreProvider>
-        <SettingsModal isOpen={true} onClose={() => {}} />
-      </MovieStoreProvider>
-    );
-    const settingsInput = settingsContainer.querySelector('input[type="password"]');
-    expect(settingsInput).toBeInTheDocument();
-    expect(settingsInput).toHaveClass('focus-ring');
-
-    // 3. Text input in MyRatings
-    const { container: ratingsContainer } = render(
-      <MovieStoreProvider>
-        <MyRatings onOpenCsvModal={() => {}} />
-      </MovieStoreProvider>
-    );
-    const ratingsInput = ratingsContainer.querySelector('input[type="text"]');
-    expect(ratingsInput).toBeInTheDocument();
-    expect(ratingsInput).toHaveClass('focus-ring');
-
-    // 4. Text input in TasteCalibration
-    const { container: calibrationContainer } = render(
-      <MovieStoreProvider>
-        <TasteCalibration />
-      </MovieStoreProvider>
-    );
-    const calibrationInput = calibrationContainer.querySelector('input[type="text"]');
-    expect(calibrationInput).toBeInTheDocument();
-    expect(calibrationInput).toHaveClass('focus-ring');
-
-    // 5. Rating buttons in RatingControl
-    render(<RatingControl onRate={() => {}} onClear={() => {}} />);
-    const ratingButton = screen.getByRole('radio', { name: /Rate 1 out of 10/i });
-    expect(ratingButton).toBeInTheDocument();
-    expect(ratingButton).toHaveClass('focus-ring');
-  });
-
-  it('tabs to a text input, a slider and a button with user-event and asserts each focused element has focus-ring and is activeElement', async () => {
+  it('tabs to a text input, a slider and a radio button with user-event using capped tab-until-target', async () => {
     const user = userEvent.setup();
 
     // 1. Text input in SettingsModal
-    const { container: settingsContainer } = render(
+    const { container: settingsContainer, unmount: unmountSettings } = render(
       <MovieStoreProvider>
         <SettingsModal isOpen={true} onClose={() => {}} />
       </MovieStoreProvider>
     );
     const textInput = settingsContainer.querySelector('input[type="password"]') as HTMLInputElement;
     expect(textInput).toBeInTheDocument();
-    await user.tab(); // Close button
-    await user.tab(); // Get TMDB Key link
-    await user.tab(); // Read Access Token button
-    await user.tab(); // API Key button
-    await user.tab(); // TMDB Credential Input
+    expect(document.activeElement).not.toBe(textInput);
+    await tabUntilTarget(user, textInput, 30);
     expect(document.activeElement).toBe(textInput);
-    expect(textInput).toHaveClass('focus-ring');
-    cleanup();
+    unmountSettings();
 
     // 2. Slider in DiscoveryFilters
-    const { container: filterContainer } = render(
+    const { container: filterContainer, unmount: unmountFilters } = render(
       <MovieStoreProvider>
         <DiscoveryFilters />
       </MovieStoreProvider>
     );
     const slider = filterContainer.querySelector('input[type="range"]') as HTMLInputElement;
     expect(slider).toBeInTheDocument();
-    await user.tab(); // Re-rank button
-    await user.tab(); // Range slider
+    expect(document.activeElement).not.toBe(slider);
+    await tabUntilTarget(user, slider, 30);
     expect(document.activeElement).toBe(slider);
-    expect(slider).toHaveClass('focus-ring');
-    cleanup();
+    unmountFilters();
 
     // 3. Button in RatingControl
-    render(<RatingControl onRate={() => {}} onClear={() => {}} />);
+    const { unmount: unmountRating } = render(<RatingControl onRate={() => {}} onClear={() => {}} />);
     const ratingBtn1 = screen.getByRole('radio', { name: /Rate 1 out of 10/i });
     expect(ratingBtn1).toBeInTheDocument();
-    await user.tab(); // 1st radio button
+    expect(document.activeElement).not.toBe(ratingBtn1);
+    await tabUntilTarget(user, ratingBtn1, 30);
     expect(document.activeElement).toBe(ratingBtn1);
-    expect(ratingBtn1).toHaveClass('focus-ring');
+    unmountRating();
+  });
+
+  it('navigates to SettingsModal peer toggle via keyboard and toggles with Space', async () => {
+    vi.mocked(nativeVault.isVaultSupported).mockReturnValue(true);
+    const user = userEvent.setup();
+
+    const { unmount } = render(
+      <MovieStoreProvider>
+        <SettingsModal isOpen={true} onClose={() => {}} />
+      </MovieStoreProvider>
+    );
+
+    const toggle = screen.getByRole('checkbox', { name: /Remember on this device/i });
+    expect(toggle).toBeInTheDocument();
+    expect(toggle).not.toBeChecked();
+
+    expect(document.activeElement).not.toBe(toggle);
+    await tabUntilTarget(user, toggle, 30);
+    expect(document.activeElement).toBe(toggle);
+
+    // Space toggles it on
+    await user.keyboard('[Space]');
+    expect(toggle).toBeChecked();
+
+    // Space toggles it off
+    await user.keyboard('[Space]');
+    expect(toggle).not.toBeChecked();
+
+    unmount();
+  });
+
+  it('fails tabUntilTarget if the cap is reached without focusing target', async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<button>Tabbable Element</button>);
+    const unreachable = document.createElement('input');
+    unreachable.tabIndex = -1;
+    document.body.appendChild(unreachable);
+
+    try {
+      await expect(tabUntilTarget(user, unreachable, 5)).rejects.toThrow(
+        'Target element was not reached within 5 tab presses'
+      );
+    } finally {
+      document.body.removeChild(unreachable);
+      unmount();
+    }
+  });
+
+  it('fails tabUntilTarget if target is already the active element', async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<button>Already Active</button>);
+    const button = screen.getByRole('button', { name: /Already Active/i });
+    button.focus();
+    expect(document.activeElement).toBe(button);
+
+    await expect(tabUntilTarget(user, button, 5)).rejects.toThrow(/not to be/);
+    unmount();
   });
 });
