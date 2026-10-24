@@ -395,7 +395,7 @@ describe('CIN-17 & CIN-32 UI Polish', () => {
     button.focus();
     expect(document.activeElement).toBe(button);
 
-    await expect(tabUntilTarget(user, button, 5)).rejects.toThrow(/not\.toBe/);
+    await expect(tabUntilTarget(user, button, 5)).rejects.toThrow(/not to be/);
     unmount();
   });
 });
