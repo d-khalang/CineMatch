@@ -430,7 +430,7 @@ export const TasteCalibration: React.FC = () => {
                   setIsDropdownOpen(false);
                 }
               }}
-              className="w-full pl-11 pr-28 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-slate-100 placeholder-slate-500 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--border-focus)] focus:border-[var(--accent-primary)] transition-all"
+              className="w-full pl-11 pr-28 py-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-slate-100 placeholder-slate-500 text-sm focus-ring transition-all"
             />
             <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
 

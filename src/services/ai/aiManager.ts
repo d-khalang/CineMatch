@@ -72,67 +72,95 @@ class AIServiceManager {
       }
 
       const seenIds = new Set<number>();
-      let recommendations = (result.recommendations || [])
-        .filter((r) => {
-          if (!r?.movie || seenIds.has(r.movie.id)) return false;
-          seenIds.add(r.movie.id);
-          return true;
-        })
-        .map((r) => ({
-          ...r,
-          score: typeof r.score === 'number' && Number.isFinite(r.score) ? r.score : 85,
-        }));
+      const filteredAiRecs = (result.recommendations || []).filter((r) => {
+        if (!r?.movie || seenIds.has(r.movie.id)) return false;
+        seenIds.add(r.movie.id);
+        return true;
+      });
+
+      const finiteAiScores = filteredAiRecs
+        .map((r) => r.score)
+        .filter((s): s is number => typeof s === 'number' && Number.isFinite(s));
+      const minAiScore =
+        finiteAiScores.length > 0 ? Math.min(...finiteAiScores) : undefined;
+
+      let recommendations: Recommendation[] = filteredAiRecs.map((r) => ({
+        ...r,
+        origin: r.origin === 'local_backfill' ? undefined : r.origin,
+      }));
 
       if (provider.id !== 'local' && recommendations.length < MIN_RECOMMENDATIONS) {
-        const remainingPool = (request.candidatePool || []).filter((m) => {
-          if (!m || seenIds.has(m.id)) return false;
-          seenIds.add(m.id);
-          return true;
-        });
+        try {
+          const remainingPool = (request.candidatePool || []).filter((m) => {
+            if (!m || seenIds.has(m.id)) return false;
+            seenIds.add(m.id);
+            return true;
+          });
 
-        if (remainingPool.length > 0) {
-          const local = this.getProvider('local');
-          const localRes = await local.generateRecommendations(
-            { ...request, candidatePool: remainingPool },
-            signal
-          );
+          if (remainingPool.length > 0) {
+            const local = this.getProvider('local');
+            const localRes = await local.generateRecommendations(
+              { ...request, candidatePool: remainingPool },
+              signal
+            );
 
-          const finiteAiScores = recommendations
-            .map((r) => r.score)
-            .filter((s) => typeof s === 'number' && Number.isFinite(s));
-          const minAiScore =
-            finiteAiScores.length > 0 ? Math.min(...finiteAiScores) : Infinity;
+            if (signal?.aborted) {
+              throw new DOMException('Generation aborted by caller', 'AbortError');
+            }
 
-          const needed = MIN_RECOMMENDATIONS - recommendations.length;
-          const existingIds = new Set(recommendations.map((r) => r.movie.id));
-          const backfill: Recommendation[] = [];
+            const needed = MIN_RECOMMENDATIONS - recommendations.length;
+            const existingIds = new Set(recommendations.map((r) => r.movie.id));
+            const backfill: Recommendation[] = [];
 
-          for (const rec of localRes.recommendations) {
-            if (backfill.length >= needed) break;
-            if (!rec?.movie || existingIds.has(rec.movie.id)) continue;
-            existingIds.add(rec.movie.id);
+            for (const rec of localRes.recommendations) {
+              if (backfill.length >= needed) break;
+              if (!rec?.movie || existingIds.has(rec.movie.id)) continue;
+              existingIds.add(rec.movie.id);
 
-            const baseScore =
-              typeof rec.score === 'number' && Number.isFinite(rec.score) ? rec.score : 50;
+              const baseScore =
+                typeof rec.score === 'number' && Number.isFinite(rec.score) ? rec.score : 50;
 
-            backfill.push({
-              movie: rec.movie,
-              score: Number.isFinite(minAiScore) ? Math.min(baseScore, minAiScore - 1) : baseScore,
-              rank: 0,
-              reason: rec.reason,
-              serendipityType: rec.serendipityType,
-              highlightTags: rec.highlightTags,
-            });
+              const clampedScore = Math.max(
+                1,
+                minAiScore !== undefined ? Math.min(baseScore, minAiScore - 1) : baseScore
+              );
+
+              backfill.push({
+                movie: rec.movie,
+                score: clampedScore,
+                rank: 0,
+                reason: rec.reason,
+                serendipityType: rec.serendipityType,
+                highlightTags: rec.highlightTags,
+                origin: 'local_backfill',
+                ...(rec.isAiCurated !== undefined ? { isAiCurated: rec.isAiCurated } : {}),
+              });
+            }
+
+            recommendations = [...recommendations, ...backfill];
+          }
+        } catch (backfillErr: unknown) {
+          const isAbort =
+            signal?.aborted ||
+            (backfillErr instanceof DOMException && backfillErr.name === 'AbortError') ||
+            (backfillErr instanceof Error && backfillErr.name === 'AbortError') ||
+            (typeof backfillErr === 'object' &&
+              backfillErr !== null &&
+              (backfillErr as any).name === 'AbortError');
+
+          if (isAbort) {
+            throw backfillErr;
           }
 
-          recommendations = [...recommendations, ...backfill];
+          console.warn(`Local backfill failed for provider ${provider.name}:`, backfillErr);
+          // Keep existing AI recommendations as-is: usedProvider remains AI provider, error is undefined
         }
-
-        recommendations = recommendations.map((rec, idx) => ({
-          ...rec,
-          rank: idx + 1,
-        }));
       }
+
+      recommendations = recommendations.map((rec, idx) => ({
+        ...rec,
+        rank: idx + 1,
+      }));
 
       return {
         recommendations,
@@ -145,7 +173,10 @@ class AIServiceManager {
       const isAbort =
         signal?.aborted ||
         (err instanceof DOMException && err.name === 'AbortError') ||
-        (err instanceof Error && err.name === 'AbortError');
+        (err instanceof Error && err.name === 'AbortError') ||
+        (typeof err === 'object' &&
+          err !== null &&
+          (err as any).name === 'AbortError');
 
       if (isAbort) {
         throw err;

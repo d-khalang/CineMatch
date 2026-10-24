@@ -173,6 +173,10 @@
   }
 
   /* Accessible visible focus indicators */
+  .focus-ring:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+  }
   :focus-visible {
     outline: 2px solid var(--border-focus);
     outline-offset: 2px;
@@ -294,7 +298,9 @@
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.btn-tactile:focus-visible {
+.btn-tactile:focus-visible,
+.focus-ring:focus-visible,
+.peer:focus-visible ~ .focus-ring {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
 }
@@ -333,6 +339,11 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .animate-spin,
+  .animate-fadeIn {
+    animation: none !important;
   }
 }
 

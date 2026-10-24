@@ -132,7 +132,7 @@ export const RatingControl: React.FC<RatingControlProps> = ({
                 aria-checked={isSelected}
                 aria-label={`Rate ${val} out of 10: ${getRatingLabel(val)}`}
                 onClick={() => handleRate(val)}
-                className={`h-10 sm:h-8 min-w-[38px] flex items-center justify-center text-xs font-bold rounded-lg transition-all duration-150 border focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:outline-none ${getRatingColor(
+                className={`h-10 sm:h-8 min-w-[38px] flex items-center justify-center text-xs font-bold rounded-lg transition-all duration-150 border focus-ring ${getRatingColor(
                   val,
                   isSelected
                 )}`}
@@ -163,6 +163,7 @@ export const RatingControl: React.FC<RatingControlProps> = ({
         <button
           type="button"
           onClick={handleClear}
+          disabled={!currentRating}
           className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors border ${
             currentRating
               ? 'text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 border-[var(--border-subtle)] hover:border-rose-900/50'
@@ -193,7 +194,7 @@ export const RatingControl: React.FC<RatingControlProps> = ({
               onMouseEnter={() => setHoveredRating(val)}
               onMouseLeave={() => setHoveredRating(null)}
               onClick={() => handleRate(val)}
-              className={`h-12 flex flex-col items-center justify-center rounded-xl transition-all duration-150 border active:scale-95 focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:outline-none ${getRatingColor(
+              className={`h-12 flex flex-col items-center justify-center rounded-xl transition-all duration-150 border active:scale-95 focus-ring ${getRatingColor(
                 val,
                 isSelected
               )}`}
