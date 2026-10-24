@@ -8,6 +8,12 @@ import { recsSettingsFingerprint } from '../services/recommendation/settingsFing
 import { credentialStore } from '../services/credentialStore';
 import { credentialCoordinator } from '../services/credentialCoordinator';
 import {
+  readRecommendationCache,
+  writeRecommendationCache,
+  patchRecommendationCache,
+  getFingerprintAndRatedCountFallbacks,
+} from './recommendationCache';
+import {
   STORAGE_KEYS,
   safeGetItem,
   safeSetItem,
@@ -45,6 +51,7 @@ interface MovieStoreContextType {
   recommendations: Recommendation[];
   cachedRecsTimestamp: number | null;
   recsSettingsStale: boolean;
+  lastRunFingerprint: string | null;
   lastRunRatedCount: number | null;
   isGeneratingRecs: boolean;
   lastProviderUsed: string;
@@ -135,27 +142,6 @@ const removeLegacyWatchlistRecord = (movieId: number): void => {
     }
   }
 };
-
-/**
- * Helper to preserve settingsFingerprint and ratedCount from cached recommendations,
- * falling back to in-memory lastRun values if available.
- */
-const getFingerprintAndRatedCountFallbacks = (
-  cached: Record<string, unknown>,
-  fallbackFingerprint: string | null,
-  fallbackRatedCount: number | null
-): { settingsFingerprint?: string; ratedCount?: number } => ({
-  ...(cached.settingsFingerprint !== undefined
-    ? { settingsFingerprint: cached.settingsFingerprint as string }
-    : fallbackFingerprint !== null
-    ? { settingsFingerprint: fallbackFingerprint }
-    : {}),
-  ...(cached.ratedCount !== undefined
-    ? { ratedCount: cached.ratedCount as number }
-    : fallbackRatedCount !== null
-    ? { ratedCount: fallbackRatedCount }
-    : {}),
-});
 
 export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // 1. User Ratings State
@@ -271,61 +257,26 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [selectedMovieForModal, setSelectedMovieForModal] = useState<Movie | null>(null);
   
   // Recommendations state (hydrated from cache if present for instant/offline display)
+  const [initialCachedRecs] = useState(() => readRecommendationCache());
+
   const [recommendations, setRecommendations] = useState<Recommendation[]>(() => {
-    try {
-      const cached = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed.recommendations)) {
-          const hiddenIds = new Set(hiddenFilms.map((h) => h.movieId));
-          return parsed.recommendations
-            .filter((r: Recommendation) => !hiddenIds.has(r?.movie?.id))
-            .map((r: Recommendation, idx: number) => ({ ...r, rank: idx + 1 }));
-        }
-      }
-      return [];
-    } catch {
-      return [];
-    }
+    if (!initialCachedRecs) return [];
+    const hiddenIds = new Set(hiddenFilms.map((h) => h.movieId));
+    return initialCachedRecs.recommendations
+      .filter((r: Recommendation) => !hiddenIds.has(r?.movie?.id))
+      .map((r: Recommendation, idx: number) => ({ ...r, rank: idx + 1 }));
   });
 
   const [cachedRecsTimestamp, setCachedRecsTimestamp] = useState<number | null>(() => {
-    try {
-      const cached = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return typeof parsed.generatedAt === 'number' ? parsed.generatedAt : null;
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    return initialCachedRecs ? initialCachedRecs.generatedAt : null;
   });
 
   const [lastRunFingerprint, setLastRunFingerprint] = useState<string | null>(() => {
-    try {
-      const cached = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return typeof parsed.settingsFingerprint === 'string' ? parsed.settingsFingerprint : null;
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    return initialCachedRecs?.settingsFingerprint ?? null;
   });
 
   const [lastRunRatedCount, setLastRunRatedCount] = useState<number | null>(() => {
-    try {
-      const cached = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return typeof parsed.ratedCount === 'number' ? parsed.ratedCount : null;
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    return initialCachedRecs?.ratedCount ?? null;
   });
 
   const recsSettingsStale = useMemo(() => {
@@ -336,29 +287,11 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [recommendations.length, lastRunFingerprint, aiSettings]);
 
   const [lastProviderUsed, setLastProviderUsed] = useState<string>(() => {
-    try {
-      const cached = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return typeof parsed.usedProvider === 'string' ? parsed.usedProvider : '';
-      }
-      return '';
-    } catch {
-      return '';
-    }
+    return initialCachedRecs ? initialCachedRecs.usedProvider : '';
   });
 
   const [aiTasteAnalysis, setAiTasteAnalysis] = useState<string | null>(() => {
-    try {
-      const cached = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return typeof parsed.tasteAnalysis === 'string' ? parsed.tasteAnalysis : null;
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    return initialCachedRecs?.tasteAnalysis ?? null;
   });
 
   const [isGeneratingRecs, setIsGeneratingRecs] = useState<boolean>(false);
@@ -373,6 +306,16 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const failedWatchlistIdsRef = useRef<Set<number>>(new Set());
   const storeEpochRef = useRef<number>(0);
   const hiddenFilmsRef = useRef<HiddenFilm[]>(hiddenFilms);
+  const recommendationsRef = useRef<Recommendation[]>(recommendations);
+  const watchlistRef = useRef<number[]>(watchlist);
+
+  useEffect(() => {
+    recommendationsRef.current = recommendations;
+  }, [recommendations]);
+
+  useEffect(() => {
+    watchlistRef.current = watchlist;
+  }, [watchlist]);
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -569,36 +512,33 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, [cancelGeneration]);
 
-  const dismissRecommendation = useCallback((movieId: number) => {
-    const cachedStr = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-    let existingParsed: Record<string, unknown> = {};
-    if (cachedStr) {
-      try {
-        existingParsed = JSON.parse(cachedStr);
-      } catch {
-        // ignore malformed cache
-      }
-    }
-
-    setRecommendations((prev) => {
-      const next = prev
+  const dismissRecommendation = useCallback(
+    (movieId: number) => {
+      const next = recommendationsRef.current
         .filter((r) => r.movie.id !== movieId)
         .map((r, idx) => ({ ...r, rank: idx + 1 }));
 
-      safeSetItem(
-        STORAGE_KEYS.CACHED_RECOMMENDATIONS,
-        JSON.stringify({
-          ...existingParsed,
+      recommendationsRef.current = next;
+      setRecommendations(next);
+
+      const cached = readRecommendationCache();
+      if (cached) {
+        patchRecommendationCache({
           recommendations: next,
-          generatedAt: existingParsed.generatedAt ?? cachedRecsTimestamp ?? Date.now(),
-          usedProvider: existingParsed.usedProvider ?? lastProviderUsed,
-          tasteAnalysis: existingParsed.tasteAnalysis ?? aiTasteAnalysis,
-          ...getFingerprintAndRatedCountFallbacks(existingParsed, lastRunFingerprint, lastRunRatedCount),
-        })
-      );
-      return next;
-    });
-  }, [lastProviderUsed, aiTasteAnalysis, lastRunFingerprint, lastRunRatedCount, cachedRecsTimestamp]);
+          ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
+        });
+      } else {
+        writeRecommendationCache({
+          recommendations: next,
+          generatedAt: cachedRecsTimestamp ?? Date.now(),
+          usedProvider: lastProviderUsed,
+          tasteAnalysis: aiTasteAnalysis,
+          ...getFingerprintAndRatedCountFallbacks({}, lastRunFingerprint, lastRunRatedCount),
+        });
+      }
+    },
+    [cachedRecsTimestamp, lastProviderUsed, aiTasteAnalysis, lastRunFingerprint, lastRunRatedCount]
+  );
 
   const hideFilm = useCallback(
     (movieId: number, reason: HiddenFilm['reason'], title?: string) => {
@@ -618,68 +558,42 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const nextHidden = applyHide(hiddenFilmsRef.current);
       hiddenFilmsRef.current = nextHidden;
       safeSetItem(STORAGE_KEYS.HIDDEN_FILMS, JSON.stringify(nextHidden));
-      setHiddenFilms((prev) => {
-        const next = prev === hiddenFilmsRef.current ? prev : applyHide(prev);
-        hiddenFilmsRef.current = next;
-        return next;
-      });
+      setHiddenFilms(nextHidden);
 
-      setRecommendations((prev) => {
-        if (!prev.some((r) => r.movie.id === movieId)) {
-          const cachedStr = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-          if (cachedStr) {
-            try {
-              const parsed = JSON.parse(cachedStr);
-              if (
-                Array.isArray(parsed.recommendations) &&
-                parsed.recommendations.some((r: Recommendation) => r?.movie?.id === movieId)
-              ) {
-                const filteredRecs = parsed.recommendations
-                  .filter((r: Recommendation) => r?.movie?.id !== movieId)
-                  .map((r: Recommendation, idx: number) => ({ ...r, rank: idx + 1 }));
-                safeSetItem(
-                  STORAGE_KEYS.CACHED_RECOMMENDATIONS,
-                  JSON.stringify({
-                    ...parsed,
-                    recommendations: filteredRecs,
-                    ...getFingerprintAndRatedCountFallbacks(parsed, lastRunFingerprint, lastRunRatedCount),
-                  })
-                );
-              }
-            } catch {
-              // ignore malformed cache
-            }
-          }
-          return prev;
-        }
-
-        const cachedStr = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-        let existingParsed: Record<string, unknown> = {};
-        if (cachedStr) {
-          try {
-            existingParsed = JSON.parse(cachedStr);
-          } catch {
-            // ignore malformed cache
-          }
-        }
-
-        const next = prev
+      if (recommendationsRef.current.some((r) => r.movie.id === movieId)) {
+        const next = recommendationsRef.current
           .filter((r) => r.movie.id !== movieId)
           .map((r, idx) => ({ ...r, rank: idx + 1 }));
+        recommendationsRef.current = next;
+        setRecommendations(next);
 
-        safeSetItem(
-          STORAGE_KEYS.CACHED_RECOMMENDATIONS,
-          JSON.stringify({
-            ...existingParsed,
+        const cached = readRecommendationCache();
+        if (cached) {
+          patchRecommendationCache({
             recommendations: next,
-            generatedAt: existingParsed.generatedAt ?? cachedRecsTimestamp ?? Date.now(),
-            usedProvider: existingParsed.usedProvider ?? lastProviderUsed,
-            tasteAnalysis: existingParsed.tasteAnalysis ?? aiTasteAnalysis,
-            ...getFingerprintAndRatedCountFallbacks(existingParsed, lastRunFingerprint, lastRunRatedCount),
-          })
-        );
-        return next;
-      });
+            ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
+          });
+        } else {
+          writeRecommendationCache({
+            recommendations: next,
+            generatedAt: cachedRecsTimestamp ?? Date.now(),
+            usedProvider: lastProviderUsed,
+            tasteAnalysis: aiTasteAnalysis,
+            ...getFingerprintAndRatedCountFallbacks({}, lastRunFingerprint, lastRunRatedCount),
+          });
+        }
+      } else {
+        const cached = readRecommendationCache();
+        if (cached && cached.recommendations.some((r) => r?.movie?.id === movieId)) {
+          const filteredRecs = cached.recommendations
+            .filter((r) => r?.movie?.id !== movieId)
+            .map((r, idx) => ({ ...r, rank: idx + 1 }));
+          patchRecommendationCache({
+            recommendations: filteredRecs,
+            ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
+          });
+        }
+      }
     },
     [cachedRecsTimestamp, lastProviderUsed, aiTasteAnalysis, lastRunFingerprint, lastRunRatedCount]
   );
@@ -688,11 +602,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const nextHidden = hiddenFilmsRef.current.filter((h) => h.movieId !== movieId);
     hiddenFilmsRef.current = nextHidden;
     safeSetItem(STORAGE_KEYS.HIDDEN_FILMS, JSON.stringify(nextHidden));
-    setHiddenFilms((prev) => {
-      const next = prev.filter((h) => h.movieId !== movieId);
-      hiddenFilmsRef.current = next;
-      return next;
-    });
+    setHiddenFilms(nextHidden);
   }, []);
 
   const removeRating = useCallback((movieId: number) => {
@@ -714,14 +624,17 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const movieId = typeof movieOrId === 'number' ? movieOrId : movieOrId.id;
     const movieObj = typeof movieOrId === 'object' ? movieOrId : null;
 
-    setWatchlist((prev) => {
-      const removing = prev.includes(movieId);
-      if (removing) {
-        removeLegacyWatchlistRecord(movieId);
-        return prev.filter((id) => id !== movieId);
-      }
-      return [movieId, ...prev];
-    });
+    const removing = watchlistRef.current.includes(movieId);
+    if (removing) {
+      removeLegacyWatchlistRecord(movieId);
+      const next = watchlistRef.current.filter((id) => id !== movieId);
+      watchlistRef.current = next;
+      setWatchlist(next);
+    } else {
+      const next = [movieId, ...watchlistRef.current];
+      watchlistRef.current = next;
+      setWatchlist(next);
+    }
 
     setWatchlistMovies((prev) => {
       const next = { ...prev };
@@ -736,6 +649,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const clearWatchlist = useCallback(() => {
     failedWatchlistIdsRef.current.clear();
+    watchlistRef.current = [];
     setWatchlist([]);
     setWatchlistMovies({});
     const r1 = safeRemoveItem(STORAGE_KEYS.WATCHLIST);
@@ -755,11 +669,13 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const importRatingsList = useCallback((newRatings: UserRating[]) => {
     cancelGeneration();
+    newRatings.forEach((r) => {
+      const currentVersion = (ratingVersionsRef.current.get(r.movieId) || 0) + 1;
+      ratingVersionsRef.current.set(r.movieId, currentVersion);
+    });
     setRatings((prev) => {
       const next = { ...prev };
       newRatings.forEach((r) => {
-        const currentVersion = (ratingVersionsRef.current.get(r.movieId) || 0) + 1;
-        ratingVersionsRef.current.set(r.movieId, currentVersion);
         next[r.movieId] = r;
       });
       return next;
@@ -796,10 +712,12 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     credentialCoordinator.clearAllData();
     setRatings({});
     setWatchlist([]);
+    watchlistRef.current = [];
     setWatchlistMovies({});
     setHiddenFilms([]);
     hiddenFilmsRef.current = [];
     setRecommendations([]);
+    recommendationsRef.current = [];
     setAiTasteAnalysis(null);
     setCachedRecsTimestamp(null);
     setLastRunFingerprint(null);
@@ -1035,6 +953,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const fingerprint = recsSettingsFingerprint(aiSettings);
         const currentRatedCount = userRatingsList.length;
 
+        recommendationsRef.current = finalRecommendations;
         setRecommendations(finalRecommendations);
         setCachedRecsTimestamp(timestamp);
         setLastProviderUsed(result.usedProvider);
@@ -1048,17 +967,14 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
 
         // Persist last successful recommendations
-        safeSetItem(
-          STORAGE_KEYS.CACHED_RECOMMENDATIONS,
-          JSON.stringify({
-            recommendations: finalRecommendations,
-            generatedAt: timestamp,
-            usedProvider: result.usedProvider,
-            tasteAnalysis: result.tasteAnalysis,
-            settingsFingerprint: fingerprint,
-            ratedCount: currentRatedCount,
-          })
-        );
+        writeRecommendationCache({
+          recommendations: finalRecommendations,
+          generatedAt: timestamp,
+          usedProvider: result.usedProvider,
+          tasteAnalysis: result.tasteAnalysis,
+          settingsFingerprint: fingerprint,
+          ratedCount: currentRatedCount,
+        });
       }
     } catch (err: unknown) {
       if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
@@ -1089,6 +1005,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         recommendations,
         cachedRecsTimestamp,
         recsSettingsStale,
+        lastRunFingerprint,
         lastRunRatedCount,
         isGeneratingRecs,
         lastProviderUsed,
