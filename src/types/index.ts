@@ -54,6 +54,7 @@ export interface Recommendation {
     | 'ai_cinephile_discovery';
   highlightTags: string[];
   isAiCurated?: boolean;
+  origin?: 'ai' | 'local_backfill'; // CIN-31 stub
 }
 
 export type AIProviderId = 'gemini' | 'openrouter' | 'local';
