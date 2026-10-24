@@ -153,7 +153,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                 year: item.year,
                 genres: item.genres || [],
                 director: item.director,
-                ratedAt: Date.now(),
+                ratedAt: item.ratedAt ?? Date.now(),
               });
               return;
             }
@@ -172,7 +172,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                     year: found.release_date ? found.release_date.slice(0, 4) : item.year,
                     genres: (found.genres || []).map((g) => g.name),
                     director: item.director,
-                    ratedAt: Date.now(),
+                    ratedAt: item.ratedAt ?? Date.now(),
                   });
                   return;
                 }
@@ -231,7 +231,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                       year: match.release_date ? match.release_date.slice(0, 4) : item.year,
                       genres: (match.genres || []).map((g) => g.name),
                       director: item.director,
-                      ratedAt: Date.now(),
+                      ratedAt: item.ratedAt ?? Date.now(),
                     });
                     return;
                   }
