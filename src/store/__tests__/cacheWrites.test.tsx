@@ -10,6 +10,8 @@ import { Movie, Recommendation } from '../../types';
 import {
   STORAGE_KEYS,
   clearInMemoryStoreForTesting,
+  safeSetItem,
+  safeRemoveItem,
 } from '../../services/storage';
 import { credentialStore } from '../../services/credentialStore';
 
@@ -278,5 +280,389 @@ describe('Store cache writes and StrictMode resilience (CIN-50)', () => {
     const finalCache = readRecommendationCache();
     expect(finalCache?.recommendations).toHaveLength(1);
     expect(finalCache?.recommendations[0].movie.id).toBe(202);
+  });
+
+  it('dismiss with no cache, then remount: the dismissed film stays gone', () => {
+    writeRecommendationCache({
+      recommendations: [rec1, rec2],
+      generatedAt: 1000,
+      usedProvider: 'gemini',
+      settingsFingerprint: 'fp-initial',
+      ratedCount: 5,
+    });
+
+    const { result, unmount } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(result.current.recommendations).toHaveLength(2);
+
+    safeRemoveItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
+    expect(readRecommendationCache()).toBeNull();
+
+    act(() => {
+      result.current.dismissRecommendation(1);
+    });
+
+    expect(result.current.recommendations).toHaveLength(1);
+    expect(result.current.recommendations[0].movie.id).toBe(2);
+
+    const updatedCache = readRecommendationCache();
+    expect(updatedCache).not.toBeNull();
+    expect(updatedCache?.recommendations).toHaveLength(1);
+    expect(updatedCache?.recommendations[0].movie.id).toBe(2);
+    expect(updatedCache?.recommendations[0].rank).toBe(1);
+    expect(updatedCache?.generatedAt).toBe(1000);
+    expect(updatedCache?.usedProvider).toBe('gemini');
+    expect(updatedCache?.settingsFingerprint).toBe('fp-initial');
+    expect(updatedCache?.ratedCount).toBe(5);
+
+    unmount();
+
+    const { result: remountResult } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(remountResult.current.recommendations).toHaveLength(1);
+    expect(remountResult.current.recommendations[0].movie.id).toBe(2);
+    expect(remountResult.current.cachedRecsTimestamp).toBe(1000);
+    expect(remountResult.current.lastProviderUsed).toBe('gemini');
+    expect(remountResult.current.lastRunFingerprint).toBe('fp-initial');
+    expect(remountResult.current.lastRunRatedCount).toBe(5);
+  });
+
+  it('the same with an invalid cache (garbage JSON)', () => {
+    writeRecommendationCache({
+      recommendations: [rec1, rec2],
+      generatedAt: 1000,
+      usedProvider: 'gemini',
+      settingsFingerprint: 'fp-initial',
+      ratedCount: 5,
+    });
+
+    const { result, unmount } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(result.current.recommendations).toHaveLength(2);
+
+    safeSetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS, 'not-valid-json{{{');
+    expect(readRecommendationCache()).toBeNull();
+
+    act(() => {
+      result.current.dismissRecommendation(1);
+    });
+
+    expect(result.current.recommendations).toHaveLength(1);
+    expect(result.current.recommendations[0].movie.id).toBe(2);
+
+    const updatedCache = readRecommendationCache();
+    expect(updatedCache).not.toBeNull();
+    expect(updatedCache?.recommendations).toHaveLength(1);
+    expect(updatedCache?.recommendations[0].movie.id).toBe(2);
+    expect(updatedCache?.recommendations[0].rank).toBe(1);
+    expect(updatedCache?.generatedAt).toBe(1000);
+    expect(updatedCache?.usedProvider).toBe('gemini');
+    expect(updatedCache?.settingsFingerprint).toBe('fp-initial');
+    expect(updatedCache?.ratedCount).toBe(5);
+
+    unmount();
+
+    const { result: remountResult } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(remountResult.current.recommendations).toHaveLength(1);
+    expect(remountResult.current.recommendations[0].movie.id).toBe(2);
+    expect(remountResult.current.cachedRecsTimestamp).toBe(1000);
+    expect(remountResult.current.lastProviderUsed).toBe('gemini');
+    expect(remountResult.current.lastRunFingerprint).toBe('fp-initial');
+    expect(remountResult.current.lastRunRatedCount).toBe(5);
+  });
+
+  it('hide with a cache that doesn\'t contain the film but memory does: it\'s still persisted', () => {
+    const movie3 = makeMovie(3, 'Film 3');
+    const rec3 = makeRec(movie3, 3, 80);
+
+    writeRecommendationCache({
+      recommendations: [rec1, rec3],
+      generatedAt: 1000,
+      usedProvider: 'gemini',
+      settingsFingerprint: 'fp-initial',
+      ratedCount: 5,
+    });
+
+    const { result, unmount } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(result.current.recommendations).toHaveLength(2);
+
+    // Overwrite storage cache so it only contains rec2 (rec1 is missing from cache, and rec3 is missing from cache; memory has rec1 and rec3)
+    writeRecommendationCache({
+      recommendations: [rec2],
+      generatedAt: 1000,
+      usedProvider: 'gemini',
+      settingsFingerprint: 'fp-initial',
+      ratedCount: 5,
+    });
+
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+    act(() => {
+      result.current.hideFilm(1, 'seen', 'Film 1');
+    });
+
+    const cacheWrites = setItemSpy.mock.calls.filter(
+      ([key]) => key === STORAGE_KEYS.CACHED_RECOMMENDATIONS
+    );
+    expect(cacheWrites).toHaveLength(1);
+
+    // In memory, film 1 is gone, rec3 remains with rank 1
+    expect(result.current.recommendations).toHaveLength(1);
+    expect(result.current.recommendations[0].movie.id).toBe(3);
+    expect(result.current.recommendations[0].rank).toBe(1);
+
+    // Cache must have been overwritten with memory's next ([rec3]), replacing [rec2]
+    const updatedCache = readRecommendationCache();
+    expect(updatedCache?.recommendations).toHaveLength(1);
+    expect(updatedCache?.recommendations[0].movie.id).toBe(3);
+    expect(updatedCache?.recommendations[0].rank).toBe(1);
+
+    unmount();
+
+    // On remount, rec3 is hydrated from the persisted cache
+    const { result: remountResult } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(remountResult.current.recommendations).toHaveLength(1);
+    expect(remountResult.current.recommendations[0].movie.id).toBe(3);
+  });
+
+  it('two dismissRecommendation calls in the same act: both are persisted', () => {
+    const movie3 = makeMovie(3, 'Film 3');
+    const rec3 = makeRec(movie3, 3, 80);
+
+    writeRecommendationCache({
+      recommendations: [rec1, rec2, rec3],
+      generatedAt: 1000,
+      usedProvider: 'gemini',
+      settingsFingerprint: 'fp-initial',
+      ratedCount: 5,
+    });
+
+    const { result, unmount } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(result.current.recommendations).toHaveLength(3);
+
+    act(() => {
+      result.current.dismissRecommendation(1);
+      result.current.dismissRecommendation(2);
+    });
+
+    expect(result.current.recommendations).toHaveLength(1);
+    expect(result.current.recommendations[0].movie.id).toBe(3);
+    expect(result.current.recommendations[0].rank).toBe(1);
+
+    const updatedCache = readRecommendationCache();
+    expect(updatedCache?.recommendations).toHaveLength(1);
+    expect(updatedCache?.recommendations[0].movie.id).toBe(3);
+    expect(updatedCache?.recommendations[0].rank).toBe(1);
+
+    unmount();
+
+    const { result: remountResult } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(remountResult.current.recommendations).toHaveLength(1);
+    expect(remountResult.current.recommendations[0].movie.id).toBe(3);
+  });
+
+  it('restoreFilm doesn\'t touch the recommendation cache', () => {
+    writeRecommendationCache({
+      recommendations: [rec1, rec2],
+      generatedAt: 1000,
+      usedProvider: 'gemini',
+      settingsFingerprint: 'fp-initial',
+      ratedCount: 5,
+    });
+
+    const { result } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+
+    act(() => {
+      result.current.hideFilm(999, 'not_for_me', 'Some Other Film');
+    });
+    expect(result.current.hiddenFilms).toHaveLength(1);
+
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+    act(() => {
+      result.current.restoreFilm(999);
+    });
+
+    expect(result.current.hiddenFilms).toHaveLength(0);
+
+    const recCacheWrites = setItemSpy.mock.calls.filter(
+      ([key]) => key === STORAGE_KEYS.CACHED_RECOMMENDATIONS
+    );
+    expect(recCacheWrites).toHaveLength(0);
+
+    const currentCache = readRecommendationCache();
+    expect(currentCache?.recommendations).toHaveLength(2);
+  });
+
+  it('hydration from a cache without settingsFingerprint still hydrates the list', () => {
+    safeSetItem(
+      STORAGE_KEYS.CACHED_RECOMMENDATIONS,
+      JSON.stringify({
+        recommendations: [rec1, rec2],
+        generatedAt: 2000,
+        usedProvider: 'openrouter',
+      })
+    );
+
+    const { result, unmount } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+
+    expect(result.current.recommendations).toHaveLength(2);
+    expect(result.current.recommendations[0].movie.id).toBe(1);
+    expect(result.current.recommendations[1].movie.id).toBe(2);
+    expect(result.current.cachedRecsTimestamp).toBe(2000);
+    expect(result.current.lastProviderUsed).toBe('openrouter');
+    expect(result.current.lastRunFingerprint).toBeNull();
+
+    // Dismissing recommendation when settingsFingerprint is missing still writes a valid cache
+    act(() => {
+      result.current.dismissRecommendation(1);
+    });
+
+    expect(result.current.recommendations).toHaveLength(1);
+    expect(result.current.recommendations[0].movie.id).toBe(2);
+
+    const updatedCache = readRecommendationCache();
+    expect(updatedCache).not.toBeNull();
+    expect(updatedCache?.recommendations).toHaveLength(1);
+    expect(updatedCache?.recommendations[0].movie.id).toBe(2);
+    expect(updatedCache?.generatedAt).toBe(2000);
+    expect(updatedCache?.usedProvider).toBe('openrouter');
+    expect(updatedCache?.settingsFingerprint).toBeUndefined();
+
+    unmount();
+
+    const { result: remountResult } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(remountResult.current.recommendations).toHaveLength(1);
+    expect(remountResult.current.recommendations[0].movie.id).toBe(2);
+  });
+
+  it('hide with no cache, then remount: the hidden film stays gone and memory is persisted to cache', () => {
+    writeRecommendationCache({
+      recommendations: [rec1, rec2],
+      generatedAt: 1000,
+      usedProvider: 'gemini',
+      settingsFingerprint: 'fp-initial',
+      ratedCount: 5,
+    });
+
+    const { result, unmount } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(result.current.recommendations).toHaveLength(2);
+
+    safeRemoveItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
+    expect(readRecommendationCache()).toBeNull();
+
+    act(() => {
+      result.current.hideFilm(1, 'seen', 'Film 1');
+    });
+
+    expect(result.current.recommendations).toHaveLength(1);
+    expect(result.current.recommendations[0].movie.id).toBe(2);
+    expect(result.current.hiddenFilms).toHaveLength(1);
+
+    const updatedCache = readRecommendationCache();
+    expect(updatedCache).not.toBeNull();
+    expect(updatedCache?.recommendations).toHaveLength(1);
+    expect(updatedCache?.recommendations[0].movie.id).toBe(2);
+    expect(updatedCache?.generatedAt).toBe(1000);
+    expect(updatedCache?.usedProvider).toBe('gemini');
+    expect(updatedCache?.settingsFingerprint).toBe('fp-initial');
+    expect(updatedCache?.ratedCount).toBe(5);
+
+    unmount();
+
+    const { result: remountResult } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(remountResult.current.recommendations).toHaveLength(1);
+    expect(remountResult.current.recommendations[0].movie.id).toBe(2);
+    expect(remountResult.current.hiddenFilms).toHaveLength(1);
+  });
+
+  it('dismiss the single/last recommendation: empty list is persisted to cache and remains empty on remount', () => {
+    writeRecommendationCache({
+      recommendations: [rec1],
+      generatedAt: 1000,
+      usedProvider: 'gemini',
+      settingsFingerprint: 'fp-initial',
+      ratedCount: 5,
+    });
+
+    const { result, unmount } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(result.current.recommendations).toHaveLength(1);
+
+    act(() => {
+      result.current.dismissRecommendation(1);
+    });
+
+    expect(result.current.recommendations).toHaveLength(0);
+
+    const updatedCache = readRecommendationCache();
+    expect(updatedCache).not.toBeNull();
+    expect(updatedCache?.recommendations).toHaveLength(0);
+    expect(updatedCache?.generatedAt).toBe(1000);
+    expect(updatedCache?.usedProvider).toBe('gemini');
+
+    unmount();
+
+    const { result: remountResult } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(remountResult.current.recommendations).toHaveLength(0);
+  });
+
+  it('invalid cache with non-finite or NaN numeric fields is rejected and replaced on dismiss', () => {
+    safeSetItem(
+      STORAGE_KEYS.CACHED_RECOMMENDATIONS,
+      JSON.stringify({
+        recommendations: [rec1, rec2],
+        generatedAt: 'not-a-number',
+        usedProvider: 'gemini',
+        ratedCount: 'five',
+      })
+    );
+
+    // Non-numeric generatedAt drops the cache entirely
+    expect(readRecommendationCache()).toBeNull();
+
+    const { result, unmount } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
+    expect(result.current.recommendations).toHaveLength(0);
+
+    // Movie with non-numeric id is rejected by cache validation
+    safeSetItem(
+      STORAGE_KEYS.CACHED_RECOMMENDATIONS,
+      JSON.stringify({
+        recommendations: [{ movie: { id: 'invalid-id' }, score: 90, rank: 1, reason: '' }],
+        generatedAt: 1000,
+        usedProvider: 'gemini',
+      })
+    );
+    expect(readRecommendationCache()).toBeNull();
+    unmount();
+  });
+
+  it('cache with missing required fields (usedProvider or recommendations) is dropped entirely', () => {
+    // Missing usedProvider
+    safeSetItem(
+      STORAGE_KEYS.CACHED_RECOMMENDATIONS,
+      JSON.stringify({
+        recommendations: [rec1, rec2],
+        generatedAt: 1000,
+      })
+    );
+    expect(readRecommendationCache()).toBeNull();
+
+    // Missing recommendations
+    safeSetItem(
+      STORAGE_KEYS.CACHED_RECOMMENDATIONS,
+      JSON.stringify({
+        generatedAt: 1000,
+        usedProvider: 'gemini',
+      })
+    );
+    expect(readRecommendationCache()).toBeNull();
+
+    // Non-array recommendations
+    safeSetItem(
+      STORAGE_KEYS.CACHED_RECOMMENDATIONS,
+      JSON.stringify({
+        recommendations: 'not-an-array',
+        generatedAt: 1000,
+        usedProvider: 'gemini',
+      })
+    );
+    expect(readRecommendationCache()).toBeNull();
   });
 });

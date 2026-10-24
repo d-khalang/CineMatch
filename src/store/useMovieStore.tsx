@@ -51,6 +51,7 @@ interface MovieStoreContextType {
   recommendations: Recommendation[];
   cachedRecsTimestamp: number | null;
   recsSettingsStale: boolean;
+  lastRunFingerprint: string | null;
   lastRunRatedCount: number | null;
   isGeneratingRecs: boolean;
   lastProviderUsed: string;
@@ -522,16 +523,21 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const cached = readRecommendationCache();
       if (cached) {
-        const filteredCached = cached.recommendations
-          .filter((r) => r?.movie?.id !== movieId)
-          .map((r, idx) => ({ ...r, rank: idx + 1 }));
         patchRecommendationCache({
-          recommendations: filteredCached,
+          recommendations: next,
           ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
+        });
+      } else {
+        writeRecommendationCache({
+          recommendations: next,
+          generatedAt: cachedRecsTimestamp ?? Date.now(),
+          usedProvider: lastProviderUsed,
+          tasteAnalysis: aiTasteAnalysis,
+          ...getFingerprintAndRatedCountFallbacks({}, lastRunFingerprint, lastRunRatedCount),
         });
       }
     },
-    [lastRunFingerprint, lastRunRatedCount]
+    [cachedRecsTimestamp, lastProviderUsed, aiTasteAnalysis, lastRunFingerprint, lastRunRatedCount]
   );
 
   const hideFilm = useCallback(
@@ -560,20 +566,36 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           .map((r, idx) => ({ ...r, rank: idx + 1 }));
         recommendationsRef.current = next;
         setRecommendations(next);
-      }
 
-      const cached = readRecommendationCache();
-      if (cached && cached.recommendations.some((r) => r?.movie?.id === movieId)) {
-        const filteredRecs = cached.recommendations
-          .filter((r) => r?.movie?.id !== movieId)
-          .map((r, idx) => ({ ...r, rank: idx + 1 }));
-        patchRecommendationCache({
-          recommendations: filteredRecs,
-          ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
-        });
+        const cached = readRecommendationCache();
+        if (cached) {
+          patchRecommendationCache({
+            recommendations: next,
+            ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
+          });
+        } else {
+          writeRecommendationCache({
+            recommendations: next,
+            generatedAt: cachedRecsTimestamp ?? Date.now(),
+            usedProvider: lastProviderUsed,
+            tasteAnalysis: aiTasteAnalysis,
+            ...getFingerprintAndRatedCountFallbacks({}, lastRunFingerprint, lastRunRatedCount),
+          });
+        }
+      } else {
+        const cached = readRecommendationCache();
+        if (cached && cached.recommendations.some((r) => r?.movie?.id === movieId)) {
+          const filteredRecs = cached.recommendations
+            .filter((r) => r?.movie?.id !== movieId)
+            .map((r, idx) => ({ ...r, rank: idx + 1 }));
+          patchRecommendationCache({
+            recommendations: filteredRecs,
+            ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
+          });
+        }
       }
     },
-    [lastRunFingerprint, lastRunRatedCount]
+    [cachedRecsTimestamp, lastProviderUsed, aiTasteAnalysis, lastRunFingerprint, lastRunRatedCount]
   );
 
   const restoreFilm = useCallback((movieId: number) => {
@@ -983,6 +1005,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         recommendations,
         cachedRecsTimestamp,
         recsSettingsStale,
+        lastRunFingerprint,
         lastRunRatedCount,
         isGeneratingRecs,
         lastProviderUsed,
