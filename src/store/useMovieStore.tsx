@@ -793,7 +793,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     storeEpochRef.current++;
     ratingVersionsRef.current.clear();
     failedWatchlistIdsRef.current.clear();
-    credentialCoordinator.clearAllData?.()?.catch?.(() => {});
+    credentialCoordinator.clearAllData();
     setRatings({});
     setWatchlist([]);
     setWatchlistMovies({});

@@ -6,6 +6,7 @@ import { Recommendation, Movie } from '../../types';
 import { STORAGE_KEYS, clearInMemoryStoreForTesting, safeGetItem, safeSetItem } from '../../services/storage';
 import { recsSettingsFingerprint } from '../../services/recommendation/settingsFingerprint';
 import { aiManager } from '../../services/ai/aiManager';
+import { credentialCoordinator } from '../../services/credentialCoordinator';
 
 vi.mock('../../services/tmdb', () => ({
   IMAGE_BASE_URL: 'https://image.tmdb.org/t/p/w500',
@@ -148,6 +149,8 @@ describe('Recommendation Staleness and Store Lifecycle (CIN-43)', () => {
   });
 
   it('clearAllData resets lastRunRatedCount to null and recsSettingsStale to false', () => {
+    // The real coordinator touches the native vault; this test is about store state only.
+    vi.spyOn(credentialCoordinator, 'clearAllData').mockResolvedValue(undefined);
     const fingerprint = recsSettingsFingerprint({
       activeProvider: 'gemini',
       serendipityLevel: 40,
