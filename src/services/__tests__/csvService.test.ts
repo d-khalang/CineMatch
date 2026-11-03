@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseMovieCsv, generateRatingsCsv, sanitizeCsvFormula } from '../csvService';
+import { parseMovieCsv, generateRatingsCsv, sanitizeCsvFormula, sniffCsvKind } from '../csvService';
 import { UserRating } from '../../types';
 
 describe('CSV Parsing & Sanitization Service', () => {
@@ -274,5 +274,50 @@ The Matrix,1999,9`;
     const result = parseMovieCsv(csv);
     expect(result.accepted).toHaveLength(1);
     expect(result.accepted[0].ratedAt).toBeUndefined();
+  });
+});
+
+describe('sniffCsvKind', () => {
+  it('detects Letterboxd watched.csv from raw CSV text', () => {
+    const csv = 'Date,Name,Year,Letterboxd URI\n2021-03-04,Heat,1995,https://boxd.it/abc\n';
+    expect(sniffCsvKind(csv)).toBe('watched');
+  });
+
+  it('detects Letterboxd ratings.csv from raw CSV text', () => {
+    const csv = 'Date,Name,Year,Letterboxd URI,Rating\n2024-01-15,Parasite,2019,https://boxd.it/i64K,4.5\n';
+    expect(sniffCsvKind(csv)).toBe('ratings');
+  });
+
+  it('tolerates UTF-8 BOM, leading empty lines, CRLF, and quoted headers', () => {
+    const watchedWithBomAndQuotes =
+      '\uFEFF\r\n   \r\n" Date ","NAME","Year","Letterboxd URI"\r\n2021-03-04,"Heat",1995,https://boxd.it/abc\r\n';
+    expect(sniffCsvKind(watchedWithBomAndQuotes)).toBe('watched');
+
+    const ratingsQuoted = '"Name","Year"," RATING "\n"Parasite",2019,4.5';
+    expect(sniffCsvKind(ratingsQuoted)).toBe('ratings');
+  });
+
+  it('returns unknown for IMDb, generic/CineMatch exports, and empty input', () => {
+    expect(sniffCsvKind('Const,Your Rating,Date Rated,Title\ntt1375666,10,2023-01-01,Inception')).toBe('unknown');
+    expect(sniffCsvKind('"Title","Year","Rating","TMDB_ID"\n"Inception","2010",10,27205')).toBe('unknown');
+    expect(sniffCsvKind('')).toBe('unknown');
+    expect(sniffCsvKind('\uFEFF   \r\n\t\n')).toBe('unknown');
+  });
+
+  it('handles header-only single-line input without trailing newline and CR line endings', () => {
+    expect(sniffCsvKind('Date,Name,Year,Letterboxd URI')).toBe('watched');
+    expect(sniffCsvKind('Name,Rating')).toBe('ratings');
+    expect(sniffCsvKind('Title,Rating')).toBe('unknown');
+    // Stops after header row even if a data row contains the literal word "Rating"
+    expect(sniffCsvKind('Date,Name,Year,Letterboxd URI\r2021-03-04,Rating,1995,https://boxd.it/abc')).toBe('watched');
+    expect(sniffCsvKind('Date,Name,Year,Letterboxd URI\n2021-03-04,Rating,1995,https://boxd.it/abc')).toBe('watched');
+  });
+
+  it('respects RFC-4180 quotes (embedded commas, escaped quotes, newlines, and strict opening quote position)', () => {
+    expect(sniffCsvKind('"Note, Name",Year\n"foo",2020')).toBe('unknown');
+    expect(sniffCsvKind('"Meta\nInfo",Name,Year\n"foo",Heat,1995')).toBe('watched');
+    expect(sniffCsvKind('"Col ""A""",Name,Rating\n"x",Heat,4.5')).toBe('ratings');
+    // Space after comma before quote is not unquoted by RFC-4180 / PapaParse
+    expect(sniffCsvKind('Title, Year, Score, "Name"\nInception, 2010, 9, "User"')).toBe('unknown');
   });
 });
