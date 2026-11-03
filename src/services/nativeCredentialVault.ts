@@ -7,6 +7,7 @@ export interface StoredCredentials {
   tmdbValue: string;
   geminiApiKey: string;
   openRouterApiKey: string;
+  groqApiKey: string;
 }
 
 export interface ReadVaultResult {
@@ -85,7 +86,13 @@ export const validateStoredCredentials = (creds: unknown): StoredCredentials => 
   const obj = creds as Record<string, unknown>;
 
   // Check allowed keys only
-  const allowedKeys = new Set(['tmdbType', 'tmdbValue', 'geminiApiKey', 'openRouterApiKey']);
+  const allowedKeys = new Set([
+    'tmdbType',
+    'tmdbValue',
+    'geminiApiKey',
+    'openRouterApiKey',
+    'groqApiKey',
+  ]);
   for (const key of Object.keys(obj)) {
     if (!allowedKeys.has(key)) {
       throw new VaultBridgeError('INVALID_DATA', `Unexpected field in credentials: ${key}`);
@@ -100,6 +107,7 @@ export const validateStoredCredentials = (creds: unknown): StoredCredentials => 
   const tmdbValue = typeof obj.tmdbValue === 'string' ? obj.tmdbValue : '';
   const geminiApiKey = typeof obj.geminiApiKey === 'string' ? obj.geminiApiKey : '';
   const openRouterApiKey = typeof obj.openRouterApiKey === 'string' ? obj.openRouterApiKey : '';
+  const groqApiKey = typeof obj.groqApiKey === 'string' ? obj.groqApiKey : '';
 
   const encoder = new TextEncoder();
   if (encoder.encode(tmdbValue).length > MAX_FIELD_BYTES) {
@@ -111,12 +119,16 @@ export const validateStoredCredentials = (creds: unknown): StoredCredentials => 
   if (encoder.encode(openRouterApiKey).length > MAX_FIELD_BYTES) {
     throw new VaultBridgeError('INVALID_DATA', 'openRouterApiKey exceeds field size limit');
   }
+  if (encoder.encode(groqApiKey).length > MAX_FIELD_BYTES) {
+    throw new VaultBridgeError('INVALID_DATA', 'groqApiKey exceeds field size limit');
+  }
 
   return {
     tmdbType,
     tmdbValue,
     geminiApiKey,
     openRouterApiKey,
+    groqApiKey,
   };
 };
 

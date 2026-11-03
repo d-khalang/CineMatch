@@ -1,5 +1,6 @@
 import { UserRating, Movie, AISettings, Recommendation, HiddenFilm } from '../types';
 import { sanitizeOpenRouterModel } from './ai/openRouterProvider';
+import { sanitizeGroqModel } from './ai/groqProvider';
 
 export const STORAGE_VERSION = 3;
 
@@ -238,10 +239,11 @@ export const runStorageMigration = (): { migrated: boolean; secretsStripped: boo
     if (legacySettingsStr) {
       try {
         const parsed = JSON.parse(legacySettingsStr);
-        if (parsed.geminiApiKey || parsed.openRouterApiKey || parsed.tmdbApiKey) {
+        if (parsed.geminiApiKey || parsed.openRouterApiKey || parsed.groqApiKey || parsed.tmdbApiKey) {
           secretsStripped = true;
           delete parsed.geminiApiKey;
           delete parsed.openRouterApiKey;
+          delete parsed.groqApiKey;
           delete parsed.tmdbApiKey;
           try {
             // Overwrite legacy settings on disk without credentials
@@ -255,6 +257,7 @@ export const runStorageMigration = (): { migrated: boolean; secretsStripped: boo
           activeProvider: parsed.activeProvider || 'gemini',
           geminiModel: parsed.geminiModel || 'gemini-3.8-flash',
           openRouterModel: sanitizeOpenRouterModel(parsed.openRouterModel),
+          groqModel: sanitizeGroqModel(parsed.groqModel),
           serendipityLevel: typeof parsed.serendipityLevel === 'number' ? parsed.serendipityLevel : 40,
           selectedVibes: Array.isArray(parsed.selectedVibes) ? parsed.selectedVibes : [],
           preferredEras: Array.isArray(parsed.preferredEras) ? parsed.preferredEras : [],

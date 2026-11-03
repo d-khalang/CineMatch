@@ -60,7 +60,8 @@ public class CredentialVaultInstrumentedTest {
                 "read_access_token",
                 "test-tmdb-token-xyz-12345",
                 "test-gemini-key-abc",
-                "test-openrouter-key-def"
+                "test-openrouter-key-def",
+                "test-groq-key-ghi"
         );
         vault.write(original);
 
@@ -74,6 +75,7 @@ public class CredentialVaultInstrumentedTest {
         assertEquals("test-tmdb-token-xyz-12345", result.credentials.tmdbValue);
         assertEquals("test-gemini-key-abc", result.credentials.geminiApiKey);
         assertEquals("test-openrouter-key-def", result.credentials.openRouterApiKey);
+        assertEquals("test-groq-key-ghi", result.credentials.groqApiKey);
     }
 
     @Test
@@ -82,6 +84,7 @@ public class CredentialVaultInstrumentedTest {
                 "api_key",
                 "same-key-value",
                 "same-gemini-value",
+                "",
                 ""
         );
 
@@ -106,6 +109,7 @@ public class CredentialVaultInstrumentedTest {
                 "read_access_token",
                 "sensitive-token",
                 "gemini-key",
+                "",
                 ""
         );
         vault.write(creds);
@@ -128,7 +132,7 @@ public class CredentialVaultInstrumentedTest {
     @Test
     public void testTamperedHeaderOrVersionRejected() throws Exception {
         CredentialVault.StoredCredentials creds = new CredentialVault.StoredCredentials(
-                "read_access_token", "token-val", "", ""
+                "read_access_token", "token-val", "", "", ""
         );
         vault.write(creds);
 
@@ -150,7 +154,7 @@ public class CredentialVaultInstrumentedTest {
     @Test
     public void testMissingKeyForExistingFileReportsKeyUnavailable() throws Exception {
         CredentialVault.StoredCredentials creds = new CredentialVault.StoredCredentials(
-                "read_access_token", "test-token", "", ""
+                "read_access_token", "test-token", "", "", ""
         );
         vault.write(creds);
 
@@ -170,7 +174,7 @@ public class CredentialVaultInstrumentedTest {
     @Test
     public void testClearIdempotencyAndRemoval() throws Exception {
         CredentialVault.StoredCredentials creds = new CredentialVault.StoredCredentials(
-                "read_access_token", "val1", "val2", "val3"
+                "read_access_token", "val1", "val2", "val3", "val4"
         );
         vault.write(creds);
 
@@ -199,7 +203,7 @@ public class CredentialVaultInstrumentedTest {
         assertTrue(vault.read().rememberEnabled);
 
         // Write credentials while true
-        vault.write(new CredentialVault.StoredCredentials("read_access_token", "val1", "", ""));
+        vault.write(new CredentialVault.StoredCredentials("read_access_token", "val1", "", "", ""));
         assertNotNull(vault.read().credentials);
 
         // Disabling remember removes saved credentials and persists preference false
@@ -217,11 +221,13 @@ public class CredentialVaultInstrumentedTest {
 
     @Test
     public void testEmptySnapshotClearsVault() throws Exception {
-        vault.write(new CredentialVault.StoredCredentials("read_access_token", "val1", "val2", ""));
-        assertNotNull(vault.read().credentials);
+        vault.write(new CredentialVault.StoredCredentials("read_access_token", "", "", "", "groq-only-key"));
+        CredentialVault.ReadResult groqOnly = vault.read();
+        assertNotNull(groqOnly.credentials);
+        assertEquals("groq-only-key", groqOnly.credentials.groqApiKey);
 
         // Empty credentials write
-        vault.write(new CredentialVault.StoredCredentials("read_access_token", "", "", ""));
+        vault.write(new CredentialVault.StoredCredentials("read_access_token", "", "", "", ""));
         assertNull(vault.read().credentials);
     }
 

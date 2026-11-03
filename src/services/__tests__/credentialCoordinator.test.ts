@@ -31,6 +31,7 @@ describe('credentialCoordinator', () => {
           tmdbValue: 'restored-token-123',
           geminiApiKey: 'restored-gemini',
           openRouterApiKey: 'restored-openrouter',
+          groqApiKey: '',
         },
         rememberEnabled: true,
       });
@@ -143,6 +144,7 @@ describe('credentialCoordinator', () => {
           tmdbValue: 'stale-restored-token',
           geminiApiKey: '',
           openRouterApiKey: '',
+          groqApiKey: '',
         },
         rememberEnabled: true,
       });
@@ -179,6 +181,7 @@ describe('credentialCoordinator', () => {
         tmdbValue: 'my-tmdb',
         geminiApiKey: 'my-gemini',
         openRouterApiKey: 'my-openrouter',
+        groqApiKey: '',
       });
       expect(credentialCoordinator.getState().isRemembered).toBe(true);
       expect(credentialStore.getCredentials().tmdbValue).toBe('my-tmdb');
@@ -230,6 +233,7 @@ describe('credentialCoordinator', () => {
           tmdbValue: 'tmdb-token',
           geminiApiKey: 'gemini-key',
           openRouterApiKey: 'openrouter-key',
+          groqApiKey: '',
         },
         rememberEnabled: true,
       });
@@ -250,6 +254,7 @@ describe('credentialCoordinator', () => {
         tmdbValue: '',
         geminiApiKey: 'gemini-key',
         openRouterApiKey: 'openrouter-key',
+        groqApiKey: '',
       });
       expect(credentialCoordinator.getState().rememberEnabled).toBe(true);
     });
