@@ -38,6 +38,7 @@ public class CredentialVaultPlugin extends Plugin {
                     creds.put("tmdbValue", result.credentials.tmdbValue);
                     creds.put("geminiApiKey", result.credentials.geminiApiKey);
                     creds.put("openRouterApiKey", result.credentials.openRouterApiKey);
+                    creds.put("groqApiKey", result.credentials.groqApiKey);
                     ret.put("credentials", creds);
                 } else {
                     ret.put("credentials", JSONObject.NULL);
@@ -70,7 +71,8 @@ public class CredentialVaultPlugin extends Plugin {
         while (keys.hasNext()) {
             String key = keys.next();
             if (!key.equals("tmdbType") && !key.equals("tmdbValue") &&
-                !key.equals("geminiApiKey") && !key.equals("openRouterApiKey")) {
+                !key.equals("geminiApiKey") && !key.equals("openRouterApiKey") &&
+                !key.equals("groqApiKey")) {
                 call.reject("Unexpected field in credentials snapshot", "INVALID_DATA");
                 return;
             }
@@ -80,6 +82,7 @@ public class CredentialVaultPlugin extends Plugin {
         String tmdbValue = credsObj.optString("tmdbValue", "");
         String geminiApiKey = credsObj.optString("geminiApiKey", "");
         String openRouterApiKey = credsObj.optString("openRouterApiKey", "");
+        String groqApiKey = credsObj.optString("groqApiKey", "");
 
         if (!tmdbType.equals("read_access_token") && !tmdbType.equals("api_key")) {
             call.reject("Invalid TMDB credential type", "INVALID_DATA");
@@ -87,7 +90,7 @@ public class CredentialVaultPlugin extends Plugin {
         }
 
         CredentialVault.StoredCredentials credentials = new CredentialVault.StoredCredentials(
-                tmdbType, tmdbValue, geminiApiKey, openRouterApiKey
+                tmdbType, tmdbValue, geminiApiKey, openRouterApiKey, groqApiKey
         );
 
         executor.execute(() -> {
