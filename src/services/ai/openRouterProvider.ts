@@ -1,6 +1,12 @@
 import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './types';
 import { Movie } from '../../types';
-import { validateAndSanitizeAIResponse } from './aiResponseValidator';
+import {
+  validateAndSanitizeAIResponse,
+  parseAIJsonResponse,
+  composeSignals,
+} from './aiResponseValidator';
+
+export { composeSignals };
 
 export const OPENROUTER_DEFAULT_MODEL = 'openrouter/free';
 
@@ -31,24 +37,14 @@ export function sanitizeOpenRouterModel(model?: string): string {
   return trimmed;
 }
 
-function composeSignals(signals: (AbortSignal | undefined)[]): AbortSignal {
-  const controller = new AbortController();
-  for (const s of signals) {
-    if (!s) continue;
-    if (s.aborted) {
-      controller.abort(s.reason);
-      return controller.signal;
-    }
-    s.addEventListener('abort', () => controller.abort(s.reason), { once: true });
-  }
-  return controller.signal;
-}
-
 const MAX_PROMPT_RATINGS = 80;
 const TOP_RATINGS_COUNT = 60;
 const BOTTOM_RATINGS_COUNT = 20;
 
-export function buildOpenRouterPrompt(request: RecommendationRequest): string {
+export function buildOpenRouterPrompt(
+  request: RecommendationRequest,
+  { compact = false }: { compact?: boolean } = {}
+): string {
   const {
     userRatings = [],
     candidatePool = [],
@@ -110,7 +106,7 @@ export function buildOpenRouterPrompt(request: RecommendationRequest): string {
 Recommend the top films for the user based on their ratings.
 
 User Profile:
-${JSON.stringify(ratingsSummary, null, 2)}${genreSummaryLine}
+${JSON.stringify(ratingsSummary, null, compact ? undefined : 2)}${genreSummaryLine}
 
 Serendipity: ${normalizedSerendipity}%
 Serendipity Rubric:
@@ -121,7 +117,7 @@ Vibes: ${selectedVibes.join(', ') || 'Any'}
 Eras: ${preferredEras.join(', ') || 'Any'}
 
 Candidate Pool:
-${JSON.stringify(poolSummary, null, 2)}
+${JSON.stringify(poolSummary, null, compact ? undefined : 2)}
 
 Instructions:
 1. Return 12–20 films in "pool_rankings" from the Candidate Pool and up to 3 films in "unconstrained_discoveries" outside the pool.
@@ -256,29 +252,7 @@ export class OpenRouterProvider implements IAIProvider {
         throw new Error('Empty response from OpenRouter model.');
       }
 
-      // Strip DeepSeek R1 <think>...</think> reasoning wrappers
-      const withoutThinking = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-
-      // Clean markdown fences
-      const cleanJson = withoutThinking
-        .replace(/^```json/im, '')
-        .replace(/^```/im, '')
-        .replace(/```$/im, '')
-        .trim();
-
-      let parsed: any;
-      try {
-        parsed = JSON.parse(cleanJson);
-      } catch {
-        // Fallback: search for first { and last }
-        const start = cleanJson.indexOf('{');
-        const end = cleanJson.lastIndexOf('}');
-        if (start !== -1 && end !== -1 && end > start) {
-          parsed = JSON.parse(cleanJson.slice(start, end + 1));
-        } else {
-          throw new Error('Failed to parse structured JSON from OpenRouter.');
-        }
-      }
+      const parsed = parseAIJsonResponse(content, 'OpenRouter');
       return validateAndSanitizeAIResponse(parsed, candidateMap);
     } finally {
       clearTimeout(timeout);

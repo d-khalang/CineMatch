@@ -307,6 +307,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         tmdbValue,
         geminiApiKey: geminiKey,
         openRouterApiKey: openRouterKey,
+        groqApiKey: credentialStore.getCredentials().groqApiKey,
         rememberOnDevice,
       });
 

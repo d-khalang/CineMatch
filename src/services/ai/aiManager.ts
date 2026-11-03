@@ -2,6 +2,7 @@ import { IAIProvider, RecommendationRequest, UnconstrainedDiscovery } from './ty
 import { LocalProvider } from './localProvider';
 import { GeminiProvider } from './geminiProvider';
 import { OpenRouterProvider } from './openRouterProvider';
+import { GroqProvider } from './groqProvider';
 import { AIProviderId, Recommendation } from '../../types';
 
 export const MIN_RECOMMENDATIONS = 8;
@@ -21,6 +22,7 @@ class AIServiceManager {
     this.registerProvider(new LocalProvider());
     this.registerProvider(new GeminiProvider());
     this.registerProvider(new OpenRouterProvider());
+    this.registerProvider(new GroqProvider());
   }
 
   registerProvider(provider: IAIProvider) {
@@ -62,6 +64,15 @@ class AIServiceManager {
       return {
         recommendations: res.recommendations,
         usedProvider: 'Local Smart Engine (Configure OpenRouter Key in Settings)',
+      };
+    }
+
+    if (providerId === 'groq' && !request.apiKey?.trim()) {
+      const local = this.getProvider('local');
+      const res = await local.generateRecommendations(request, signal);
+      return {
+        recommendations: res.recommendations,
+        usedProvider: 'Local Smart Engine (Configure Groq Key in Settings)',
       };
     }
 

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Movie, UserRating, HiddenFilm, Recommendation, AISettings, TasteStats } from '../types';
+import { Movie, UserRating, HiddenFilm, Recommendation, AISettings, AIProviderId, TasteStats } from '../types';
 import { aiManager } from '../services/ai/aiManager';
 import { getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
 import { matchesPreferredEras, sortAndRankRecommendations, coerceScore } from './recommendationUtils';
@@ -28,6 +28,7 @@ import {
   capHiddenFilms,
 } from '../services/storage';
 import { OPENROUTER_DEFAULT_MODEL, sanitizeOpenRouterModel } from '../services/ai/openRouterProvider';
+import { GROQ_DEFAULT_MODEL, sanitizeGroqModel } from '../services/ai/groqProvider';
 
 const DEFAULT_SETTINGS: AISettings = {
   activeProvider: 'gemini',
@@ -35,6 +36,8 @@ const DEFAULT_SETTINGS: AISettings = {
   geminiModel: 'gemini-3.8-flash',
   openRouterApiKey: '',
   openRouterModel: OPENROUTER_DEFAULT_MODEL,
+  groqApiKey: '',
+  groqModel: GROQ_DEFAULT_MODEL,
   serendipityLevel: 40,
   selectedVibes: [],
   preferredEras: [],
@@ -242,6 +245,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           activeProvider: parsed.activeProvider || 'gemini',
           geminiModel: parsed.geminiModel || 'gemini-3.8-flash',
           openRouterModel: sanitizeOpenRouterModel(parsed.openRouterModel),
+          groqModel: sanitizeGroqModel(parsed.groqModel),
           serendipityLevel: typeof parsed.serendipityLevel === 'number' ? parsed.serendipityLevel : 40,
           selectedVibes: Array.isArray(parsed.selectedVibes) ? parsed.selectedVibes : [],
           preferredEras: Array.isArray(parsed.preferredEras) ? parsed.preferredEras : [],
@@ -393,6 +397,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       activeProvider: aiSettings.activeProvider,
       geminiModel: aiSettings.geminiModel,
       openRouterModel: aiSettings.openRouterModel,
+      groqModel: aiSettings.groqModel,
       serendipityLevel: aiSettings.serendipityLevel,
       selectedVibes: aiSettings.selectedVibes,
       preferredEras: aiSettings.preferredEras,
@@ -871,8 +876,20 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const providerId = aiSettings.activeProvider;
       const creds = credentialStore.getCredentials();
-      const apiKey = providerId === 'gemini' ? creds.geminiApiKey : creds.openRouterApiKey;
-      const model = providerId === 'gemini' ? aiSettings.geminiModel : aiSettings.openRouterModel;
+      const apiKeyByProvider: Record<AIProviderId, string | undefined> = {
+        gemini: creds.geminiApiKey,
+        openrouter: creds.openRouterApiKey,
+        groq: creds.groqApiKey,
+        local: '',
+      };
+      const apiKey = apiKeyByProvider[providerId];
+      const modelByProvider: Record<AIProviderId, string | undefined> = {
+        gemini: aiSettings.geminiModel,
+        openrouter: aiSettings.openRouterModel,
+        groq: aiSettings.groqModel,
+        local: undefined,
+      };
+      const model = modelByProvider[providerId];
 
       // 2. Dispatch to AI Provider (or Local fallback)
       const result = await aiManager.generateRecommendations(

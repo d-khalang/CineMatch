@@ -52,6 +52,7 @@ describe('nativeCredentialVault bridge', () => {
         tmdbValue: 'valid-token',
         geminiApiKey: 'valid-gemini',
         openRouterApiKey: 'valid-openrouter',
+        groqApiKey: '',
       };
       const result = validateStoredCredentials(valid);
       expect(result).toEqual(valid);
@@ -63,6 +64,7 @@ describe('nativeCredentialVault bridge', () => {
         tmdbValue: 'api-key-123',
         geminiApiKey: '',
         openRouterApiKey: '',
+        groqApiKey: '',
       };
       const result = validateStoredCredentials(valid);
       expect(result).toEqual(valid);
@@ -121,6 +123,7 @@ describe('nativeCredentialVault bridge', () => {
         tmdbValue: 'tok',
         geminiApiKey: '',
         openRouterApiKey: '',
+        groqApiKey: '',
       };
       await expect(writeVault(creds)).rejects.toThrow(VaultBridgeError);
     });
