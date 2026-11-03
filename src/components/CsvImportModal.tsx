@@ -1,5 +1,4 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import Papa from 'papaparse';
 import { X, Upload, FileText, CheckCircle, Loader2, AlertCircle, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
 import { Movie, UserRating } from '../types';
@@ -9,7 +8,7 @@ import {
   parseMovieCsv,
   CsvParseResult,
   ParsedCsvMovie,
-  detectLetterboxdCsvKind,
+  sniffCsvKind,
   parseWatchedCsv,
   WatchedParseResult,
   WatchedRow,
@@ -89,6 +88,9 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    cancelImport();
+    const thisOperationVersion = operationVersionRef.current;
+
     setErrorMessage(null);
     setParseResult(null);
     setWatchedResult(null);
@@ -107,10 +109,9 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
 
       try {
         const text = await selectedFile.text();
-        const cleanContent = text.replace(/^\uFEFF/, '').trim();
-        const parseOutput = Papa.parse<string[]>(cleanContent, { preview: 1, skipEmptyLines: 'greedy' });
-        const headers = parseOutput.data && parseOutput.data.length > 0 ? parseOutput.data[0] : [];
-        const detectedKind = detectLetterboxdCsvKind(headers);
+        if (operationVersionRef.current !== thisOperationVersion) return;
+
+        const detectedKind = sniffCsvKind(text);
 
         if (detectedKind === 'watched') {
           const result = parseWatchedCsv(text);
@@ -130,6 +131,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
           }
         }
       } catch (err: unknown) {
+        if (operationVersionRef.current !== thisOperationVersion) return;
         const msg = err instanceof Error ? err.message : 'Failed to parse CSV file';
         setErrorMessage(msg);
       }
@@ -869,17 +871,21 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
             </>
           )}
 
-          {/* Committed phase — offer recalibration */}
+          {/* Committed phase — plain close for watched import, recalibrate for ratings */}
           {importPhase === 'committed' && (
             <button
-              onClick={() => {
-                handleClose();
-                generateRankings().catch(() => {});
-              }}
+              onClick={
+                fileKind === 'watched'
+                  ? handleClose
+                  : () => {
+                      handleClose();
+                      generateRankings().catch(() => {});
+                    }
+              }
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--accent-primary)] hover:brightness-110 text-black font-semibold text-xs transition-all"
             >
               <CheckCircle className="w-4 h-4" />
-              Done — Recalibrate AI Recommendations
+              {fileKind === 'watched' ? 'Done' : 'Done — Recalibrate AI Recommendations'}
             </button>
           )}
         </div>

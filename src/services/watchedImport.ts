@@ -62,6 +62,7 @@ export function planWatchedImport(
     planned.push({
       movieId: tmdbId,
       reason: 'seen',
+      // Rows with no parseable date get hiddenAt: 0 so they are evicted first when the hidden-films cap is reached.
       hiddenAt: rows[i].watchedAt ?? 0,
       title: rows[i].title,
     });

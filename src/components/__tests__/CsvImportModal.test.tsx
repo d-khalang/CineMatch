@@ -1,11 +1,32 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { CsvImportModal } from '../CsvImportModal';
 import { MovieStoreProvider } from '../../store/useMovieStore';
 import { credentialStore } from '../../services/credentialStore';
 import * as tmdbService from '../../services/tmdb';
 import { STORAGE_KEYS, safeGetItem, safeSetItem, clearInMemoryStoreForTesting } from '../../services/storage';
+
+const { generateRankingsSpy } = vi.hoisted(() => ({
+  generateRankingsSpy: vi.fn(),
+}));
+
+vi.mock('../../store/useMovieStore', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../store/useMovieStore')>();
+  return {
+    ...actual,
+    useMovieStore: () => {
+      const store = actual.useMovieStore();
+      return {
+        ...store,
+        generateRankings: () => {
+          generateRankingsSpy();
+          return Promise.resolve();
+        },
+      };
+    },
+  };
+});
 
 vi.mock('../../services/tmdb', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/tmdb')>();
@@ -538,5 +559,243 @@ describe('CsvImportModal Ambiguity & Resolution', () => {
     // Verify no partial hide was committed
     const storedStr = safeGetItem(STORAGE_KEYS.HIDDEN_FILMS);
     expect(storedStr).toBeNull();
+  });
+
+  it('shows a plain "Done" after a watched import that closes the modal without calling generateRankings', async () => {
+    vi.mocked(tmdbService.searchMovies).mockResolvedValueOnce({
+      movies: [
+        {
+          id: 200,
+          title: 'Heat',
+          overview: '',
+          release_date: '1995-12-15',
+          vote_average: 8.2,
+          vote_count: 5000,
+          poster_path: null,
+          backdrop_path: null,
+          genres: [],
+        },
+      ],
+      totalPages: 1,
+    });
+
+    const onClose = vi.fn();
+    const Host = () => {
+      const [open, setOpen] = React.useState(false);
+      return (
+        <MovieStoreProvider>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open CSV Import
+          </button>
+          <CsvImportModal
+            isOpen={open}
+            onClose={() => {
+              onClose();
+              setOpen(false);
+            }}
+          />
+        </MovieStoreProvider>
+      );
+    };
+
+    render(<Host />);
+    const opener = screen.getByRole('button', { name: 'Open CSV Import' });
+    opener.focus();
+    fireEvent.click(opener);
+
+    const csvContent = 'Date,Name,Year,Letterboxd URI\n2021-03-04,Heat,1995,https://boxd.it/abc\n';
+    const file = new File([csvContent], 'watched.csv', { type: 'text/csv' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    const startButton = await screen.findByRole('button', { name: /Start Import/i });
+    fireEvent.click(startButton);
+
+    expect(await screen.findByText(/1 film marked as seen/i)).toBeInTheDocument();
+
+    const doneButton = screen.getByRole('button', { name: 'Done' });
+    expect(doneButton).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Recalibrate/i })).not.toBeInTheDocument();
+
+    fireEvent.click(doneButton);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(generateRankingsSpy).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('still shows "Done — Recalibrate AI Recommendations" after a ratings import and calls generateRankings', async () => {
+    vi.mocked(tmdbService.searchMovies).mockResolvedValueOnce({
+      movies: [
+        {
+          id: 438631,
+          title: 'Dune',
+          overview: '2021 version',
+          release_date: '2021-09-15',
+          vote_average: 8.0,
+          vote_count: 8000,
+          poster_path: null,
+          backdrop_path: null,
+          genres: [{ id: 878, name: 'Sci-Fi' }],
+        },
+      ],
+      totalPages: 1,
+    });
+
+    const onClose = vi.fn();
+    renderModal(onClose);
+
+    const csvContent = 'Date,Name,Year,Letterboxd URI,Rating\n2022-03-15,Dune,2021,https://boxd.it/test,4.5';
+    const file = new File([csvContent], 'ratings.csv', { type: 'text/csv' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    const startButton = await screen.findByRole('button', { name: /Start Import/i });
+    fireEvent.click(startButton);
+
+    const confirmButton = await screen.findByRole('button', { name: /Confirm Import/i });
+    fireEvent.click(confirmButton);
+
+    const recalibrateButton = await screen.findByRole('button', {
+      name: /Done — Recalibrate AI Recommendations/i,
+    });
+    expect(screen.queryByRole('button', { name: 'Done' })).not.toBeInTheDocument();
+
+    fireEvent.click(recalibrateButton);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(generateRankingsSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows plain "Done" without recalibrating even when a watched import hides 0 new films', async () => {
+    safeSetItem(
+      STORAGE_KEYS.RATINGS,
+      JSON.stringify({
+        200: {
+          movieId: 200,
+          title: 'Heat',
+          rating: 9,
+          posterPath: null,
+          year: '1995',
+          genres: ['Crime'],
+          ratedAt: 1_600_000_000_000,
+        },
+      })
+    );
+
+    vi.mocked(tmdbService.searchMovies).mockResolvedValueOnce({
+      movies: [
+        {
+          id: 200,
+          title: 'Heat',
+          overview: '',
+          release_date: '1995-12-15',
+          vote_average: 8.2,
+          vote_count: 5000,
+          poster_path: null,
+          backdrop_path: null,
+          genres: [],
+        },
+      ],
+      totalPages: 1,
+    });
+
+    const onClose = vi.fn();
+    renderModal(onClose);
+
+    const csvContent = 'Date,Name,Year,Letterboxd URI\n2021-03-04,Heat,1995,https://boxd.it/abc\n';
+    const file = new File([csvContent], 'watched.csv', { type: 'text/csv' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    const startButton = await screen.findByRole('button', { name: /Start Import/i });
+    fireEvent.click(startButton);
+
+    expect(await screen.findByText(/0 films marked as seen/i)).toBeInTheDocument();
+
+    const doneButton = screen.getByRole('button', { name: 'Done' });
+    expect(screen.queryByRole('button', { name: /Recalibrate/i })).not.toBeInTheDocument();
+
+    fireEvent.click(doneButton);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(generateRankingsSpy).not.toHaveBeenCalled();
+  });
+
+  it('still shows recalibrate button and calls generateRankings for non-Letterboxd CSV in Replace mode', async () => {
+    const onClose = vi.fn();
+    renderModal(onClose);
+
+    const csvContent = 'Title,Year,Rating,TMDB_ID\nInception,2010,10,27205';
+    const file = new File([csvContent], 'cinematch_export.csv', { type: 'text/csv' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    const startButton = await screen.findByRole('button', { name: /Start Import/i });
+    fireEvent.click(screen.getByRole('button', { name: /Replace all currently stored ratings/i }));
+    fireEvent.click(startButton);
+
+    const confirmButton = await screen.findByRole('button', { name: /Confirm Import/i });
+    fireEvent.click(confirmButton);
+
+    const recalibrateButton = await screen.findByRole('button', {
+      name: /Done — Recalibrate AI Recommendations/i,
+    });
+    expect(screen.queryByRole('button', { name: 'Done' })).not.toBeInTheDocument();
+
+    fireEvent.click(recalibrateButton);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(generateRankingsSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a stale file.text() read when another file is selected before it finishes', async () => {
+    const onClose = vi.fn();
+    renderModal(onClose);
+
+    let resolveSlowWatchedText!: (text: string) => void;
+    const slowWatchedFile = new File(['placeholder'], 'watched.csv', { type: 'text/csv' });
+    vi.spyOn(slowWatchedFile, 'text').mockImplementationOnce(
+      () =>
+        new Promise<string>((res) => {
+          resolveSlowWatchedText = res;
+        })
+    );
+
+    const fastRatingsCsv = 'Title,Year,Rating,TMDB_ID\nInception,2010,10,27205';
+    const fastRatingsFile = new File([fastRatingsCsv], 'ratings.csv', { type: 'text/csv' });
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [slowWatchedFile] } });
+    fireEvent.change(input, { target: { files: [fastRatingsFile] } });
+
+    const startButton = await screen.findByRole('button', { name: /Start Import \(1 Films\)/i });
+
+    await act(async () => {
+      resolveSlowWatchedText(
+        'Date,Name,Year,Letterboxd URI\n2021-03-04,Heat,1995,https://boxd.it/abc\n2021-03-05,Thief,1981,https://boxd.it/def\n'
+      );
+    });
+
+    expect(screen.queryByText(/Letterboxd \(watched\)/i)).not.toBeInTheDocument();
+    expect(startButton).toHaveTextContent('Start Import (1 Films)');
+
+    fireEvent.click(startButton);
+    const confirmButton = await screen.findByRole('button', { name: /Confirm Import/i });
+    fireEvent.click(confirmButton);
+
+    const recalibrateButton = await screen.findByRole('button', {
+      name: /Done — Recalibrate AI Recommendations/i,
+    });
+    fireEvent.click(recalibrateButton);
+
+    expect(generateRankingsSpy).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
