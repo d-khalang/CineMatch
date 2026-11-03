@@ -41,7 +41,10 @@ const MAX_PROMPT_RATINGS = 80;
 const TOP_RATINGS_COUNT = 60;
 const BOTTOM_RATINGS_COUNT = 20;
 
-export function buildOpenRouterPrompt(request: RecommendationRequest): string {
+export function buildOpenRouterPrompt(
+  request: RecommendationRequest,
+  { compact = false }: { compact?: boolean } = {}
+): string {
   const {
     userRatings = [],
     candidatePool = [],
@@ -103,7 +106,7 @@ export function buildOpenRouterPrompt(request: RecommendationRequest): string {
 Recommend the top films for the user based on their ratings.
 
 User Profile:
-${JSON.stringify(ratingsSummary, null, 2)}${genreSummaryLine}
+${JSON.stringify(ratingsSummary, null, compact ? undefined : 2)}${genreSummaryLine}
 
 Serendipity: ${normalizedSerendipity}%
 Serendipity Rubric:
@@ -114,7 +117,7 @@ Vibes: ${selectedVibes.join(', ') || 'Any'}
 Eras: ${preferredEras.join(', ') || 'Any'}
 
 Candidate Pool:
-${JSON.stringify(poolSummary, null, 2)}
+${JSON.stringify(poolSummary, null, compact ? undefined : 2)}
 
 Instructions:
 1. Return 12–20 films in "pool_rankings" from the Candidate Pool and up to 3 films in "unconstrained_discoveries" outside the pool.

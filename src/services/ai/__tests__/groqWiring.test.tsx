@@ -2,6 +2,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, renderHook, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { GroqProvider, GROQ_DEFAULT_MODEL, fetchGroqModels } from '../groqProvider';
+import { buildOpenRouterPrompt } from '../openRouterProvider';
 import { OpenRouterProvider } from '../openRouterProvider';
 import { parseAIJsonResponse, composeSignals } from '../aiResponseValidator';
 import { aiManager } from '../aiManager';
@@ -104,6 +105,69 @@ describe('Groq Part 1 Wiring & Regression Suite (CIN-67)', () => {
   });
 
   describe('GroqProvider request payload & MSW handlers', () => {
+    const generateBody = async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                content: JSON.stringify({ taste_analysis: 'Test', pool_rankings: [], unconstrained_discoveries: [] }),
+              },
+            },
+          ],
+        }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      await new GroqProvider().generateRecommendations({
+        userRatings: [
+          { movieId: 1, title: 'Rated', rating: 9, posterPath: null, genres: ['Drama'], ratedAt: 1 },
+        ],
+        candidatePool: [],
+        serendipityLevel: 40,
+        apiKey: 'groq-test-key',
+      });
+      return JSON.parse(fetchMock.mock.calls[0][1].body);
+    };
+
+    it('caps the reply and sends a compact prompt, so a run fits the free-tier token limit', async () => {
+      const body = await generateBody();
+      expect(body.max_tokens).toBe(3500);
+      const prompt = body.messages[1].content;
+      expect(prompt).toContain('[{"title":"Rated"');
+      expect(prompt).not.toContain('\n  {\n    "title"');
+    });
+
+    it('keeps the pretty-printed prompt for OpenRouter', () => {
+      const prompt = buildOpenRouterPrompt({
+        userRatings: [
+          { movieId: 1, title: 'Rated', rating: 9, posterPath: null, genres: ['Drama'], ratedAt: 1 },
+        ],
+        candidatePool: [],
+      } as never);
+      expect(prompt).toContain('\n  {\n    "title": "Rated"');
+    });
+
+    it('reports a cut-off reply clearly instead of a raw JSON parse error', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ choices: [{ finish_reason: 'length', message: { content: '{"pool_rankings": [' } }] }),
+        })
+      );
+
+      await expect(
+        new GroqProvider().generateRecommendations({
+          userRatings: [],
+          candidatePool: [],
+          serendipityLevel: 40,
+          apiKey: 'groq-test-key',
+        })
+      ).rejects.toThrow('cut off');
+    });
+
     it('does not send response_format in testConnection or generateRecommendations', async () => {
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,

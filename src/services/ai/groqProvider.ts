@@ -15,6 +15,9 @@ const GROQ_MODELS_URL = 'https://api.groq.com/openai/v1/models';
 const NON_CHAT_GROQ_MODEL_PATTERN = /whisper|tts|orpheus|guard|embed/i;
 // The recommendation prompt reaches about 9,100 input tokens, so smaller models always fail.
 const MIN_GROQ_CONTEXT_WINDOW = 16000;
+// Free-tier keys get 8,000 tokens per minute. A compact prompt (about 4,400) plus this
+// reply cap fits it. Without a cap Groq returned 413s and 429s (checked 2026-11-03, CIN-66).
+const GROQ_MAX_REPLY_TOKENS = 3500;
 
 export function sanitizeGroqModel(model?: string): string {
   if (!model || typeof model !== 'string') return GROQ_DEFAULT_MODEL;
@@ -185,7 +188,7 @@ export class GroqProvider implements IAIProvider {
     const candidateMap = new Map<number, Movie>();
     candidatePool.forEach((m) => candidateMap.set(m.id, m));
 
-    const systemPrompt = buildOpenRouterPrompt(request);
+    const systemPrompt = buildOpenRouterPrompt(request, { compact: true });
 
     const timeoutController = new AbortController();
     const timeout = setTimeout(
@@ -203,6 +206,7 @@ export class GroqProvider implements IAIProvider {
         },
         body: JSON.stringify({
           model: targetModel,
+          max_tokens: GROQ_MAX_REPLY_TOKENS,
           messages: [
             {
               role: 'system',
@@ -226,6 +230,10 @@ export class GroqProvider implements IAIProvider {
 
       const data = await response.json();
       const content = data?.choices?.[0]?.message?.content;
+
+      if (data?.choices?.[0]?.finish_reason === 'length') {
+        throw new Error('Groq reply was cut off before it finished. Try another model.');
+      }
 
       if (typeof content !== 'string' || !content.trim()) {
         throw new Error('Empty response from Groq model.');
