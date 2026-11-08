@@ -538,6 +538,15 @@ export const validateHiddenFilms = (data: unknown): HiddenFilm[] => {
       typeof raw.title === 'string'
         ? { movieId, reason: raw.reason, hiddenAt, title: raw.title }
         : { movieId, reason: raw.reason, hiddenAt };
+    if (typeof raw.year === 'string') {
+      entry.year = raw.year;
+    }
+    if (Array.isArray(raw.genres)) {
+      const validGenres = raw.genres.filter((g): g is string => typeof g === 'string');
+      if (validGenres.length > 0) {
+        entry.genres = validGenres;
+      }
+    }
     byMovieId.set(movieId, entry);
   }
   return capHiddenFilms(Array.from(byMovieId.values()));

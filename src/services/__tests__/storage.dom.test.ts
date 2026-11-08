@@ -360,6 +360,46 @@ describe('Storage Service, Migration & Validation', () => {
       { movieId: 7, reason: 'not_for_me', hiddenAt: 200, title: 'Updated' },
     ]);
 
+    const withYearAndGenres = [
+      {
+        movieId: 8,
+        reason: 'not_for_me',
+        hiddenAt: 300,
+        title: 'With Meta',
+        year: '1999',
+        genres: ['Action', 'Thriller', 123, null],
+      },
+    ];
+    expect(validateHiddenFilms(withYearAndGenres)).toEqual([
+      {
+        movieId: 8,
+        reason: 'not_for_me',
+        hiddenAt: 300,
+        title: 'With Meta',
+        year: '1999',
+        genres: ['Action', 'Thriller'],
+      },
+    ]);
+
+    const malformedMeta = [
+      {
+        movieId: 9,
+        reason: 'not_for_me',
+        hiddenAt: 400,
+        title: 'Only Invalid Meta',
+        year: 2020,
+        genres: [123, null, false],
+      },
+    ];
+    expect(validateHiddenFilms(malformedMeta)).toEqual([
+      {
+        movieId: 9,
+        reason: 'not_for_me',
+        hiddenAt: 400,
+        title: 'Only Invalid Meta',
+      },
+    ]);
+
     const oversized = Array.from({ length: HIDDEN_FILMS_CAP + 2 }, (_, idx) => ({
       movieId: idx + 1,
       reason: 'seen' as const,

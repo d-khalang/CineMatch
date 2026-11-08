@@ -4,6 +4,7 @@ import { aiManager } from '../services/ai/aiManager';
 import { getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
 import { matchesPreferredEras, sortAndRankRecommendations, coerceScore } from './recommendationUtils';
 import { getCandidateRecommendationPool } from '../services/recommendation/candidateSources';
+import { selectRejectedFilms } from '../services/recommendation/rejectedFilms';
 import { recsSettingsFingerprint } from '../services/recommendation/settingsFingerprint';
 import { credentialStore } from '../services/credentialStore';
 import { credentialCoordinator } from '../services/credentialCoordinator';
@@ -548,10 +549,39 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const hideFilm = useCallback(
     (movieId: number, reason: HiddenFilm['reason'], title?: string) => {
       const hiddenAt = Date.now();
-      const entry: HiddenFilm =
-        title !== undefined
-          ? { movieId, reason, hiddenAt, title }
-          : { movieId, reason, hiddenAt };
+      const rec = recommendationsRef.current.find((r) => r?.movie?.id === movieId);
+      let year: string | undefined;
+      let genres: string[] | undefined;
+      if (rec) {
+        if (rec.movie.release_date) {
+          const match = rec.movie.release_date.match(/\b(\d{4})\b/);
+          if (match) {
+            year = match[1];
+          }
+        }
+        if (Array.isArray(rec.movie.genres)) {
+          const names = rec.movie.genres
+            .map((g) => (typeof g === 'string' ? g : g?.name))
+            .filter((name): name is string => typeof name === 'string' && name.trim().length > 0);
+          if (names.length > 0) {
+            genres = names;
+          }
+        }
+      }
+
+      const resolvedTitle =
+        typeof title === 'string' && title.trim().length > 0
+          ? title.trim()
+          : rec?.movie?.title?.trim();
+
+      const entry: HiddenFilm = {
+        movieId,
+        reason,
+        hiddenAt,
+        ...(resolvedTitle !== undefined ? { title: resolvedTitle } : {}),
+        ...(year !== undefined ? { year } : {}),
+        ...(genres !== undefined ? { genres } : {}),
+      };
 
       const applyHide = (list: HiddenFilm[]): HiddenFilm[] => {
         const filtered = list.some((h) => h.movieId === movieId)
@@ -846,17 +876,16 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     try {
       const userRatingsList = Object.values(ratings);
       const ratedIds = new Set(userRatingsList.map((r) => r.movieId));
-      const hiddenIds = new Set([
-        ...hiddenFilms.map((h) => h.movieId),
-        ...hiddenFilmsRef.current.map((h) => h.movieId),
-      ]);
+      const hiddenIds = new Set(hiddenFilmsRef.current.map((h) => h.movieId));
       const excludedIds = new Set<number>([...ratedIds, ...hiddenIds]);
 
       // Seeds: top rated movies
       const topSeeds = [...userRatingsList]
-        .filter((r) => r.rating >= 7)
+        .filter((r) => r.rating >= 7 && !hiddenIds.has(r.movieId))
         .sort((a, b) => b.rating - a.rating)
         .map((r) => r.movieId);
+
+      const unhiddenRatings = userRatingsList.filter((r) => !hiddenIds.has(r.movieId));
 
       // 1. Fetch candidates from TMDB
       const candidatePool = await getCandidateRecommendationPool(
@@ -865,7 +894,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           excludeIds: excludedIds,
           preferredEras: aiSettings.preferredEras,
           selectedVibes: aiSettings.selectedVibes,
-          userRatings: userRatingsList,
+          userRatings: unhiddenRatings,
         },
         controller.signal
       );
@@ -900,6 +929,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           serendipityLevel: aiSettings.serendipityLevel,
           selectedVibes: aiSettings.selectedVibes,
           preferredEras: aiSettings.preferredEras,
+          rejectedFilms: selectRejectedFilms(hiddenFilmsRef.current),
           apiKey,
           model,
         },

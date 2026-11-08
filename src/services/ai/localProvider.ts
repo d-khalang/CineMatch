@@ -1,5 +1,6 @@
 import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './types';
 import { Recommendation, Movie } from '../../types';
+import { rejectionPenalty } from '../recommendation/rejectedFilms';
 
 export class LocalProvider implements IAIProvider {
   readonly id = 'local';
@@ -148,6 +149,10 @@ export class LocalProvider implements IAIProvider {
             reasons.push(`Harmonizes with the overall themes and quality standards in your movie profile.`);
           }
         }
+      }
+
+      if (request.rejectedFilms && request.rejectedFilms.length > 0) {
+        score -= rejectionPenalty(movie, request.rejectedFilms);
       }
 
       // Bound score between 45 and 99
