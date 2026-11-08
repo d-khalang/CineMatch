@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseMovieCsv, generateRatingsCsv, sanitizeCsvFormula, sniffCsvKind } from '../csvService';
+import { parseMovieCsv, generateRatingsCsv, sanitizeCsvFormula, sniffCsvKind, parseWatchedCsv } from '../csvService';
 import { UserRating } from '../../types';
 
 describe('CSV Parsing & Sanitization Service', () => {
@@ -288,6 +288,82 @@ describe('sniffCsvKind', () => {
     expect(sniffCsvKind(csv)).toBe('ratings');
   });
 
+  it('detects Letterboxd watched.csv whether it is comma, semicolon or tab delimited', () => {
+    const comma = 'Date,Name,Year,Letterboxd URI\n2021-03-04,Heat,1995,https://boxd.it/abc\n';
+    expect(sniffCsvKind(comma)).toBe('watched');
+
+    const semicolon = 'Date;Name;Year;Letterboxd URI\n2021-03-04;Heat;1995;https://boxd.it/abc\n';
+    expect(sniffCsvKind(semicolon)).toBe('watched');
+
+    const tab = 'Date\tName\tYear\tLetterboxd URI\n2021-03-04\tHeat\t1995\thttps://boxd.it/abc\n';
+    expect(sniffCsvKind(tab)).toBe('watched');
+  });
+
+  it('detects comma-delimited Letterboxd watched.csv', () => {
+    const comma = 'Date,Name,Year,Letterboxd URI\n2021-03-04,Heat,1995,https://boxd.it/abc\n';
+    expect(sniffCsvKind(comma)).toBe('watched');
+  });
+
+  it('detects semicolon-delimited Letterboxd watched.csv', () => {
+    const semicolon = 'Date;Name;Year;Letterboxd URI\n2021-03-04;Heat;1995;https://boxd.it/abc\n';
+    expect(sniffCsvKind(semicolon)).toBe('watched');
+  });
+
+  it('detects tab-delimited Letterboxd watched.csv', () => {
+    const tab = 'Date\tName\tYear\tLetterboxd URI\n2021-03-04\tHeat\t1995\thttps://boxd.it/abc\n';
+    expect(sniffCsvKind(tab)).toBe('watched');
+  });
+
+  it('detects semicolon and tab delimited watched.csv even with quoted commas in field values', () => {
+    const semicolon =
+      '"Date";"Name";"Year";"Letterboxd URI"\n"2021-03-04";"Everything Everywhere All at Once, The";2022;"https://boxd.it/test"\n';
+    expect(sniffCsvKind(semicolon)).toBe('watched');
+
+    const tab =
+      '"Date"\t"Name"\t"Year"\t"Letterboxd URI"\n"2021-03-04"\t"Everything Everywhere All at Once, The"\t2022\t"https://boxd.it/test"\n';
+    expect(sniffCsvKind(tab)).toBe('watched');
+  });
+
+  it('detects Letterboxd ratings.csv whether comma, semicolon or tab delimited', () => {
+    const comma = 'Date,Name,Year,Letterboxd URI,Rating\n2024-01-15,Parasite,2019,https://boxd.it/i64K,4.5\n';
+    expect(sniffCsvKind(comma)).toBe('ratings');
+
+    const semicolon = 'Date;Name;Year;Letterboxd URI;Rating\n2024-01-15;Parasite;2019;https://boxd.it/i64K;4.5\n';
+    expect(sniffCsvKind(semicolon)).toBe('ratings');
+
+    const tab = 'Date\tName\tYear\tLetterboxd URI\tRating\n2024-01-15\tParasite\t2019\thttps://boxd.it/i64K\t4.5\n';
+    expect(sniffCsvKind(tab)).toBe('ratings');
+  });
+
+  it('detects header-only watched.csv whether it is comma, semicolon or tab delimited', () => {
+    expect(sniffCsvKind('Date,Name,Year,Letterboxd URI')).toBe('watched');
+    expect(sniffCsvKind('Date;Name;Year;Letterboxd URI')).toBe('watched');
+    expect(sniffCsvKind('Date\tName\tYear\tLetterboxd URI')).toBe('watched');
+  });
+
+  it('parses watched.csv correctly whether comma, semicolon or tab delimited', () => {
+    const comma = 'Date,Name,Year,Letterboxd URI\n2021-03-04,Heat,1995,https://boxd.it/abc\n';
+    const parsedComma = parseWatchedCsv(comma);
+    expect(parsedComma.accepted).toHaveLength(1);
+    expect(parsedComma.accepted[0].title).toBe('Heat');
+    expect(parsedComma.accepted[0].year).toBe('1995');
+    expect(parsedComma.accepted[0].watchedAt).toBe(Date.UTC(2021, 2, 4));
+
+    const semicolon = 'Date;Name;Year;Letterboxd URI\n2021-03-04;Heat;1995;https://boxd.it/abc\n';
+    const parsedSemicolon = parseWatchedCsv(semicolon);
+    expect(parsedSemicolon.accepted).toHaveLength(1);
+    expect(parsedSemicolon.accepted[0].title).toBe('Heat');
+    expect(parsedSemicolon.accepted[0].year).toBe('1995');
+    expect(parsedSemicolon.accepted[0].watchedAt).toBe(Date.UTC(2021, 2, 4));
+
+    const tab = 'Date\tName\tYear\tLetterboxd URI\n2021-03-04\tHeat\t1995\thttps://boxd.it/abc\n';
+    const parsedTab = parseWatchedCsv(tab);
+    expect(parsedTab.accepted).toHaveLength(1);
+    expect(parsedTab.accepted[0].title).toBe('Heat');
+    expect(parsedTab.accepted[0].year).toBe('1995');
+    expect(parsedTab.accepted[0].watchedAt).toBe(Date.UTC(2021, 2, 4));
+  });
+
   it('tolerates UTF-8 BOM, leading empty lines, CRLF, and quoted headers', () => {
     const watchedWithBomAndQuotes =
       '\uFEFF\r\n   \r\n" Date ","NAME","Year","Letterboxd URI"\r\n2021-03-04,"Heat",1995,https://boxd.it/abc\r\n';
@@ -302,6 +378,12 @@ describe('sniffCsvKind', () => {
     expect(sniffCsvKind('"Title","Year","Rating","TMDB_ID"\n"Inception","2010",10,27205')).toBe('unknown');
     expect(sniffCsvKind('')).toBe('unknown');
     expect(sniffCsvKind('\uFEFF   \r\n\t\n')).toBe('unknown');
+    expect(sniffCsvKind(null as unknown as string)).toBe('unknown');
+    expect(sniffCsvKind(undefined as unknown as string)).toBe('unknown');
+    expect(sniffCsvKind(123 as unknown as string)).toBe('unknown');
+    expect(sniffCsvKind('   \t \r\n ')).toBe('unknown');
+    expect(sniffCsvKind(';;;;')).toBe('unknown');
+    expect(sniffCsvKind('\t\t\t')).toBe('unknown');
   });
 
   it('handles header-only single-line input without trailing newline and CR line endings', () => {
