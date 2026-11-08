@@ -21,6 +21,11 @@ import {
   OPENROUTER_DEFAULT_MODEL,
   sanitizeOpenRouterModel,
 } from '../services/ai/openRouterProvider';
+import {
+  GROQ_DEFAULT_MODEL,
+  sanitizeGroqModel,
+  fetchGroqModels,
+} from '../services/ai/groqProvider';
 import { testTmdbConnection } from '../services/tmdb';
 import { credentialStore, TmdbCredentialType } from '../services/credentialStore';
 import { isVaultSupported } from '../services/nativeCredentialVault';
@@ -29,6 +34,47 @@ import { AIProviderId } from '../types';
 import { useModalA11y } from './useModalA11y';
 
 const CUSTOM_OPENROUTER_OPTION = '__custom__';
+
+function formatGroqError(err: unknown): string {
+  if (err && typeof err === 'object') {
+    const status = 'status' in err ? (err as { status: unknown }).status : undefined;
+    if (status === 413 || status === 429) {
+      return "This model's free limit is too small for your ratings. Try another model.";
+    }
+  }
+  const msg = err instanceof Error ? err.message : String(err || 'Failed to load Groq models.');
+  if (/\b(413|429)\b|rate[ -]?limit/i.test(msg)) {
+    return "This model's free limit is too small for your ratings. Try another model.";
+  }
+  return msg;
+}
+
+function buildGroqOptions(
+  models: { id: string; name: string }[],
+  savedModel: string,
+  selectedModel: string
+): { id: string; label: string }[] {
+  const options: { id: string; label: string }[] = [];
+  const seenIds = new Set<string>();
+
+  if (savedModel && !models.some((m) => m.id === savedModel)) {
+    options.push({ id: savedModel, label: `${savedModel} (saved)` });
+    seenIds.add(savedModel);
+  }
+
+  for (const m of models) {
+    if (!seenIds.has(m.id)) {
+      options.push({ id: m.id, label: m.id === savedModel ? `${m.id} (saved)` : m.name || m.id });
+      seenIds.add(m.id);
+    }
+  }
+
+  if (selectedModel && !seenIds.has(selectedModel)) {
+    options.push({ id: selectedModel, label: selectedModel });
+  }
+
+  return options;
+}
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -108,6 +154,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     isInitialCustomOpenRouter ? initialOpenRouterModel : ''
   );
 
+  const initialGroqModel = sanitizeGroqModel(aiSettings.groqModel);
+  const [groqModel, setGroqModel] = useState<string>(initialGroqModel);
+  const [savedGroqModel, setSavedGroqModel] = useState<string>(initialGroqModel);
+  const [groqModels, setGroqModels] = useState<{ id: string; name: string }[]>([]);
+  const [isLoadingGroqModels, setIsLoadingGroqModels] = useState<boolean>(false);
+  const [groqModelsError, setGroqModelsError] = useState<string | null>(null);
+
+  const groqFetchAbortControllerRef = useRef<AbortController | null>(null);
+  const groqFetchRequestIdRef = useRef<number>(0);
+  const hasAutoLoadedGroqRef = useRef<boolean>(false);
+
   // In-memory credentials state
   const [tmdbType, setTmdbType] = useState<TmdbCredentialType>(
     credentialStore.getCredentials().tmdbType
@@ -116,6 +173,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [geminiKey, setGeminiKey] = useState<string>(credentialStore.getCredentials().geminiApiKey);
   const [openRouterKey, setOpenRouterKey] = useState<string>(
     credentialStore.getCredentials().openRouterApiKey
+  );
+  const [groqKey, setGroqKey] = useState<string>(
+    credentialStore.getCredentials().groqApiKey
   );
 
   // Coordinator state & remember preference
@@ -127,6 +187,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [showTmdbKey, setShowTmdbKey] = useState<boolean>(false);
   const [showGeminiKey, setShowGeminiKey] = useState<boolean>(false);
   const [showOpenRouterKey, setShowOpenRouterKey] = useState<boolean>(false);
+  const [showGroqKey, setShowGroqKey] = useState<boolean>(false);
 
   // Separate test connection statuses
   const [tmdbTesting, setTmdbTesting] = useState<{ loading: boolean; success?: boolean; message?: string }>({
@@ -135,6 +196,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [aiTesting, setAiTesting] = useState<{ loading: boolean; success?: boolean; message?: string }>({
     loading: false,
   });
+
+  const handleLoadGroqModels = async (keyToUse: string) => {
+    const trimmedKey = keyToUse.trim();
+    if (!trimmedKey) return;
+
+    if (groqFetchAbortControllerRef.current) {
+      groqFetchAbortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    groqFetchAbortControllerRef.current = controller;
+    const reqId = ++groqFetchRequestIdRef.current;
+
+    setIsLoadingGroqModels(true);
+    setGroqModelsError(null);
+
+    try {
+      const models = await fetchGroqModels(trimmedKey, controller.signal);
+      if (reqId === groqFetchRequestIdRef.current && !controller.signal.aborted) {
+        setGroqModels(models);
+        setIsLoadingGroqModels(false);
+      }
+    } catch (err: unknown) {
+      if (controller.signal.aborted || reqId !== groqFetchRequestIdRef.current) {
+        return;
+      }
+      setIsLoadingGroqModels(false);
+      setGroqModelsError(formatGroqError(err));
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (groqFetchAbortControllerRef.current) {
+        groqFetchAbortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   // Subscribe to coordinator state changes
   useEffect(() => {
@@ -153,6 +251,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setTmdbValue(creds.tmdbValue);
       setGeminiKey(creds.geminiApiKey);
       setOpenRouterKey(creds.openRouterApiKey);
+      const currentGroqKey = creds.groqApiKey;
+      setGroqKey(currentGroqKey);
       setProvider(aiSettings.activeProvider);
       setGeminiModel(aiSettings.geminiModel || 'gemini-3.8-flash');
       const activeModel = sanitizeOpenRouterModel(aiSettings.openRouterModel);
@@ -160,9 +260,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setOpenRouterModel(activeModel);
       setIsCustomOpenRouterModel(isCustom);
       setCustomOpenRouterModelInput(isCustom ? activeModel : '');
+      const activeGroqModel = sanitizeGroqModel(aiSettings.groqModel);
+      setGroqModel(activeGroqModel);
+      setSavedGroqModel(activeGroqModel);
+      setGroqModelsError(null);
       setRememberOnDevice(coord.rememberEnabled);
+      hasAutoLoadedGroqRef.current = false;
+      if (aiSettings.activeProvider === 'groq' && currentGroqKey.trim()) {
+        hasAutoLoadedGroqRef.current = true;
+        handleLoadGroqModels(currentGroqKey.trim());
+      }
       setTmdbTesting({ loading: false });
       setAiTesting({ loading: false });
+    } else {
+      hasAutoLoadedGroqRef.current = false;
+      if (groqFetchAbortControllerRef.current) {
+        groqFetchAbortControllerRef.current.abort();
+        groqFetchAbortControllerRef.current = null;
+      }
+      setIsLoadingGroqModels(false);
     }
   }, [isOpen, aiSettings]);
 
@@ -185,13 +301,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setAiTesting({ loading: false });
   };
 
+  const handleGroqKeyChange = (val: string) => {
+    setGroqKey(val);
+    setAiTesting({ loading: false });
+    // A list loaded for the old key doesn't apply to this one.
+    groqFetchRequestIdRef.current += 1;
+    groqFetchAbortControllerRef.current?.abort();
+    groqFetchAbortControllerRef.current = null;
+    setIsLoadingGroqModels(false);
+    setGroqModels([]);
+    setGroqModelsError(null);
+  };
+
   const handleOpenRouterKeyChange = (val: string) => {
     setOpenRouterKey(val);
     setAiTesting({ loading: false });
   };
 
+  const handleGroqModelChange = (m: string) => {
+    setGroqModel(m);
+    setAiTesting({ loading: false });
+  };
+
   const handleProviderChange = (p: AIProviderId) => {
     setProvider(p);
+    if (p === 'groq' && groqKey.trim() && !hasAutoLoadedGroqRef.current) {
+      hasAutoLoadedGroqRef.current = true;
+      handleLoadGroqModels(groqKey.trim());
+    }
     setAiTesting({ loading: false });
   };
 
@@ -228,6 +365,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }
   };
 
+  const groqOptions = buildGroqOptions(groqModels, savedGroqModel, groqModel);
+
   const handleTestTmdb = async () => {
     if (!tmdbValue.trim()) {
       setTmdbTesting({ loading: false, success: false, message: 'Please enter a TMDB token or key first.' });
@@ -252,28 +391,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       return;
     }
 
-    const key = provider === 'gemini' ? geminiKey : openRouterKey;
+    let key = '';
+    let providerName = '';
+    let model = '';
+    let statusKey: 'gemini' | 'openRouter' | 'groq' = 'gemini';
+
+    if (provider === 'gemini') {
+      key = geminiKey;
+      providerName = 'Gemini';
+      model = geminiModel;
+      statusKey = 'gemini';
+    } else if (provider === 'openrouter') {
+      key = openRouterKey;
+      providerName = 'OpenRouter';
+      model = isCustomOpenRouterModel
+        ? customOpenRouterModelInput.trim() || OPENROUTER_DEFAULT_MODEL
+        : openRouterModel;
+      statusKey = 'openRouter';
+    } else if (provider === 'groq') {
+      key = groqKey;
+      providerName = 'Groq';
+      model = groqModel || GROQ_DEFAULT_MODEL;
+      statusKey = 'groq';
+    }
     if (!key.trim()) {
-      setAiTesting({ loading: false, success: false, message: `Please enter your ${provider === 'gemini' ? 'Gemini' : 'OpenRouter'} API key first.` });
+      setAiTesting({ loading: false, success: false, message: `Please enter your ${providerName} API key first.` });
       return;
     }
 
     setAiTesting({ loading: true });
     const version = credentialStore.getVersion();
     const activeProviderObj = aiManager.getProvider(provider);
-    const rawModel = provider === 'gemini' ? geminiModel : openRouterModel;
-    const model =
-      provider === 'openrouter' && isCustomOpenRouterModel
-        ? customOpenRouterModelInput.trim() || OPENROUTER_DEFAULT_MODEL
-        : rawModel;
 
-    const statusKey: 'gemini' | 'openRouter' = provider === 'openrouter' ? 'openRouter' : 'gemini';
     try {
       const result = await activeProviderObj.testConnection(key.trim(), model);
-      setAiTesting({ loading: false, success: result.success, message: result.message });
-      credentialStore.setStatus(statusKey, result.success ? 'valid' : 'invalid', result.message, version);
+      let displayMessage = result.message;
+      if (provider === 'groq' && !result.success && /\b(413|429)\b|rate[ -]?limit/i.test(displayMessage)) {
+        displayMessage = "This model's free limit is too small for your ratings. Try another model.";
+      }
+      setAiTesting({ loading: false, success: result.success, message: displayMessage });
+      credentialStore.setStatus(statusKey, result.success ? 'valid' : 'invalid', displayMessage, version);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Connection test failed.';
+      let msg = err instanceof Error ? err.message : 'Connection test failed.';
+      if (provider === 'groq' && /\b(413|429)\b|rate[ -]?limit/i.test(msg)) {
+        msg = "This model's free limit is too small for your ratings. Try another model.";
+      }
       setAiTesting({ loading: false, success: false, message: msg });
       credentialStore.setStatus(statusKey, 'invalid', msg, version);
     }
@@ -292,6 +454,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     await credentialCoordinator.forgetProvider('gemini');
   };
 
+  const handleForgetGroq = async () => {
+    setGroqKey('');
+    setAiTesting({ loading: false });
+    await credentialCoordinator.forgetProvider('groq');
+  };
+
   const handleForgetOpenRouter = async () => {
     setOpenRouterKey('');
     setAiTesting({ loading: false });
@@ -307,7 +475,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         tmdbValue,
         geminiApiKey: geminiKey,
         openRouterApiKey: openRouterKey,
-        groqApiKey: credentialStore.getCredentials().groqApiKey,
+        groqApiKey: groqKey,
         rememberOnDevice,
       });
 
@@ -320,11 +488,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         activeProvider: provider,
         geminiModel,
         openRouterModel: resolvedOpenRouterModel,
+        groqModel: sanitizeGroqModel(groqModel),
       });
 
       if (!res.success) {
         showToast(`Keys usable for this session. Persistence error: ${res.error || 'Failed to save to device.'}`);
-      } else if (isVaultSupported() && rememberOnDevice && (tmdbValue.trim() || geminiKey.trim() || openRouterKey.trim())) {
+      } else if (isVaultSupported() && rememberOnDevice && (tmdbValue.trim() || geminiKey.trim() || openRouterKey.trim() || groqKey.trim())) {
         showToast('Keys saved on this device.');
       } else {
         showToast('Keys available for this session only.');
@@ -563,7 +732,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </div>
 
             {/* Provider Tabs */}
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
                 type="button"
                 onClick={() => handleProviderChange('local')}
@@ -601,6 +770,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               >
                 <span className="font-semibold block text-xs">OpenRouter</span>
                 <span className="text-[10px] text-slate-400">Free & Custom</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleProviderChange('groq')}
+                className={`p-2.5 rounded-xl border text-center transition-all ${
+                  provider === 'groq'
+                    ? 'bg-[var(--accent-primary)]/15 border-[var(--accent-primary)] text-white'
+                    : 'bg-black/20 border-white/5 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span className="font-semibold block text-xs">Groq</span>
+                <span className="text-[10px] text-slate-400">Ultra-Fast</span>
               </button>
             </div>
 
@@ -764,6 +946,96 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       <p className="text-[11px] text-slate-400 leading-relaxed">
                         Tip: Free models on OpenRouter require the <code className="text-emerald-400 bg-white/5 px-1 py-0.5 rounded">:free</code> suffix (or use <code className="text-emerald-400 bg-white/5 px-1 py-0.5 rounded">openrouter/free</code>). Paid models do not require a suffix.
                       </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {provider === 'groq' && (
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center justify-between text-xs">
+                  <label htmlFor="groq-api-key-input" className="text-slate-300 font-medium">Groq API Key</label>
+                  <a
+                    href="https://console.groq.com/keys"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] text-[var(--accent-primary)] hover:underline inline-flex items-center gap-1"
+                  >
+                    Get Free Key <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+
+                <div className="relative">
+                  <input
+                    id="groq-api-key-input"
+                    aria-label="Groq API Key"
+                    type={showGroqKey ? 'text' : 'password'}
+                    value={groqKey}
+                    onChange={(e) => handleGroqKeyChange(e.target.value)}
+                    placeholder="gsk_..."
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-slate-600 focus-ring pr-20 font-mono"
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    <button
+                      type="button"
+                      aria-label={showGroqKey ? 'Hide Groq API key' : 'Show Groq API key'}
+                      onClick={() => setShowGroqKey(!showGroqKey)}
+                      className="p-1.5 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                    >
+                      {showGroqKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                    {groqKey && (
+                      <button
+                        type="button"
+                        onClick={handleForgetGroq}
+                        className="p-1.5 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                        title="Forget Groq Key"
+                        aria-label="Forget Groq Key"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="groq-model-select" className="text-xs text-slate-400">
+                      Model Selection
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => handleLoadGroqModels(groqKey)}
+                      disabled={isLoadingGroqModels || !groqKey.trim()}
+                      className="text-[11px] text-[var(--accent-primary)] hover:underline inline-flex items-center gap-1 font-medium transition-colors disabled:opacity-40 disabled:no-underline cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      {isLoadingGroqModels && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                      Load models
+                    </button>
+                  </div>
+
+                  <select
+                    id="groq-model-select"
+                    aria-label="Groq Model"
+                    value={groqModel}
+                    onChange={(e) => handleGroqModelChange(e.target.value)}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus-ring"
+                  >
+                    {groqOptions.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  {groqModelsError && (
+                    <div
+                      role="alert"
+                      className="text-xs text-rose-400 flex items-center gap-1.5 pt-0.5"
+                    >
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{groqModelsError}</span>
                     </div>
                   )}
                 </div>

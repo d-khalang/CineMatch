@@ -47,70 +47,34 @@ export function detectLetterboxdCsvKind(headers: string[]): LetterboxdCsvKind {
 
 /**
  * Sniffs the CSV kind from the first non-empty RFC-4180 header record without full-file parsing.
+ * Auto-detects delimiter (comma, semicolon, tab) using PapaParse preview.
  */
 export function sniffCsvKind(text: string): LetterboxdCsvKind {
   if (!text || typeof text !== 'string') return 'unknown';
 
-  const len = text.length;
-  let i = 0;
-  while (i < len && (text.charCodeAt(i) === 0xfeff || /\s/.test(text[i]))) {
-    i++;
-  }
+  const clean = text.replace(/^\uFEFF/, '').trimStart();
+  if (!clean) return 'unknown';
 
-  while (i < len) {
-    const headers: string[] = [];
-    let field = '';
-    let inQuotes = false;
+  try {
+    const parseOutput = Papa.parse<string[]>(clean, {
+      preview: 1,
+      skipEmptyLines: 'greedy',
+    });
 
-    while (i < len) {
-      const ch = text[i];
-      if (inQuotes) {
-        if (ch === '"') {
-          if (i + 1 < len && text[i + 1] === '"') {
-            field += '"';
-            i += 2;
-          } else {
-            let k = i + 1;
-            while (k < len && (text[k] === ' ' || text[k] === '\t')) {
-              k++;
-            }
-            if (k === len || text[k] === ',' || text[k] === '\r' || text[k] === '\n') {
-              inQuotes = false;
-              i = k;
-            } else {
-              field += '"';
-              i++;
-            }
-          }
-        } else {
-          field += ch;
-          i++;
-        }
-      } else if (ch === '"' && field === '') {
-        inQuotes = true;
-        i++;
-      } else if (ch === ',') {
-        headers.push(field);
-        field = '';
-        i++;
-      } else if (ch === '\r' || ch === '\n') {
-        if (ch === '\r' && i + 1 < len && text[i + 1] === '\n') {
-          i += 2;
-        } else {
-          i++;
-        }
-        break;
-      } else {
-        field += ch;
-        i++;
-      }
+    if (!parseOutput.data || parseOutput.data.length === 0) {
+      return 'unknown';
     }
 
-    headers.push(field);
+    const headers = parseOutput.data[0];
+    if (!Array.isArray(headers) || headers.length === 0) {
+      return 'unknown';
+    }
 
-    if (headers.some((h) => h.replace(/^\uFEFF/, '').trim() !== '')) {
+    if (headers.some((h) => typeof h === 'string' && h.trim() !== '')) {
       return detectLetterboxdCsvKind(headers);
     }
+  } catch {
+    return 'unknown';
   }
 
   return 'unknown';

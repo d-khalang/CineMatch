@@ -23,6 +23,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onOpenSettings, onOpenPalette })
   const getProviderName = () => {
     if (aiSettings.activeProvider === 'gemini') return `Gemini AI (${aiSettings.geminiModel || '2.5 Flash'})`;
     if (aiSettings.activeProvider === 'openrouter') return 'OpenRouter AI';
+    if (aiSettings.activeProvider === 'groq') return 'Groq AI';
     return 'Local Engine';
   };
 
