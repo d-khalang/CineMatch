@@ -41,6 +41,10 @@ export function sanitizeOpenRouterModel(model?: string): string {
 const MAX_PROMPT_RATINGS = 80;
 const TOP_RATINGS_COUNT = 60;
 const BOTTOM_RATINGS_COUNT = 20;
+// Compact prompts serve free-tier token limits, so they carry fewer ratings. Same 3:1 split.
+const COMPACT_MAX_PROMPT_RATINGS = 50;
+const COMPACT_TOP_RATINGS_COUNT = 38;
+const COMPACT_BOTTOM_RATINGS_COUNT = 12;
 
 export function buildOpenRouterPrompt(
   request: RecommendationRequest,
@@ -54,12 +58,16 @@ export function buildOpenRouterPrompt(
     preferredEras = [],
   } = request;
 
-  const isTruncated = userRatings.length > MAX_PROMPT_RATINGS;
+  const maxRatings = compact ? COMPACT_MAX_PROMPT_RATINGS : MAX_PROMPT_RATINGS;
+  const topCount = compact ? COMPACT_TOP_RATINGS_COUNT : TOP_RATINGS_COUNT;
+  const bottomCount = compact ? COMPACT_BOTTOM_RATINGS_COUNT : BOTTOM_RATINGS_COUNT;
+
+  const isTruncated = userRatings.length > maxRatings;
   const selectedRatings = isTruncated
     ? (() => {
         const ratingValue = (r: { rating: number }) => (Number.isFinite(r.rating) ? r.rating : 0);
         const sorted = [...userRatings].sort((a, b) => ratingValue(b) - ratingValue(a));
-        return [...sorted.slice(0, TOP_RATINGS_COUNT), ...sorted.slice(-BOTTOM_RATINGS_COUNT)];
+        return [...sorted.slice(0, topCount), ...sorted.slice(-bottomCount)];
       })()
     : userRatings;
 
@@ -86,7 +94,7 @@ export function buildOpenRouterPrompt(
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .map(([genre, count]) => `${genre}: ${count}`)
       .join(', ');
-    genreSummaryLine = `\nGenre Summary (all ${userRatings.length} ratings, ${userRatings.length - MAX_PROMPT_RATINGS} omitted above): ${summaryText || 'None'}`;
+    genreSummaryLine = `\nGenre Summary (all ${userRatings.length} ratings, ${userRatings.length - maxRatings} omitted above): ${summaryText || 'None'}`;
   }
 
   const poolSummary = candidatePool.slice(0, 40).map((m) => ({
