@@ -280,8 +280,15 @@ function matchesEra(
  * - At least 8 seed_graph and 8 hidden_gem remain (when available)
  * - Preferred eras fill at least half the window (20 items) when era candidates are plentiful
  * - Preserves stream interleaving relative order within the first 40 and beyond
+ *
+ * Scarce-filler tradeoff:
+ * The cap only reorders and never drops candidates. When a candidate pool of 40
+ * or more has fewer than about 20 non-era and non-vibe films, the over-cap items
+ * in `rest` fill the first 40, so the nominal cap is exceeded. That is the
+ * intended tradeoff, because the cap reorders and never drops films. Output
+ * length always equals input length.
  */
-function applyFirst40CapAndFloors(
+export function applyFirst40CapAndFloors(
   candidates: Candidate[],
   options: CandidateOptions
 ): Candidate[] {
@@ -363,8 +370,21 @@ function applyFirst40CapAndFloors(
   }
 
   // 3. Guarantee at least 8 seed_graph candidates
+  // Prefer non-era seed candidates first so they are not rejected by the era cap
   const targetSeed = Math.min(8, totalSeed);
   let seedCount = mustInclude.filter((c) => c.sources.includes('seed_graph')).length;
+  for (const c of candidates) {
+    if (seedCount >= targetSeed) break;
+    if (
+      !mustIncludeSet.has(c.movie.id) &&
+      c.sources.includes('seed_graph') &&
+      !c.sources.includes('era')
+    ) {
+      if (tryAddMust(c)) {
+        seedCount++;
+      }
+    }
+  }
   for (const c of candidates) {
     if (seedCount >= targetSeed) break;
     if (!mustIncludeSet.has(c.movie.id) && c.sources.includes('seed_graph')) {
@@ -375,8 +395,21 @@ function applyFirst40CapAndFloors(
   }
 
   // 4. Guarantee at least 8 hidden_gem candidates
+  // Prefer non-era hidden gem candidates first so they are not rejected by the era cap
   const targetGem = Math.min(8, totalGem);
   let gemCount = mustInclude.filter((c) => c.sources.includes('hidden_gem')).length;
+  for (const c of candidates) {
+    if (gemCount >= targetGem) break;
+    if (
+      !mustIncludeSet.has(c.movie.id) &&
+      c.sources.includes('hidden_gem') &&
+      !c.sources.includes('era')
+    ) {
+      if (tryAddMust(c)) {
+        gemCount++;
+      }
+    }
+  }
   for (const c of candidates) {
     if (gemCount >= targetGem) break;
     if (!mustIncludeSet.has(c.movie.id) && c.sources.includes('hidden_gem')) {
@@ -460,15 +493,12 @@ export async function generateCandidates(
   const internalController = new AbortController();
   const internalSignal = internalController.signal;
 
-  let deadlineExpired = false;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   if (deadlineMs <= 0) {
-    deadlineExpired = true;
     internalController.abort(new DOMException('The deadline expired', 'AbortError'));
   } else {
     timeoutId = setTimeout(() => {
-      deadlineExpired = true;
       internalController.abort(new DOMException('The deadline expired', 'AbortError'));
     }, deadlineMs);
   }
@@ -832,6 +862,7 @@ export async function generateCandidates(
     if (callerSignal) {
       callerSignal.removeEventListener('abort', onCallerAbort);
     }
+    internalController.abort();
     limiter.dispose();
   }
 }
