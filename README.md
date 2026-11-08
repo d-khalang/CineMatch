@@ -8,7 +8,7 @@
 [![Vitest](https://img.shields.io/badge/Tests-138%20Passed-22C55E?logo=vitest&logoColor=white)](https://vitest.dev/)
 [![TMDB](https://img.shields.io/badge/Data-The%20Movie%20Database-01B4E4?logo=themoviedatabase&logoColor=white)](https://www.themoviedb.org/)
 
-**CineMatch AI** is a private, client-first movie recommendation platform and cinephile taste profiler. Combining rich movie metadata from **The Movie Database (TMDB)** with a **Modular AI Engine** (Google Gemini, OpenRouter, or a 100% offline Local Heuristic Engine), CineMatch analyzes your personal taste profile across a 1–10 grading scale to generate hyper-personalized, context-aware film recommendations.
+**CineMatch AI** is a private, client-first movie recommendation platform and cinephile taste profiler. Combining rich movie metadata from **The Movie Database (TMDB)** with a **Modular AI Engine** (Google Gemini, Groq, OpenRouter, or a 100% offline Local Heuristic Engine), CineMatch analyzes your personal taste profile across a 1–10 grading scale to generate hyper-personalized, context-aware film recommendations.
 
 Built with a **zero-hosted-backend philosophy**, CineMatch operates under a **Bring-Your-Own-Key (BYOK)** model: user credentials and movie ratings never touch third-party servers, keeping your movie data completely in your own hands.
 
@@ -52,7 +52,7 @@ Built with a **zero-hosted-backend philosophy**, CineMatch operates under a **Br
       <br />
       <b>Modular AI Engine (BYOK)</b>
       <br />
-      <em>Zero-custody session credentials with direct access to Gemini, OpenRouter, or the offline Local Engine.</em>
+      <em>Zero-custody session credentials with direct access to Gemini, Groq, OpenRouter, or the offline Local Engine.</em>
     </td>
   </tr>
 </table>
@@ -74,6 +74,7 @@ Built with a **zero-hosted-backend philosophy**, CineMatch operates under a **Br
 
 ### 🧠 2. Modular Multi-Provider AI Architecture
 - **Google Gemini (v1beta):** Direct native integration with `gemini-3.8-flash` (default & recommended), `gemini-3.7-flash`, `gemini-2.5-flash`, and `gemini-2.5-pro`. Delivers structured psychological taste profiles and contextual rationales for every recommendation.
+- **Groq LPU:** Ultra-fast inference with a live model picker loading available models (default `openai/gpt-oss-120b`). Built-in context window and token budgeting tailored for free-tier limits.
 - **OpenRouter Cloud:** Tap into verified free models including `openrouter/free` (Free Models Router), `google/gemma-4-31b-it:free`, `nvidia/nemotron-3.5-lightning:free`, and others, plus **Custom Model** entry for any model ID (free models require `:free` suffix, paid models supported with your own API key; includes automatic `<think>` tag stripping).
 - **Local Smart Engine (Zero-Key Mode):** Don't have an AI API key? CineMatch includes an autonomous, client-side heuristic engine that scores candidates using multi-factor vector math completely offline.
 
