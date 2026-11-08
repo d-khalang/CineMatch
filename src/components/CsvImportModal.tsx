@@ -104,8 +104,11 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
     setImportPhase('select');
     setFileKind('ratings');
 
-    if (e.target.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
+    const selectedFile = e.target.files?.[0];
+    // The input stays mounted across resets, so clear it or re-picking the same file fires no change.
+    e.target.value = '';
+
+    if (selectedFile) {
       if (selectedFile.size > 2 * 1024 * 1024) {
         setErrorMessage('File exceeds the maximum 2 MB limit. Please select a smaller export file.');
         return;
@@ -519,15 +522,6 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
               </div>
               <label htmlFor="csv-file-input" className="inline-block px-4 py-2 rounded-xl bg-[var(--bg-surface-hover)] text-xs font-semibold text-white hover:bg-[var(--border-subtle)] cursor-pointer transition-colors">
                 Browse Files
-
-
-
-
-
-
-
-
-
               </label>
             </div>
           )}

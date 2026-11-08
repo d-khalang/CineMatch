@@ -883,14 +883,22 @@ describe('CsvImportModal Ambiguity & Resolution', () => {
     expect(await screen.findByRole('button', { name: /Confirm Import/i })).toBeInTheDocument();
   });
 
+  it('clears the file input after reading, so picking the same file again fires a change', async () => {
+    renderModal();
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const setValue = vi.fn();
+    Object.defineProperty(input, 'value', { configurable: true, get: () => '', set: setValue });
+    const file = new File(['Title,Rating\nInception,10'], 'ratings.csv', { type: 'text/csv' });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    expect(await screen.findByRole('button', { name: /Start Import/i })).toBeInTheDocument();
+    expect(setValue).toHaveBeenCalledWith('');
+  });
+
   it('resets isProcessing when picking a new file while an import is in-flight even if the new read is slow', async () => {
-    let resolveSlowSearch!: (val: any) => void;
-    vi.mocked(tmdbService.searchMovies).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveSlowSearch = resolve;
-        })
-    );
+    vi.mocked(tmdbService.searchMovies).mockImplementationOnce(() => new Promise(() => {}));
 
     renderModal();
 
