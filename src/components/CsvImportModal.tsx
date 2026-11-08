@@ -54,6 +54,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
       abortControllerRef.current = null;
     }
     operationVersionRef.current++;
+    setIsProcessing(false);
   }, []);
 
   // On close: cancel any pending import, then call parent onClose
@@ -90,6 +91,9 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     cancelImport();
     const thisOperationVersion = operationVersionRef.current;
+
+    setIsProcessing(false);
+    setStatusMessage(null);
 
     setErrorMessage(null);
     setParseResult(null);
@@ -485,6 +489,16 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
         </div>
 
         <div className="overflow-y-auto space-y-4 flex-1 pr-1">
+          <input
+            id="csv-file-input"
+            type="file"
+            accept=".csv,text/csv"
+            onChange={handleFileChange}
+            className="hidden"
+            style={{ display: 'none' }}
+            tabIndex={-1}
+            aria-hidden="true"
+          />
           {errorMessage && (
             <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2.5">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -503,17 +517,17 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({ isOpen, onClose 
                   Supports ratings from IMDb (ratings.csv) and Letterboxd (ratings.csv or watched.csv)
                 </p>
               </div>
-              <label className="inline-block px-4 py-2 rounded-xl bg-[var(--bg-surface-hover)] text-xs font-semibold text-white hover:bg-[var(--border-subtle)] cursor-pointer transition-colors">
+              <label htmlFor="csv-file-input" className="inline-block px-4 py-2 rounded-xl bg-[var(--bg-surface-hover)] text-xs font-semibold text-white hover:bg-[var(--border-subtle)] cursor-pointer transition-colors">
                 Browse Files
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  onChange={handleFileChange}
-                  className="hidden"
-                  style={{ display: 'none' }}
-                  tabIndex={-1}
-                  aria-hidden="true"
-                />
+
+
+
+
+
+
+
+
+
               </label>
             </div>
           )}

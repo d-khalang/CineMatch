@@ -798,4 +798,199 @@ describe('CsvImportModal Ambiguity & Resolution', () => {
     expect(generateRankingsSpy).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+
+  it('leaves no stuck spinner when picking a new file while an import is processing', async () => {
+    let resolveSlowSearch!: (val: any) => void;
+    vi.mocked(tmdbService.searchMovies).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSlowSearch = resolve;
+        })
+    );
+
+    const onClose = vi.fn();
+    renderModal(onClose);
+
+    const file1Csv = 'Title,Rating\nInception,10';
+    const file1 = new File([file1Csv], 'first_ratings.csv', { type: 'text/csv' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [file1] } });
+
+    const startButton = await screen.findByRole('button', { name: /Start Import \(1 Films\)/i });
+    expect(startButton).toBeEnabled();
+
+    // Start resolution for file 1 — this sets isProcessing to true
+    fireEvent.click(startButton);
+
+    // Modal is now in resolving phase with a spinner button
+    expect(await screen.findByRole('button', { name: /Matching\.\.\./i })).toBeInTheDocument();
+
+    // While file 1 resolution is in-flight, user picks a new file (file 2)
+    const file2Csv = 'Title,Rating\nInterstellar,9';
+    const file2 = new File([file2Csv], 'second_ratings.csv', { type: 'text/csv' });
+
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file2] } });
+    });
+
+    // File 2 is now loaded: isProcessing must be false and no stuck spinner
+    expect(screen.queryByRole('button', { name: /Matching\.\.\./i })).not.toBeInTheDocument();
+    const newStartButton = await screen.findByRole('button', { name: /Start Import \(1 Films\)/i });
+    expect(newStartButton).toBeEnabled();
+    expect(newStartButton).not.toHaveTextContent(/Resolving/i);
+
+    // Resolve the hung search from file 1 to ensure stale completion does not resurrect isProcessing
+    await act(async () => {
+      resolveSlowSearch({
+        movies: [
+          {
+            id: 27205,
+            title: 'Inception',
+            release_date: '2010-07-16',
+            vote_average: 8.8,
+            vote_count: 25000,
+            poster_path: null,
+            genres: [],
+          },
+        ],
+        totalPages: 1,
+      });
+    });
+
+    // Spinner is still not stuck, button remains enabled for file 2
+    expect(screen.queryByRole('button', { name: /Matching\.\.\./i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Start Import \(1 Films\)/i })).toBeEnabled();
+
+    // Verify that the new file can now proceed to resolve and import cleanly
+    vi.mocked(tmdbService.searchMovies).mockResolvedValueOnce({
+      movies: [
+        {
+          id: 157336,
+          title: 'Interstellar',
+          overview: '',
+          release_date: '2014-11-05',
+          vote_average: 8.6,
+          vote_count: 30000,
+          poster_path: null,
+          backdrop_path: null,
+          genres: [],
+        },
+      ],
+      totalPages: 1,
+    });
+    fireEvent.click(newStartButton);
+    expect(await screen.findByRole('button', { name: /Confirm Import/i })).toBeInTheDocument();
+  });
+
+  it('resets isProcessing when picking a new file while an import is in-flight even if the new read is slow', async () => {
+    let resolveSlowSearch!: (val: any) => void;
+    vi.mocked(tmdbService.searchMovies).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSlowSearch = resolve;
+        })
+    );
+
+    renderModal();
+
+    const file1Csv = 'Title,Rating\nInception,10';
+    const file1 = new File([file1Csv], 'first.csv', { type: 'text/csv' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [file1] } });
+    const startButton = await screen.findByRole('button', { name: /Start Import/i });
+    fireEvent.click(startButton);
+
+    expect(await screen.findByRole('button', { name: /Matching\.\.\./i })).toBeInTheDocument();
+
+    // Start a slow second read
+    let resolveSlowText!: (text: string) => void;
+    const slowFile = new File(['placeholder'], 'slow.csv', { type: 'text/csv' });
+    vi.spyOn(slowFile, 'text').mockImplementationOnce(
+      () =>
+        new Promise<string>((res) => {
+          resolveSlowText = res;
+        })
+    );
+
+    fireEvent.change(input, { target: { files: [slowFile] } });
+
+    // The resolving spinner from import 1 must immediately disappear
+    expect(screen.queryByRole('button', { name: /Matching\.\.\./i })).not.toBeInTheDocument();
+
+    // Finish reading the second file
+    await act(async () => {
+      resolveSlowText('Title,Rating\nArrival,10');
+    });
+
+    const readyButton = await screen.findByRole('button', { name: /Start Import \(1 Films\)/i });
+    expect(readyButton).toBeEnabled();
+  });
+
+  it('leaves no stuck spinner when picking a new file while a watched import is processing', async () => {
+    let resolveSlowSearch!: (val: any) => void;
+    vi.mocked(tmdbService.searchMovies).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSlowSearch = resolve;
+        })
+    );
+
+    const onClose = vi.fn();
+    renderModal(onClose);
+
+    const watchedCsv = 'Date,Name,Year,Letterboxd URI\n2021-03-04,Heat,1995,https://boxd.it/abc\n';
+    const watchedFile = new File([watchedCsv], 'watched.csv', { type: 'text/csv' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { files: [watchedFile] } });
+
+    const startButton = await screen.findByRole('button', { name: /Start Import \(1 Films\)/i });
+    expect(startButton).toBeEnabled();
+
+    // Start watched resolution — sets isProcessing to true
+    fireEvent.click(startButton);
+
+    // Modal is in resolving phase with a spinner button
+    expect(await screen.findByRole('button', { name: /Matching\.\.\./i })).toBeInTheDocument();
+
+    // While watched resolution is in-flight, pick a new ratings file
+    const ratingsCsv = 'Title,Rating\nInterstellar,9';
+    const ratingsFile = new File([ratingsCsv], 'ratings.csv', { type: 'text/csv' });
+
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [ratingsFile] } });
+    });
+
+    // Spinner must not be stuck; new file is ready to import
+    expect(screen.queryByRole('button', { name: /Matching\.\.\./i })).not.toBeInTheDocument();
+    const newStartButton = await screen.findByRole('button', { name: /Start Import \(1 Films\)/i });
+    expect(newStartButton).toBeEnabled();
+    expect(newStartButton).not.toHaveTextContent(/Resolving/i);
+
+    // Resolve the hung search from the cancelled watched import
+    await act(async () => {
+      resolveSlowSearch({
+        movies: [
+          {
+            id: 200,
+            title: 'Heat',
+            overview: '',
+            release_date: '1995-12-15',
+            vote_average: 8.2,
+            vote_count: 5000,
+            poster_path: null,
+            genres: [],
+          },
+        ],
+        totalPages: 1,
+      });
+    });
+
+    // Stale watched resolution must not have written to hidden films or stuck the spinner
+    expect(safeGetItem(STORAGE_KEYS.HIDDEN_FILMS)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Matching\.\.\./i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Start Import \(1 Films\)/i })).toBeEnabled();
+  });
 });
