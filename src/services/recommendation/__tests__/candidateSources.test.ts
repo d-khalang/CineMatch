@@ -8,8 +8,11 @@ import {
   selectWeightedSeeds,
   getTopUserGenreIds,
   RequestLimiter,
+  applyFirst40CapAndFloors,
 } from '../candidateSources';
 import type { UserRating } from '../../../types';
+import type { Candidate, CandidateSource } from '../types';
+import { MissingTmdbCredentialError } from '../../tmdbClient';
 
 function createLcg(seed: number): () => number {
   let s = seed;
@@ -896,6 +899,18 @@ describe('candidateSources module', () => {
       await expect(generateCandidates(fixture, { seedCount: NaN })).resolves.toBeDefined();
     });
 
+    it('handles deadlineMs: NaN and Infinity by falling back to default deadline without throwing', async () => {
+      server.use(
+        http.get('https://api.themoviedb.org/3/*', () => {
+          return HttpResponse.json({ page: 1, results: [] });
+        })
+      );
+
+      const fixture = create200RatingFixture();
+      await expect(generateCandidates(fixture, { deadlineMs: NaN })).resolves.toBeDefined();
+      await expect(generateCandidates(fixture, { deadlineMs: Infinity })).resolves.toBeDefined();
+    });
+
     it('handles preferredEras with whitespace/empty strings without incorrectly capping vibes', async () => {
       server.use(
         http.get('https://api.themoviedb.org/3/discover/movie', () => {
@@ -962,6 +977,210 @@ describe('candidateSources module', () => {
       });
       const first40 = result.slice(0, 40);
       expect(first40.some((c) => c.sources.includes('vibe'))).toBe(true);
+    });
+
+    describe('CIN-46 cap/floor edge cases and early abort', () => {
+      function makeCandidate(
+        id: number,
+        sources: CandidateSource[],
+        releaseDate = '2005-06-01'
+      ): Candidate {
+        return {
+          movie: {
+            id,
+            title: `Film ${id}`,
+            overview: '',
+            poster_path: `/p${id}.jpg`,
+            backdrop_path: null,
+            release_date: releaseDate,
+            vote_average: 8.0,
+            vote_count: 500,
+            genre_ids: [18],
+            genres: [{ id: 18, name: 'Drama' }],
+          },
+          sources,
+          seedNeighbour: sources.includes('seed_graph'),
+        };
+      }
+
+      it('preserves all candidates so output length equals input length even with scarce filler exceeding cap', () => {
+        // Edge cases: empty candidates array, single candidate, and pool under 40
+        expect(applyFirst40CapAndFloors([], { preferredEras: ['2000s'] })).toHaveLength(0);
+
+        const singleCandidate = makeCandidate(1, ['era']);
+        const singleResult = applyFirst40CapAndFloors([singleCandidate], { preferredEras: ['2000s'] });
+        expect(singleResult).toHaveLength(1);
+        expect(singleResult[0].movie.id).toBe(1);
+
+        const smallPool = Array.from({ length: 15 }, (_, i) => makeCandidate(10 + i, ['era']));
+        expect(applyFirst40CapAndFloors(smallPool, { preferredEras: ['2000s'] })).toHaveLength(15);
+
+        // Pool of 50 candidates: 45 era candidates + 5 baseline candidates (only 5 non-era filler)
+        const candidates: Candidate[] = [
+          ...Array.from({ length: 45 }, (_, i) => makeCandidate(100 + i, ['era'], '2005-01-01')),
+          ...Array.from({ length: 5 }, (_, i) => makeCandidate(200 + i, ['acclaimed_baseline'], '1985-01-01')),
+        ];
+
+        const result = applyFirst40CapAndFloors(candidates, { preferredEras: ['2000s'] });
+
+        // Output length strictly equals input length
+        expect(result).toHaveLength(candidates.length);
+        expect(result).toHaveLength(50);
+
+        const first40 = result.slice(0, 40);
+        expect(first40).toHaveLength(40);
+        // Scarce filler tradeoff: the remaining items in rest fill the first 40, so nominal era cap of 20 is exceeded
+        const eraInFirst40 = first40.filter((c) => c.sources.includes('era')).length;
+        expect(eraInFirst40).toBe(35);
+        expect(first40.filter((c) => c.sources.includes('acclaimed_baseline')).length).toBe(5);
+
+        // No candidates are dropped
+        expect(new Set(result.map((c) => c.movie.id))).toEqual(new Set(candidates.map((c) => c.movie.id)));
+      });
+
+      it('meets seed_graph and hidden_gem floors when seed and gem films overlap with era and enough non-era films exist', () => {
+        // 20 era-only candidates (fills the era floor up to 20)
+        const eraCandidates = Array.from({ length: 20 }, (_, i) =>
+          makeCandidate(100 + i, ['era'], '2005-01-01')
+        );
+
+        // Seed films: 4 overlap with era, 12 are non-era (total 16 seed films)
+        const overlappingSeeds = Array.from({ length: 4 }, (_, i) =>
+          makeCandidate(200 + i, ['seed_graph', 'era'], '2005-01-01')
+        );
+        const nonEraSeeds = Array.from({ length: 12 }, (_, i) =>
+          makeCandidate(210 + i, ['seed_graph'], '1985-01-01')
+        );
+
+        // Gem films: 4 overlap with era, 12 are non-era (total 16 gem films)
+        const overlappingGems = Array.from({ length: 4 }, (_, i) =>
+          makeCandidate(300 + i, ['hidden_gem', 'era'], '2005-01-01')
+        );
+        const nonEraGems = Array.from({ length: 12 }, (_, i) =>
+          makeCandidate(310 + i, ['hidden_gem'], '1985-01-01')
+        );
+
+        // Total pool: 20 era + 4 overlapSeed + 12 nonEraSeed + 4 overlapGem + 12 nonEraGem = 52 candidates
+        const candidates: Candidate[] = [
+          ...eraCandidates,
+          ...overlappingSeeds,
+          ...nonEraSeeds,
+          ...overlappingGems,
+          ...nonEraGems,
+        ];
+
+        const result = applyFirst40CapAndFloors(candidates, { preferredEras: ['2000s'] });
+        expect(result).toHaveLength(candidates.length);
+
+        const first40 = result.slice(0, 40);
+        const seedCountInFirst40 = first40.filter((c) => c.sources.includes('seed_graph')).length;
+        const gemCountInFirst40 = first40.filter((c) => c.sources.includes('hidden_gem')).length;
+        const eraCountInFirst40 = first40.filter((c) => c.sources.includes('era')).length;
+
+        // The seed_graph and hidden_gem floors of at least 8 each are met
+        expect(seedCountInFirst40).toBeGreaterThanOrEqual(8);
+        expect(gemCountInFirst40).toBeGreaterThanOrEqual(8);
+        // Era cap of 20 in first 40 is respected since enough non-era films exist
+        expect(eraCountInFirst40).toBeLessThanOrEqual(20);
+
+        // Proves non-era seed and gem films are preferred first to satisfy floors without inflating eraCount
+        const nonEraSeedsInFirst40 = first40.filter(
+          (c) => c.sources.includes('seed_graph') && !c.sources.includes('era')
+        ).length;
+        const nonEraGemsInFirst40 = first40.filter(
+          (c) => c.sources.includes('hidden_gem') && !c.sources.includes('era')
+        ).length;
+        expect(nonEraSeedsInFirst40).toBeGreaterThanOrEqual(8);
+        expect(nonEraGemsInFirst40).toBeGreaterThanOrEqual(8);
+
+        // Also test when overlapping films appear ahead of era films in stream interleaving
+        const interleavedCandidates: Candidate[] = [
+          ...overlappingSeeds,
+          ...overlappingGems,
+          ...eraCandidates,
+          ...nonEraSeeds,
+          ...nonEraGems,
+        ];
+        const interleavedResult = applyFirst40CapAndFloors(interleavedCandidates, {
+          preferredEras: ['2000s'],
+        });
+        expect(interleavedResult).toHaveLength(interleavedCandidates.length);
+        const interleavedFirst40 = interleavedResult.slice(0, 40);
+        expect(
+          interleavedFirst40.filter((c) => c.sources.includes('seed_graph')).length
+        ).toBeGreaterThanOrEqual(8);
+        expect(
+          interleavedFirst40.filter((c) => c.sources.includes('hidden_gem')).length
+        ).toBeGreaterThanOrEqual(8);
+        expect(
+          interleavedFirst40.filter((c) => c.sources.includes('era')).length
+        ).toBeLessThanOrEqual(20);
+      });
+
+      it('aborts internal controller when Promise.all rejects early so in-flight requests stop', async () => {
+        let inflightAborted = false;
+
+        // Limiter concurrency is 6. With 4 seeds: 8 seed tasks (rec + sim) + 3 base tasks = 11 tasks.
+        // Task 1 will be in-flight in MSW waiting for abort.
+        // Task 2 will finish and immediately clear the TMDB credential in credentialStore.
+        // Once a slot is released, Task 7 starts, calls fetchFromTMDB, and throws MissingTmdbCredentialError.
+        // Promise.all rejects early. The finally block calls internalController.abort().
+        // Task 1's request.signal is aborted.
+        server.use(
+          http.get('https://api.themoviedb.org/3/movie/1/recommendations', async ({ request }) => {
+            await new Promise<void>((resolve) => {
+              if (request.signal.aborted) {
+                inflightAborted = true;
+                resolve();
+              } else {
+                const onAbort = () => {
+                  inflightAborted = true;
+                  clearTimeout(fallbackTimer);
+                  resolve();
+                };
+                const fallbackTimer = setTimeout(() => {
+                  request.signal.removeEventListener('abort', onAbort);
+                  resolve();
+                }, 2000);
+                request.signal.addEventListener('abort', onAbort, { once: true });
+              }
+            });
+            return HttpResponse.json({ page: 1, results: [] });
+          }),
+          http.get('https://api.themoviedb.org/3/movie/1/similar', () => {
+            credentialStore.setTmdbCredential('read_access_token', '');
+            return HttpResponse.json({ page: 1, results: [] });
+          }),
+          http.get('https://api.themoviedb.org/3/*', () => {
+            return HttpResponse.json({ page: 1, results: [] });
+          })
+        );
+
+        const ratings: UserRating[] = [
+          { movieId: 1, title: 'Seed 1', rating: 9, posterPath: '/p1.jpg', genres: ['Drama'], ratedAt: 100 },
+          { movieId: 2, title: 'Seed 2', rating: 9, posterPath: '/p2.jpg', genres: ['Drama'], ratedAt: 200 },
+          { movieId: 3, title: 'Seed 3', rating: 9, posterPath: '/p3.jpg', genres: ['Drama'], ratedAt: 300 },
+          { movieId: 4, title: 'Seed 4', rating: 9, posterPath: '/p4.jpg', genres: ['Drama'], ratedAt: 400 },
+        ];
+
+        const caller = new AbortController();
+        const runPromise = generateCandidates(
+          ratings,
+          {
+            seedCount: 4,
+            randomFn: () => 0,
+          },
+          caller.signal
+        );
+
+        try {
+          await expect(runPromise).rejects.toBeInstanceOf(MissingTmdbCredentialError);
+          expect(inflightAborted).toBe(true);
+          expect(caller.signal.aborted).toBe(false);
+        } finally {
+          credentialStore.setTmdbCredential('read_access_token', 'mock-token');
+        }
+      });
     });
   });
 });
