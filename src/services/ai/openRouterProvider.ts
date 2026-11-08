@@ -1,5 +1,6 @@
 import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './types';
 import { Movie } from '../../types';
+import { formatRejectedFilmsBlock } from '../recommendation/rejectedFilms';
 import {
   validateAndSanitizeAIResponse,
   parseAIJsonResponse,
@@ -102,11 +103,14 @@ export function buildOpenRouterPrompt(
   const activeBand =
     normalizedSerendipity <= 30 ? 'low' : normalizedSerendipity <= 70 ? 'mid' : 'high';
 
+  const rejectedBlock = formatRejectedFilmsBlock(request.rejectedFilms || []);
+  const rejectedSection = rejectedBlock ? `\n\n${rejectedBlock}` : '';
+
   return `You are Cinephile AI, an expert cinematic curator.
 Recommend the top films for the user based on their ratings.
 
 User Profile:
-${JSON.stringify(ratingsSummary, null, compact ? undefined : 2)}${genreSummaryLine}
+${JSON.stringify(ratingsSummary, null, compact ? undefined : 2)}${genreSummaryLine}${rejectedSection}
 
 Serendipity: ${normalizedSerendipity}%
 Serendipity Rubric:

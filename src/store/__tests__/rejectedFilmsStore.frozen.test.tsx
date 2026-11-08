@@ -121,7 +121,7 @@ describe('Rejected films through the store (frozen)', () => {
       await result.current.generateRankings();
     });
 
-    const options = vi.mocked(getCandidateRecommendationPool).mock.lastCall![0];
+    const options = vi.mocked(getCandidateRecommendationPool).mock.lastCall![0]!;
     expect(options.seedMovieIds).toEqual([1]);
     expect((options.userRatings as UserRating[]).map((r) => r.movieId)).toEqual([1]);
   });

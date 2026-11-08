@@ -37,6 +37,8 @@ export interface HiddenFilm {
   reason: 'seen' | 'not_for_me';
   hiddenAt: number; // timestamp
   title?: string;
+  year?: string;
+  genres?: string[];
 }
 
 export type SerendipityMode = 'safe' | 'balanced' | 'exploratory' | 'wildcard';
