@@ -10,14 +10,14 @@ Offline evaluation suite and beyond-accuracy quality gates for `rankCandidates` 
 
 ## Quality Thresholds and Rationale
 
-| Metric | Threshold | Naive `vote_count` baseline (expected) | `rankCandidates` analytical expectation | Why this threshold was chosen |
+| Metric | Threshold | Naive `vote_count` baseline (observed) | `rankCandidates` observed | Why this threshold was chosen |
 | --- | --- | --- | --- | --- |
 | `supply` (`heavy` profile) | `>= 30` (exact `30` at `size: 30`, `40` at `size: 40`) | `30` | `30` (`40` at `size: 40`) | Guards against the CIN-3 pool-collapse failure mode where heavy raters ran out of unrated candidates (~8 items). |
 | `intraListDiversity` | `>= 0.80` | `0.53–0.54` | `0.89–0.93` | Mean pairwise `1 - candidateSimilarity`. Ensures MMR (`λ = 0.7`) and multi-bucket selection prevent franchise/director/genre monoculture while rejecting clustered blockbuster sorting (`~0.51–0.54`). |
 | `meanNoveltyPercentile` | `>= 0.45` | `0.08` | `0.57–0.76` | Mean inverse midpoint-percentile by `vote_count` within the 180-film pool. Ensures long-tail and mid-tail discovery contributes meaningfully instead of hugging the top-voted head (`~0.08`). |
 | `bucketMix` tolerance | `<= 0.06` per bucket (`below_floor === 0`) | Fails (`1.00` safe_bet) | `<= 0.02` (`±1` item at `size: 30`) | Verifies Largest-Remainder allocation honors `mixForSerendipityLevel(30)` (`50/35/15`) and `mixForSerendipityLevel(85)` (`~26/39/35`) within ~1–2 items without leaking `below_floor` items when supply suffices. |
-| `nonSeedNeighbourShare` | `>= 0.35` at `serendipityLevel = 30`; `>= 0.50` at `serendipityLevel = 85` | Pool-dependent | `0.60–0.77` (30), `0.80–0.90` (85) | Prevents the list from collapsing to TMDB `/similar` and `/recommendations` neighbours alone; requires higher non-seed exploration when serendipity increases. |
-| `popularityHeadShare(10, 0.20)` (`niche` profile) | `<= 0.30` | `1.00` (10/10) | `~0.00–0.10` | Guards against global popularity bias (Abdollahpouri et al. 2019): at most 3 of the top 10 recommendations for a niche viewer (60 ratings mostly in `Documentary` and `Music`) may come from the pool's top 20% most-voted films. |
+| `nonSeedNeighbourShare` | `>= 0.50` at `serendipityLevel = 30`; `>= 0.65` at `serendipityLevel = 85` | Pool-dependent | `0.60–0.77` (30), `0.80–0.90` (85) | Prevents the list from collapsing to TMDB `/similar` and `/recommendations` neighbours alone; requires higher non-seed exploration when serendipity increases. |
+| `popularityHeadShare(10, 0.20)` (`niche` profile) | `<= 0.30` | `1.00` (10/10) | `0.00` (niche; 0.00–0.10 across profiles) | Guards against global popularity bias (Abdollahpouri et al. 2019): at most 3 of the top 10 recommendations for a niche viewer (60 ratings mostly in `Documentary` and `Music`) may come from the pool's top 20% most-voted films. |
 
 ## Measured Values
 
