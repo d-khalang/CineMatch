@@ -7,6 +7,18 @@ import { AIProviderId, Recommendation } from '../../types';
 
 export const MIN_RECOMMENDATIONS = 8;
 
+/** Strips Groq `organization org_...` identifiers from error messages before surfacing them in the UI. */
+export function stripGroqOrgId(message: string): string {
+  return message
+    .replace(/\b(?:in|for|of)\s+organization\s+["'`]?org_[A-Za-z0-9_-]+["'`]?/gi, '')
+    .replace(/\borganization\s+["'`]?org_[A-Za-z0-9_-]+["'`]?/gi, 'organization')
+    .replace(/\borg_[A-Za-z0-9_-]+/gi, '[redacted]')
+    .replace(/\s+([:.,;!?])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/:\s*$/g, '')
+    .trim();
+}
+
 export interface AIGenerationResponse {
   recommendations: Recommendation[];
   unconstrainedDiscoveries?: UnconstrainedDiscovery[];
@@ -194,7 +206,8 @@ class AIServiceManager {
       }
 
       console.warn(`Provider ${provider.name} failed:`, err);
-      const errMsg = err instanceof Error ? err.message : String(err);
+      const rawErrMsg = err instanceof Error ? err.message : String(err);
+      const errMsg = provider.id === 'groq' ? stripGroqOrgId(rawErrMsg) : rawErrMsg;
 
       // Graceful fallback to local heuristic engine on network/provider error
       const local = this.getProvider('local');
@@ -202,7 +215,7 @@ class AIServiceManager {
       return {
         recommendations: fallbackRes.recommendations,
         usedProvider: `Local Engine (Fallback: ${errMsg || 'AI request failed'})`,
-        error: errMsg,
+        error: errMsg || (rawErrMsg ? 'AI request failed' : ''),
       };
     }
   }

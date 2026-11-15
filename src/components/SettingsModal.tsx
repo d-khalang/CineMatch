@@ -14,7 +14,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
-import { aiManager } from '../services/ai/aiManager';
+import { aiManager, stripGroqOrgId } from '../services/ai/aiManager';
 import { GEMINI_AVAILABLE_MODELS } from '../services/ai/geminiProvider';
 import {
   OPENROUTER_AVAILABLE_MODELS,
@@ -34,19 +34,26 @@ import { AIProviderId } from '../types';
 import { useModalA11y } from './useModalA11y';
 
 const CUSTOM_OPENROUTER_OPTION = '__custom__';
+const GROQ_RATE_LIMIT_MESSAGE = 'Groq is rate limiting this key. Try again in a minute.';
 
-function formatGroqError(err: unknown): string {
+function getSavedGroqModel(model?: string): string {
+  const trimmed = typeof model === 'string' ? model.trim() : '';
+  return trimmed && trimmed !== GROQ_DEFAULT_MODEL ? trimmed : '';
+}
+
+function formatGroqError(err: unknown, fallback = 'Failed to load Groq models.'): string {
   if (err && typeof err === 'object') {
     const status = 'status' in err ? (err as { status: unknown }).status : undefined;
     if (status === 413 || status === 429) {
-      return "This model's free limit is too small for your ratings. Try another model.";
+      return GROQ_RATE_LIMIT_MESSAGE;
     }
   }
-  const msg = err instanceof Error ? err.message : String(err || 'Failed to load Groq models.');
-  if (/\b(413|429)\b|rate[ -]?limit/i.test(msg)) {
-    return "This model's free limit is too small for your ratings. Try another model.";
+  const rawMsg = err instanceof Error ? err.message : String(err ?? '');
+  const msg = rawMsg.trim() || fallback;
+  if (/\b(413|429)\b|rate[ _-]?limit|too many requests/i.test(msg)) {
+    return GROQ_RATE_LIMIT_MESSAGE;
   }
-  return msg;
+  return stripGroqOrgId(msg) || fallback;
 }
 
 function buildGroqOptions(
@@ -156,7 +163,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const initialGroqModel = sanitizeGroqModel(aiSettings.groqModel);
   const [groqModel, setGroqModel] = useState<string>(initialGroqModel);
-  const [savedGroqModel, setSavedGroqModel] = useState<string>(initialGroqModel);
+  const [savedGroqModel, setSavedGroqModel] = useState<string>(() =>
+    getSavedGroqModel(aiSettings.groqModel)
+  );
   const [groqModels, setGroqModels] = useState<{ id: string; name: string }[]>([]);
   const [isLoadingGroqModels, setIsLoadingGroqModels] = useState<boolean>(false);
   const [groqModelsError, setGroqModelsError] = useState<string | null>(null);
@@ -164,6 +173,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const groqFetchAbortControllerRef = useRef<AbortController | null>(null);
   const groqFetchRequestIdRef = useRef<number>(0);
   const hasAutoLoadedGroqRef = useRef<boolean>(false);
+  const aiTestRequestIdRef = useRef<number>(0);
 
   // In-memory credentials state
   const [tmdbType, setTmdbType] = useState<TmdbCredentialType>(
@@ -196,6 +206,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [aiTesting, setAiTesting] = useState<{ loading: boolean; success?: boolean; message?: string }>({
     loading: false,
   });
+
+  const resetAiTesting = () => {
+    aiTestRequestIdRef.current += 1;
+    setAiTesting({ loading: false });
+  };
+
+  const clearGroqModelsState = () => {
+    groqFetchRequestIdRef.current += 1;
+    groqFetchAbortControllerRef.current?.abort();
+    groqFetchAbortControllerRef.current = null;
+    setIsLoadingGroqModels(false);
+    setGroqModels((prev) => (prev.length === 0 ? prev : []));
+    setGroqModelsError(null);
+  };
 
   const handleLoadGroqModels = async (keyToUse: string) => {
     const trimmedKey = keyToUse.trim();
@@ -262,23 +286,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setCustomOpenRouterModelInput(isCustom ? activeModel : '');
       const activeGroqModel = sanitizeGroqModel(aiSettings.groqModel);
       setGroqModel(activeGroqModel);
-      setSavedGroqModel(activeGroqModel);
-      setGroqModelsError(null);
+      setSavedGroqModel(getSavedGroqModel(aiSettings.groqModel));
       setRememberOnDevice(coord.rememberEnabled);
       hasAutoLoadedGroqRef.current = false;
+      clearGroqModelsState();
       if (aiSettings.activeProvider === 'groq' && currentGroqKey.trim()) {
         hasAutoLoadedGroqRef.current = true;
         handleLoadGroqModels(currentGroqKey.trim());
       }
       setTmdbTesting({ loading: false });
-      setAiTesting({ loading: false });
+      resetAiTesting();
     } else {
       hasAutoLoadedGroqRef.current = false;
-      if (groqFetchAbortControllerRef.current) {
-        groqFetchAbortControllerRef.current.abort();
-        groqFetchAbortControllerRef.current = null;
-      }
-      setIsLoadingGroqModels(false);
+      clearGroqModelsState();
+      resetAiTesting();
     }
   }, [isOpen, aiSettings]);
 
@@ -298,29 +319,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   // Invalidate AI test when drafts change
   const handleGeminiKeyChange = (val: string) => {
     setGeminiKey(val);
-    setAiTesting({ loading: false });
+    resetAiTesting();
   };
 
   const handleGroqKeyChange = (val: string) => {
     setGroqKey(val);
-    setAiTesting({ loading: false });
+    resetAiTesting();
     // A list loaded for the old key doesn't apply to this one.
-    groqFetchRequestIdRef.current += 1;
-    groqFetchAbortControllerRef.current?.abort();
-    groqFetchAbortControllerRef.current = null;
-    setIsLoadingGroqModels(false);
-    setGroqModels([]);
-    setGroqModelsError(null);
+    clearGroqModelsState();
   };
 
   const handleOpenRouterKeyChange = (val: string) => {
     setOpenRouterKey(val);
-    setAiTesting({ loading: false });
+    resetAiTesting();
   };
 
   const handleGroqModelChange = (m: string) => {
     setGroqModel(m);
-    setAiTesting({ loading: false });
+    resetAiTesting();
   };
 
   const handleProviderChange = (p: AIProviderId) => {
@@ -329,16 +345,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       hasAutoLoadedGroqRef.current = true;
       handleLoadGroqModels(groqKey.trim());
     }
-    setAiTesting({ loading: false });
+    resetAiTesting();
   };
 
   const handleGeminiModelChange = (m: string) => {
     setGeminiModel(m);
-    setAiTesting({ loading: false });
+    resetAiTesting();
   };
 
   const handleOpenRouterSelectChange = (val: string) => {
-    setAiTesting({ loading: false });
+    resetAiTesting();
     if (val === CUSTOM_OPENROUTER_OPTION) {
       setIsCustomOpenRouterModel(true);
       const current = customOpenRouterModelInput.trim();
@@ -352,7 +368,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const handleCustomOpenRouterModelChange = (val: string) => {
     setCustomOpenRouterModelInput(val);
     setOpenRouterModel(val.trim() || OPENROUTER_DEFAULT_MODEL);
-    setAiTesting({ loading: false });
+    resetAiTesting();
   };
 
   const handleAppendFreeSuffix = () => {
@@ -361,7 +377,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       const updated = `${current}:free`;
       setCustomOpenRouterModelInput(updated);
       setOpenRouterModel(updated);
-      setAiTesting({ loading: false });
+      resetAiTesting();
     }
   };
 
@@ -419,22 +435,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       return;
     }
 
+    const testReqId = ++aiTestRequestIdRef.current;
     setAiTesting({ loading: true });
     const version = credentialStore.getVersion();
     const activeProviderObj = aiManager.getProvider(provider);
 
     try {
       const result = await activeProviderObj.testConnection(key.trim(), model);
+      if (testReqId !== aiTestRequestIdRef.current) {
+        return;
+      }
       let displayMessage = result.message;
-      if (provider === 'groq' && !result.success && /\b(413|429)\b|rate[ -]?limit/i.test(displayMessage)) {
-        displayMessage = "This model's free limit is too small for your ratings. Try another model.";
+      if (provider === 'groq' && !result.success) {
+        displayMessage = formatGroqError(displayMessage, 'Connection test failed.');
       }
       setAiTesting({ loading: false, success: result.success, message: displayMessage });
       credentialStore.setStatus(statusKey, result.success ? 'valid' : 'invalid', displayMessage, version);
     } catch (err: unknown) {
+      if (testReqId !== aiTestRequestIdRef.current) {
+        return;
+      }
       let msg = err instanceof Error ? err.message : 'Connection test failed.';
-      if (provider === 'groq' && /\b(413|429)\b|rate[ -]?limit/i.test(msg)) {
-        msg = "This model's free limit is too small for your ratings. Try another model.";
+      if (provider === 'groq') {
+        msg = formatGroqError(err, 'Connection test failed.');
       }
       setAiTesting({ loading: false, success: false, message: msg });
       credentialStore.setStatus(statusKey, 'invalid', msg, version);
@@ -450,19 +473,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const handleForgetGemini = async () => {
     setGeminiKey('');
-    setAiTesting({ loading: false });
+    resetAiTesting();
     await credentialCoordinator.forgetProvider('gemini');
   };
 
   const handleForgetGroq = async () => {
-    setGroqKey('');
-    setAiTesting({ loading: false });
+    handleGroqKeyChange('');
     await credentialCoordinator.forgetProvider('groq');
   };
 
   const handleForgetOpenRouter = async () => {
     setOpenRouterKey('');
-    setAiTesting({ loading: false });
+    resetAiTesting();
     await credentialCoordinator.forgetProvider('openRouter');
   };
 
@@ -1000,20 +1022,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </div>
 
                 <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label htmlFor="groq-model-select" className="text-xs text-slate-400">
-                      Model Selection
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => handleLoadGroqModels(groqKey)}
-                      disabled={isLoadingGroqModels || !groqKey.trim()}
-                      className="text-[11px] text-[var(--accent-primary)] hover:underline inline-flex items-center gap-1 font-medium transition-colors disabled:opacity-40 disabled:no-underline cursor-pointer disabled:cursor-not-allowed"
-                    >
-                      {isLoadingGroqModels && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                      Load models
-                    </button>
-                  </div>
+                  <label htmlFor="groq-model-select" className="text-xs text-slate-400 block">
+                    Model Selection
+                  </label>
 
                   <select
                     id="groq-model-select"
@@ -1028,6 +1039,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       </option>
                     ))}
                   </select>
+
+                  <div className="flex items-center justify-end">
+                    <button
+                      type="button"
+                      aria-busy={isLoadingGroqModels}
+                      onClick={() => handleLoadGroqModels(groqKey)}
+                      disabled={isLoadingGroqModels || !groqKey.trim()}
+                      className="text-[11px] text-[var(--accent-primary)] hover:underline inline-flex items-center gap-1 font-medium transition-colors disabled:opacity-40 disabled:no-underline cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      {isLoadingGroqModels && <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />}
+                      Load models
+                    </button>
+                  </div>
+
+                  <span className="sr-only" role="status" aria-live="polite">
+                    {isLoadingGroqModels
+                      ? 'Loading Groq models...'
+                      : groqModels.length > 0
+                      ? `Loaded ${groqModels.length} Groq ${groqModels.length === 1 ? 'model' : 'models'}.`
+                      : ''}
+                  </span>
 
                   {groqModelsError && (
                     <div
