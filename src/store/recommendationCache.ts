@@ -21,53 +21,44 @@ function isValidRecommendation(r: unknown): r is Recommendation {
 }
 
 /**
- * Validates the shape of parsed cached recommendations data.
- */
-function isValidCachedRecommendationsData(data: unknown): data is CachedRecommendationsData {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
-  const obj = data as Record<string, unknown>;
-
-  if (!Array.isArray(obj.recommendations)) return false;
-  if (typeof obj.generatedAt !== 'number' || !Number.isFinite(obj.generatedAt)) return false;
-  if (typeof obj.usedProvider !== 'string') return false;
-
-  if (
-    obj.tasteAnalysis !== undefined &&
-    obj.tasteAnalysis !== null &&
-    typeof obj.tasteAnalysis !== 'string'
-  ) {
-    return false;
-  }
-  if (obj.settingsFingerprint !== undefined && typeof obj.settingsFingerprint !== 'string') {
-    return false;
-  }
-  if (
-    obj.ratedCount !== undefined &&
-    (typeof obj.ratedCount !== 'number' || !Number.isFinite(obj.ratedCount))
-  ) {
-    return false;
-  }
-
-  for (const rec of obj.recommendations) {
-    if (!isValidRecommendation(rec)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/**
  * Reads recommendation cache from storage.
- * Parses once, validates the shape, and never throws.
+ * Parses once, validates leniently per recommendation, and never throws.
+ * Returns null only when storage is empty/unparseable or not an object with a recommendations array.
  */
 export function readRecommendationCache(): CachedRecommendationsData | null {
   try {
     const raw = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    if (!isValidCachedRecommendationsData(parsed)) return null;
-    return parsed;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const obj = parsed as Record<string, unknown>;
+    if (!Array.isArray(obj.recommendations)) {
+      return null;
+    }
+
+    const result: CachedRecommendationsData = {
+      recommendations: obj.recommendations.filter(isValidRecommendation),
+      generatedAt:
+        typeof obj.generatedAt === 'number' && Number.isFinite(obj.generatedAt)
+          ? obj.generatedAt
+          : 0,
+      usedProvider: typeof obj.usedProvider === 'string' ? obj.usedProvider : '',
+    };
+
+    if (typeof obj.tasteAnalysis === 'string' || obj.tasteAnalysis === null) {
+      result.tasteAnalysis = obj.tasteAnalysis;
+    }
+    if (typeof obj.settingsFingerprint === 'string') {
+      result.settingsFingerprint = obj.settingsFingerprint;
+    }
+    if (typeof obj.ratedCount === 'number' && Number.isFinite(obj.ratedCount)) {
+      result.ratedCount = obj.ratedCount;
+    }
+
+    return result;
   } catch {
     return null;
   }
