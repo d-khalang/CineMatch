@@ -3,7 +3,14 @@ import { CheckCircle, X } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
 
 export const Toast: React.FC = () => {
-  const { toastMessage, clearToast } = useMovieStore();
+  const { toastMessage, toastAction, clearToast } = useMovieStore();
+
+  const handleAction = () => {
+    if (!toastAction) return;
+    const { onAction } = toastAction;
+    clearToast();
+    onAction();
+  };
 
   return (
     <div
@@ -21,7 +28,17 @@ export const Toast: React.FC = () => {
             <CheckCircle className="w-4 h-4 text-[var(--accent-secondary)]" />
           </div>
           <p className="flex-grow font-medium leading-snug">{toastMessage}</p>
+          {toastAction && (
+            <button
+              type="button"
+              onClick={handleAction}
+              className="shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold text-[var(--accent-primary)] hover:text-[var(--accent-hover)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] transition-colors cursor-pointer focus-ring"
+            >
+              {toastAction.label}
+            </button>
+          )}
           <button
+            type="button"
             aria-label="Dismiss notification"
             onClick={clearToast}
             className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-[var(--bg-surface-hover)] transition-colors shrink-0 cursor-pointer"

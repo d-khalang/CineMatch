@@ -44,6 +44,11 @@ const DEFAULT_SETTINGS: AISettings = {
   preferredEras: [],
 };
 
+export interface ToastAction {
+  label: string;
+  onAction: () => void;
+}
+
 interface MovieStoreContextType {
   ratings: Record<number, UserRating>;
   watchlist: number[];
@@ -81,7 +86,8 @@ interface MovieStoreContextType {
   dismissRecommendation: (movieId: number) => void;
   tasteStats: TasteStats;
   toastMessage: string | null;
-  showToast: (msg: string) => void;
+  toastAction: ToastAction | null;
+  showToast: (msg: string, action?: ToastAction) => void;
   clearToast: () => void;
   storageWarning: string | null;
 }
@@ -302,7 +308,14 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const [isGeneratingRecs, setIsGeneratingRecs] = useState<boolean>(false);
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<{
+    id: number;
+    message: string;
+    action: ToastAction | null;
+  } | null>(null);
+  const toastIdRef = useRef<number>(0);
+  const toastMessage = toast?.message ?? null;
+  const toastAction = toast?.action ?? null;
   const [storageStatus, setStorageStatus] = useState(() => getStorageStatus());
 
   // References for request racing and cancellation
@@ -323,12 +336,17 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     watchlistRef.current = watchlist;
   }, [watchlist]);
 
-  const showToast = useCallback((msg: string) => {
-    setToastMessage(msg);
+  const showToast = useCallback((msg: string, action?: ToastAction) => {
+    toastIdRef.current += 1;
+    setToast({
+      id: toastIdRef.current,
+      message: msg,
+      action: action ?? null,
+    });
   }, []);
 
   const clearToast = useCallback(() => {
-    setToastMessage(null);
+    setToast(null);
   }, []);
 
   const cancelGeneration = useCallback(() => {
@@ -368,12 +386,13 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [storageStatus]);
 
   useEffect(() => {
-    if (!toastMessage) return;
+    if (!toast) return;
+    const durationMs = toast.action ? 8000 : 3000;
     const timer = setTimeout(() => {
-      setToastMessage(null);
-    }, 3000);
+      setToast(null);
+    }, durationMs);
     return () => clearTimeout(timer);
-  }, [toastMessage]);
+  }, [toast]);
 
   // Persistence Effects (safe against QuotaExceededError; storage warning banner shown reactively via storageStatus)
   useEffect(() => {
@@ -1133,6 +1152,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         dismissRecommendation,
         tasteStats,
         toastMessage,
+        toastAction,
         showToast,
         clearToast,
         storageWarning,

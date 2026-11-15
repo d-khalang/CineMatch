@@ -17,11 +17,20 @@ import { IMAGE_BASE_URL } from '../services/tmdb';
 import { RatingControl } from './RatingControl';
 import { DiscoveryFilters } from './DiscoveryFilters';
 import { ShareButton } from './ShareButton';
-import { Movie } from '../types';
+import { Movie, Recommendation } from '../types';
+
+interface RestoredRecEntry {
+  rec: Recommendation;
+  beforeIds: number[];
+  afterIds: number[];
+  fallbackIndex: number;
+  batchTimestamp: number | null;
+}
 
 export const RankedFeed: React.FC = () => {
   const {
     recommendations,
+    cachedRecsTimestamp,
     ratings,
     watchlist,
     hiddenFilms,
@@ -39,6 +48,7 @@ export const RankedFeed: React.FC = () => {
     setActiveTab,
     showToast,
     hideFilm,
+    restoreFilm,
   } = useMovieStore();
 
   const [pendingRemovalIds, setPendingRemovalIds] = useState<Record<number, boolean>>({});
@@ -62,23 +72,69 @@ export const RankedFeed: React.FC = () => {
     .sort()
     .join(',');
   const autoAttemptedProfileRef = useRef<string | null>(null);
+  const profileSigRef = useRef<string>(profileSig);
   const pendingFocusRef = useRef<{ type: 'card'; movieId: number } | { type: 'heading' } | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const seenButtonsRef = useRef<Record<number, HTMLButtonElement | null>>({});
+  const shouldFocusRatingRef = useRef<number | null>(null);
+  const ratingContainerRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const [seenPromptMovieId, setSeenPromptMovieId] = useState<number | null>(null);
+  const [restoredRecs, setRestoredRecs] = useState<RestoredRecEntry[]>([]);
+
+  useEffect(() => {
+    profileSigRef.current = profileSig;
+  }, [profileSig]);
 
   const hiddenMovieIds = useMemo(
     () => new Set((hiddenFilms || []).map((h) => h.movieId)),
     [hiddenFilms]
   );
 
+  const effectiveRecommendations = useMemo(() => {
+    const list = [...recommendations];
+    const existingIds = new Set(list.map((r) => r.movie.id));
+
+    for (const entry of restoredRecs) {
+      if (entry.batchTimestamp !== cachedRecsTimestamp) continue;
+      if (existingIds.has(entry.rec.movie.id)) continue;
+
+      let insertAt = -1;
+      for (const afterId of entry.afterIds) {
+        const idx = list.findIndex((r) => r.movie.id === afterId);
+        if (idx !== -1) {
+          insertAt = idx;
+          break;
+        }
+      }
+      if (insertAt === -1) {
+        for (let i = entry.beforeIds.length - 1; i >= 0; i--) {
+          const idx = list.findIndex((r) => r.movie.id === entry.beforeIds[i]);
+          if (idx !== -1) {
+            insertAt = idx + 1;
+            break;
+          }
+        }
+      }
+      if (insertAt === -1) {
+        insertAt = Math.min(entry.fallbackIndex, list.length);
+      }
+
+      list.splice(insertAt, 0, entry.rec);
+      existingIds.add(entry.rec.movie.id);
+    }
+
+    return list;
+  }, [recommendations, restoredRecs, cachedRecsTimestamp]);
+
   // Keep unrated movies AND movies currently in grace period, strictly excluding hidden films
-  const visibleRecommendations = recommendations.filter(
+  const visibleRecommendations = effectiveRecommendations.filter(
     (rec) =>
       !hiddenMovieIds.has(rec.movie.id) &&
       (!ratings[rec.movie.id] || Boolean(pendingRemovalIds[rec.movie.id]))
   );
 
   const handleRateRecommendedMovie = (movie: Movie, val: number) => {
+    setSeenPromptMovieId((prev) => (prev === movie.id ? null : prev));
     setRating(movie, val);
     showToast(`Rated "${movie.title}" ${val}/10 — saved to My Ratings!`);
 
@@ -89,6 +145,7 @@ export const RankedFeed: React.FC = () => {
 
     pendingTimersRef.current[movie.id] = setTimeout(() => {
       dismissRecommendation(movie.id);
+      setRestoredRecs((prev) => prev.filter((e) => e.rec.movie.id !== movie.id));
       setPendingRemovalIds((prev) => {
         const next = { ...prev };
         delete next[movie.id];
@@ -111,8 +168,30 @@ export const RankedFeed: React.FC = () => {
     removeRating(movieId);
   };
 
+  const handleToggleSeenPrompt = (movieId: number) => {
+    if (seenPromptMovieId === movieId) {
+      shouldFocusRatingRef.current = null;
+      setSeenPromptMovieId(null);
+    } else {
+      shouldFocusRatingRef.current = movieId;
+      setSeenPromptMovieId(movieId);
+    }
+  };
+
   const handleHideFilm = (movieId: number, reason: 'seen' | 'not_for_me', rawTitle?: string) => {
     autoAttemptedProfileRef.current = profileSig;
+
+    const hiddenRecIndex = effectiveRecommendations.findIndex((rec) => rec.movie.id === movieId);
+    const hiddenRec = hiddenRecIndex !== -1 ? effectiveRecommendations[hiddenRecIndex] : null;
+    const beforeIds =
+      hiddenRecIndex !== -1
+        ? effectiveRecommendations.slice(0, hiddenRecIndex).map((r) => r.movie.id)
+        : [];
+    const afterIds =
+      hiddenRecIndex !== -1
+        ? effectiveRecommendations.slice(hiddenRecIndex + 1).map((r) => r.movie.id)
+        : [];
+    const capturedTimestamp = cachedRecsTimestamp;
 
     const currentIndex = visibleRecommendations.findIndex((rec) => rec.movie.id === movieId);
     if (currentIndex !== -1) {
@@ -131,6 +210,12 @@ export const RankedFeed: React.FC = () => {
       }
     }
 
+    setSeenPromptMovieId((prev) => (prev === movieId ? null : prev));
+    setRestoredRecs((prev) => {
+      if (!prev.some((e) => e.rec.movie.id === movieId)) return prev;
+      return prev.filter((e) => e.rec.movie.id !== movieId);
+    });
+
     const title = rawTitle && rawTitle.trim() ? rawTitle.trim() : `#${movieId}`;
     if (pendingTimersRef.current[movieId]) {
       clearTimeout(pendingTimersRef.current[movieId]);
@@ -143,8 +228,53 @@ export const RankedFeed: React.FC = () => {
       return next;
     });
     hideFilm(movieId, reason, title);
-    showToast(`Hidden "${title}". Restore it in Settings → Hidden films.`);
+    showToast(`Hidden "${title}". Restore it in Settings → Hidden films.`, {
+      label: 'Undo',
+      onAction: () => {
+        autoAttemptedProfileRef.current = profileSigRef.current;
+        pendingFocusRef.current = { type: 'card', movieId };
+        restoreFilm(movieId);
+        if (hiddenRec) {
+          setRestoredRecs((prev) => [
+            ...prev.filter((e) => e.rec.movie.id !== movieId),
+            {
+              rec: hiddenRec,
+              beforeIds,
+              afterIds,
+              fallbackIndex: hiddenRecIndex,
+              batchTimestamp: capturedTimestamp,
+            },
+          ]);
+        }
+      },
+    });
   };
+
+  useEffect(() => {
+    if (shouldFocusRatingRef.current === null) return;
+    const targetMovieId = shouldFocusRatingRef.current;
+    shouldFocusRatingRef.current = null;
+
+    if (seenPromptMovieId !== targetMovieId) return;
+    const container = ratingContainerRefs.current[targetMovieId];
+    const radioBtn =
+      container?.querySelector<HTMLButtonElement>('button[role="radio"][aria-checked="true"]') ||
+      container?.querySelector<HTMLButtonElement>('button[role="radio"]');
+    radioBtn?.focus();
+  }, [seenPromptMovieId]);
+
+  useEffect(() => {
+    if (seenPromptMovieId === null) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[role="dialog"]')) {
+        const targetId = seenPromptMovieId;
+        setSeenPromptMovieId(null);
+        seenButtonsRef.current[targetId]?.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [seenPromptMovieId]);
 
   useEffect(() => {
     if (!pendingFocusRef.current) return;
@@ -166,10 +296,14 @@ export const RankedFeed: React.FC = () => {
   });
 
   useEffect(() => {
+    setSeenPromptMovieId((prev) => (prev !== null ? null : prev));
+  }, [cachedRecsTimestamp]);
+
+  useEffect(() => {
     // If we have ratings and no recommendations yet, auto-generate ONLY ONCE per profile signature
     // and never continuously retry if generation errored or returned empty.
     if (
-      recommendations.length === 0 &&
+      effectiveRecommendations.length === 0 &&
       ratedCount >= 1 &&
       !isGeneratingRecs &&
       !recommendationError &&
@@ -178,7 +312,7 @@ export const RankedFeed: React.FC = () => {
       autoAttemptedProfileRef.current = profileSig;
       generateRankings();
     }
-  }, [ratedCount, recommendations.length, generateRankings, isGeneratingRecs, recommendationError, profileSig]);
+  }, [ratedCount, effectiveRecommendations.length, generateRankings, isGeneratingRecs, recommendationError, profileSig]);
 
   const handleManualGenerate = () => {
     autoAttemptedProfileRef.current = profileSig;
@@ -364,6 +498,7 @@ export const RankedFeed: React.FC = () => {
             const posterUrl = movie.poster_path ? `${IMAGE_BASE_URL}${movie.poster_path}` : null;
             const year = movie.release_date ? movie.release_date.slice(0, 4) : '';
             const isPendingRemoval = Boolean(pendingRemovalIds[movie.id]);
+            const isSeenPromptOpen = seenPromptMovieId === movie.id;
             const displayTitle = movie.title && movie.title.trim() ? movie.title.trim() : `#${movie.id}`;
 
             return (
@@ -526,7 +661,26 @@ export const RankedFeed: React.FC = () => {
 
                   {/* Rating Strip at the bottom of the card */}
                   <div className="pt-2 border-t border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="w-full sm:max-w-md space-y-1">
+                    <div
+                      ref={(el) => {
+                        if (el) {
+                          ratingContainerRefs.current[movie.id] = el;
+                        } else {
+                          delete ratingContainerRefs.current[movie.id];
+                        }
+                      }}
+                      className={`w-full sm:max-w-md space-y-1.5 ${
+                        isSeenPromptOpen
+                          ? 'p-3 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--border-focus)]'
+                          : ''
+                      }`}
+                    >
+                      {isSeenPromptOpen && (
+                        <p className="text-xs font-semibold text-slate-200">
+                          Already seen it? Rate it below to sharpen your picks, or skip.
+                        </p>
+                      )}
+
                       {isPendingRemoval && (
                         <div className="flex items-center justify-between text-[11px] text-white bg-[var(--bg-surface-elevated)] px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)]">
                           <span className="font-bold flex items-center gap-1.5 text-[var(--accent-secondary)]">
@@ -541,6 +695,18 @@ export const RankedFeed: React.FC = () => {
                         onClear={() => handleClearRecommendedMovie(movie.id)}
                         compact={true}
                       />
+
+                      {isSeenPromptOpen && (
+                        <div className="flex justify-end pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleHideFilm(movie.id, 'seen', displayTitle)}
+                            className="text-xs font-semibold text-slate-300 hover:text-white px-3 py-1.5 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] transition-colors cursor-pointer focus-ring"
+                          >
+                            Skip
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3 self-end sm:self-center">
@@ -554,9 +720,14 @@ export const RankedFeed: React.FC = () => {
                         }}
                         data-movie-id={movie.id}
                         type="button"
-                        onClick={() => handleHideFilm(movie.id, 'seen', displayTitle)}
+                        aria-expanded={isSeenPromptOpen}
+                        onClick={() => handleToggleSeenPrompt(movie.id)}
                         aria-label={`Seen it: ${displayTitle}`}
-                        className="text-xs text-slate-400 hover:text-slate-200 transition-colors cursor-pointer focus-ring rounded px-1.5 py-2 sm:py-0.5"
+                        className={`text-xs transition-colors cursor-pointer focus-ring rounded px-1.5 py-2 sm:py-0.5 ${
+                          isSeenPromptOpen
+                            ? 'text-white font-semibold'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
                       >
                         Seen it
                       </button>
