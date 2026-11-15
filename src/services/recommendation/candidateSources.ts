@@ -1,5 +1,6 @@
 import type { Movie, UserRating } from '../../types';
 import type { Candidate, CandidateSource } from './types';
+import { annotateCandidateMovies } from './candidateMovies';
 import {
   fetchFromTMDB,
   GENRE_MAP,
@@ -880,5 +881,5 @@ export async function getCandidateRecommendationPool(
     options,
     signal
   );
-  return candidates.map((c) => c.movie);
+  return annotateCandidateMovies(candidates);
 }

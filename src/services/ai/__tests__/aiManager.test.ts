@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { aiManager, MIN_RECOMMENDATIONS } from '../aiManager';
+import { toCandidates } from '../../recommendation/candidateMovies';
 import { Movie, UserRating } from '../../../types';
 
 describe('aiManager Orchestrator and Fallback', () => {
@@ -267,5 +268,85 @@ describe('aiManager Orchestrator and Fallback', () => {
     expect(res.recommendations.slice(0, 2).every((r) => Number.isFinite(r.score) && r.isAiCurated === true)).toBe(true);
     expect(res.recommendations.slice(2).every((r) => r.score < 78 && r.isAiCurated === undefined)).toBe(true);
     expect(res.usedProvider).toBe('Google Gemini AI');
+  });
+
+  it('still meets MIN_RECOMMENDATIONS (8) via backfill when request.candidates is provided and AI returns fewer than 8', async () => {
+    const poolWithFranchisePair: Movie[] = [
+      {
+        id: 500,
+        title: 'The Godfather Part II',
+        overview: 'Crime epic sequel',
+        release_date: '1974-12-20',
+        vote_average: 8.6,
+        vote_count: 12000,
+        poster_path: '/gf2.jpg',
+        backdrop_path: null,
+        genres: [{ id: 18, name: 'Drama' }, { id: 80, name: 'Crime' }],
+        candidateSources: ['seed_graph'],
+        seedNeighbour: true,
+      },
+      {
+        id: 501,
+        title: 'The Godfather',
+        overview: 'Crime epic original',
+        release_date: '1972-03-24',
+        vote_average: 8.7,
+        vote_count: 19000,
+        poster_path: '/gf1.jpg',
+        backdrop_path: null,
+        genres: [{ id: 18, name: 'Drama' }, { id: 80, name: 'Crime' }],
+        candidateSources: ['seed_graph'],
+        seedNeighbour: true,
+      },
+      ...Array.from({ length: 6 }, (_, i) => ({
+        id: 502 + i,
+        title: `Unique Film ${i}`,
+        overview: 'Overview',
+        release_date: '2019-01-01',
+        vote_average: 7.9,
+        vote_count: 900,
+        poster_path: `/u${i}.jpg`,
+        backdrop_path: null,
+        genres: [{ id: 878, name: 'Sci-Fi' }],
+        candidateSources: ['hidden_gem'] as Movie['candidateSources'],
+        seedNeighbour: false,
+      })),
+    ];
+
+    const content = JSON.stringify({
+      taste_analysis: 'Partial response.',
+      pool_rankings: [
+        { id: 500, score: 94, reason: 'AI pick 1', serendipityType: 'safe_bet', highlightTags: ['Crime'] },
+        { id: 502, score: 88, reason: 'AI pick 2', serendipityType: 'safe_bet', highlightTags: ['Sci-Fi'] },
+        { id: 503, score: 85, reason: 'AI pick 3', serendipityType: 'safe_bet', highlightTags: ['Sci-Fi'] },
+        { id: 504, score: 82, reason: 'AI pick 4', serendipityType: 'safe_bet', highlightTags: ['Sci-Fi'] },
+        { id: 505, score: 80, reason: 'AI pick 5', serendipityType: 'safe_bet', highlightTags: ['Sci-Fi'] },
+        { id: 506, score: 79, reason: 'AI pick 6', serendipityType: 'safe_bet', highlightTags: ['Sci-Fi'] },
+        { id: 507, score: 77, reason: 'AI pick 7', serendipityType: 'safe_bet', highlightTags: ['Sci-Fi'] },
+      ],
+      unconstrained_discoveries: [],
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content } }] }),
+      })
+    );
+
+    const res = await aiManager.generateRecommendations('openrouter', {
+      userRatings,
+      candidatePool: poolWithFranchisePair,
+      candidates: toCandidates(poolWithFranchisePair),
+      serendipityLevel: 40,
+      apiKey: 'sk-or-test-key',
+    });
+
+    expect(res.recommendations).toHaveLength(MIN_RECOMMENDATIONS);
+    expect(res.recommendations[7].movie.id).toBe(501);
+    expect(res.recommendations[7].origin).toBe('local_backfill');
+    expect(res.recommendations[7].bucket).toBeDefined();
+    expect(res.recommendations[7].sources).toEqual(['seed_graph']);
   });
 });

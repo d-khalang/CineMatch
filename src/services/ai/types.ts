@@ -1,9 +1,11 @@
 import { Movie, Recommendation, UserRating } from '../../types';
+import type { Candidate } from '../recommendation/types';
 import type { RejectedFilm } from '../recommendation/rejectedFilms';
 
 export interface RecommendationRequest {
   userRatings: UserRating[];
   candidatePool: Movie[];
+  candidates?: Candidate[];
   serendipityLevel: number; // 0 (Safe) to 100 (Wildcard/Exploratory)
   selectedVibes?: string[];
   preferredEras?: string[];

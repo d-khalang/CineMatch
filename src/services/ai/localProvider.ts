@@ -1,6 +1,7 @@
 import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './types';
 import { Recommendation, Movie } from '../../types';
 import { rejectionPenalty } from '../recommendation/rejectedFilms';
+import { rankCandidates } from '../recommendation/rankCandidates';
 import { famePenalty } from '../recommendation/fame';
 
 export class LocalProvider implements IAIProvider {
@@ -17,7 +18,26 @@ export class LocalProvider implements IAIProvider {
       throw new DOMException('Generation aborted', 'AbortError');
     }
 
-    const { userRatings, candidatePool, serendipityLevel = 30, selectedVibes = [], preferredEras = [] } = request;
+    const {
+      userRatings,
+      candidatePool,
+      candidates,
+      serendipityLevel = 30,
+      selectedVibes = [],
+      preferredEras = [],
+      rejectedFilms,
+    } = request;
+
+    if (candidates && candidates.length > 0 && userRatings && userRatings.length > 0) {
+      return {
+        recommendations: rankCandidates(candidates, userRatings, {
+          serendipityLevel,
+          preferredEras,
+          selectedVibes,
+          rejectedFilms,
+        }),
+      };
+    }
 
     if (!userRatings || userRatings.length === 0) {
       // Return top candidate movies as initial baseline
