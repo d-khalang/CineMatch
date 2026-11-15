@@ -22,8 +22,8 @@ import {
  */
 const THRESHOLDS = {
   heavySupplyMin: 30,
-  intraListDiversityMin: 0.70,
-  meanNoveltyPercentileMin: 0.35,
+  intraListDiversityMin: 0.80,
+  meanNoveltyPercentileMin: 0.45,
   bucketMixTolerance: 0.06,
   nonSeedNeighbourShareMinAt30: 0.35,
   nonSeedNeighbourShareMinAt85: 0.50,
