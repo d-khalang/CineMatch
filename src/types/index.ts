@@ -31,6 +31,16 @@ export interface UserRating {
   ratedAt: number; // timestamp
 }
 
+// HiddenFilm schema (v3)
+export interface HiddenFilm {
+  movieId: number;
+  reason: 'seen' | 'not_for_me';
+  hiddenAt: number; // timestamp
+  title?: string;
+  year?: string;
+  genres?: string[];
+}
+
 export type SerendipityMode = 'safe' | 'balanced' | 'exploratory' | 'wildcard';
 
 export interface Recommendation {
@@ -46,9 +56,10 @@ export interface Recommendation {
     | 'ai_cinephile_discovery';
   highlightTags: string[];
   isAiCurated?: boolean;
+  origin?: 'ai' | 'local_backfill';
 }
 
-export type AIProviderId = 'gemini' | 'openrouter' | 'local';
+export type AIProviderId = 'gemini' | 'openrouter' | 'groq' | 'local';
 
 export interface AISettings {
   activeProvider: AIProviderId;
@@ -56,6 +67,8 @@ export interface AISettings {
   geminiModel: string;
   openRouterApiKey: string;
   openRouterModel: string;
+  groqApiKey: string;
+  groqModel: string;
   serendipityLevel: number; // 0 (Safe) to 100 (Radical Discovery)
   selectedVibes: string[];
   preferredEras: string[];

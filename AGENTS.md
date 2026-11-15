@@ -5,6 +5,7 @@
 - The user is the product owner. Treat high level direction, priorities, and product constraints as authoritative.
 - For roadmap, architecture, triage, Linear planning, delegation, or PR coordination, use the repo scoped `cinematch-tech-lead` skill in `.codex/skills/cinematch-tech-lead/SKILL.md`.
 - Treat active Linear issues labeled `codex-cordinate` as the Codex coordination queue. Codex owns the planning and all Gemini communication for those issues through Linear and pull requests.
+- Issues labeled `loop` belong to the autonomous agent loop. Its roles, branches, labels and rules are in `docs/agent-loop/LOOP.md`; product direction is in `docs/vision.md`.
 - When an issue is already scoped for implementation, act as the developer for that issue. Follow its acceptance criteria and avoid expanding its scope.
 
 ## Project constraints

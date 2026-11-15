@@ -102,7 +102,7 @@ const MainAppContent: React.FC = () => {
       {coordState.status === 'error' && (
         <div
           role="alert"
-          className="bg-rose-950/80 border-b border-rose-500/30 px-4 py-2.5 text-xs text-rose-200 flex flex-wrap items-center justify-between gap-3 shadow-md"
+          className="bg-rose-950/80 border-b border-rose-500/30 px-4 py-2.5 text-xs text-rose-200 flex flex-wrap items-center justify-between gap-3"
         >
           <div className="flex items-center gap-2 w-full sm:w-auto sm:flex-1">
             <span className="shrink-0 font-bold">⚠️ Security Storage Alert:</span>
@@ -135,7 +135,7 @@ const MainAppContent: React.FC = () => {
 
       {/* Storage Warning Recovery Banner */}
       {storageWarning && (
-        <div role="alert" className="bg-amber-950/80 border-b border-amber-500/30 px-4 py-2.5 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-3 shadow-md">
+        <div role="alert" className="bg-amber-950/80 border-b border-amber-500/30 px-4 py-2.5 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 w-full sm:w-auto sm:flex-1">
             <span className="shrink-0 font-bold">⚠️ Storage Alert:</span>
             <span>{storageWarning} Keep this app open until retry succeeds; unsaved changes may be lost on restart.</span>

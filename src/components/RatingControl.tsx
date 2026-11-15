@@ -41,22 +41,22 @@ export const RatingControl: React.FC<RatingControlProps> = ({
 
     if (score <= 3) {
       return isSelected
-        ? 'bg-rose-600 text-white border-rose-500 shadow-lg shadow-rose-900/40 font-bold'
+        ? 'bg-rose-600 text-white border-rose-500 font-bold'
         : 'hover:bg-rose-600/30 text-rose-300 border-rose-800/40';
     }
     if (score <= 6) {
       return isSelected
-        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-900/40 font-bold'
+        ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
         : 'hover:bg-amber-500/30 text-amber-300 border-amber-800/40';
     }
     if (score <= 8) {
       return isSelected
-        ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-lg shadow-emerald-900/40 font-bold'
+        ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-bold'
         : 'hover:bg-emerald-500/30 text-emerald-300 border-emerald-800/40';
     }
     // 9-10 Masterpiece
     return isSelected
-      ? 'bg-[var(--accent-primary)] text-[var(--accent-text)] border-[var(--border-focus)] shadow-lg shadow-[var(--accent-glow)] font-bold scale-105'
+      ? 'bg-[var(--accent-primary)] text-[var(--accent-text)] border-[var(--border-focus)] font-bold'
       : 'hover:bg-[var(--accent-secondary-bg)] text-[var(--accent-secondary)] border-[var(--border-subtle)]';
   };
 
@@ -132,7 +132,7 @@ export const RatingControl: React.FC<RatingControlProps> = ({
                 aria-checked={isSelected}
                 aria-label={`Rate ${val} out of 10: ${getRatingLabel(val)}`}
                 onClick={() => handleRate(val)}
-                className={`h-10 sm:h-8 min-w-[38px] flex items-center justify-center text-xs font-bold rounded-lg transition-all duration-150 border focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:outline-none ${getRatingColor(
+                className={`h-10 sm:h-8 min-w-[38px] flex items-center justify-center text-xs font-bold rounded-lg transition-all duration-150 border focus-ring ${getRatingColor(
                   val,
                   isSelected
                 )}`}
@@ -163,6 +163,7 @@ export const RatingControl: React.FC<RatingControlProps> = ({
         <button
           type="button"
           onClick={handleClear}
+          disabled={!currentRating}
           className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors border ${
             currentRating
               ? 'text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 border-[var(--border-subtle)] hover:border-rose-900/50'
@@ -193,7 +194,7 @@ export const RatingControl: React.FC<RatingControlProps> = ({
               onMouseEnter={() => setHoveredRating(val)}
               onMouseLeave={() => setHoveredRating(null)}
               onClick={() => handleRate(val)}
-              className={`h-12 flex flex-col items-center justify-center rounded-xl transition-all duration-150 border active:scale-95 focus-visible:ring-2 focus-visible:ring-[var(--accent-primary)] focus-visible:outline-none ${getRatingColor(
+              className={`h-12 flex flex-col items-center justify-center rounded-xl transition-all duration-150 border active:scale-95 focus-ring ${getRatingColor(
                 val,
                 isSelected
               )}`}

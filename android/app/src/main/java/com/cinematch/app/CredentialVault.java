@@ -76,16 +76,24 @@ public class CredentialVault {
         public final String tmdbValue;
         public final String geminiApiKey;
         public final String openRouterApiKey;
+        public final String groqApiKey;
 
-        public StoredCredentials(String tmdbType, String tmdbValue, String geminiApiKey, String openRouterApiKey) {
+        public StoredCredentials(
+                String tmdbType,
+                String tmdbValue,
+                String geminiApiKey,
+                String openRouterApiKey,
+                String groqApiKey
+        ) {
             this.tmdbType = tmdbType != null ? tmdbType : "read_access_token";
             this.tmdbValue = tmdbValue != null ? tmdbValue : "";
             this.geminiApiKey = geminiApiKey != null ? geminiApiKey : "";
             this.openRouterApiKey = openRouterApiKey != null ? openRouterApiKey : "";
+            this.groqApiKey = groqApiKey != null ? groqApiKey : "";
         }
 
         public boolean isEmpty() {
-            return tmdbValue.isEmpty() && geminiApiKey.isEmpty() && openRouterApiKey.isEmpty();
+            return tmdbValue.isEmpty() && geminiApiKey.isEmpty() && openRouterApiKey.isEmpty() && groqApiKey.isEmpty();
         }
     }
 
@@ -226,6 +234,7 @@ public class CredentialVault {
             json.put("tmdbValue", credentials.tmdbValue);
             json.put("geminiApiKey", credentials.geminiApiKey);
             json.put("openRouterApiKey", credentials.openRouterApiKey);
+            json.put("groqApiKey", credentials.groqApiKey);
             payloadBytes = json.toString().getBytes(StandardCharsets.UTF_8);
         } catch (JSONException e) {
             throw new VaultException("INVALID_DATA", "Failed to serialize credentials snapshot");
@@ -448,6 +457,7 @@ public class CredentialVault {
         validateFieldBound("tmdbValue", credentials.tmdbValue);
         validateFieldBound("geminiApiKey", credentials.geminiApiKey);
         validateFieldBound("openRouterApiKey", credentials.openRouterApiKey);
+        validateFieldBound("groqApiKey", credentials.groqApiKey);
     }
 
     private void validateFieldBound(String fieldName, String value) throws VaultException {
@@ -474,12 +484,14 @@ public class CredentialVault {
             String tmdbValue = json.optString("tmdbValue", "");
             String geminiApiKey = json.optString("geminiApiKey", "");
             String openRouterApiKey = json.optString("openRouterApiKey", "");
+            String groqApiKey = json.optString("groqApiKey", "");
 
             validateFieldBound("tmdbValue", tmdbValue);
             validateFieldBound("geminiApiKey", geminiApiKey);
             validateFieldBound("openRouterApiKey", openRouterApiKey);
+            validateFieldBound("groqApiKey", groqApiKey);
 
-            return new StoredCredentials(tmdbType, tmdbValue, geminiApiKey, openRouterApiKey);
+            return new StoredCredentials(tmdbType, tmdbValue, geminiApiKey, openRouterApiKey, groqApiKey);
         } catch (JSONException e) {
             throw new VaultException("INVALID_DATA", "Invalid JSON in decrypted vault payload");
         }

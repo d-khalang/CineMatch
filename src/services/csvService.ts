@@ -9,6 +9,7 @@ export interface ParsedCsvMovie {
   tmdbId?: number; // Parsed from CineMatch export (TMDB_ID)
   director?: string;
   genres?: string[];
+  ratedAt?: number; // epoch ms
 }
 
 export interface CsvParseResult {
@@ -16,6 +17,121 @@ export interface CsvParseResult {
   accepted: ParsedCsvMovie[];
   rejected: { row: number; title?: string; reason: string }[];
   totalRows: number;
+}
+
+export type LetterboxdCsvKind = 'ratings' | 'watched' | 'unknown';
+
+export interface WatchedRow {
+  title: string;
+  year?: string;
+  sourceId?: string; // Letterboxd URI
+  watchedAt?: number; // epoch ms from the Date column; undefined if unparseable or in the future
+}
+
+export interface WatchedParseResult {
+  accepted: WatchedRow[];
+  rejected: { row: number; title?: string; reason: string }[];
+  totalRows: number;
+}
+
+export function detectLetterboxdCsvKind(headers: string[]): LetterboxdCsvKind {
+  const normalized = headers.map((h) =>
+    typeof h === 'string' ? h.replace(/^\uFEFF/, '').trim().toLowerCase() : ''
+  );
+  const hasName = normalized.includes('name');
+  if (!hasName) return 'unknown';
+  if (normalized.includes('rating')) return 'ratings';
+  if (normalized.includes('letterboxd uri') || normalized.includes('year')) return 'watched';
+  return 'unknown';
+}
+
+/**
+ * Sniffs the CSV kind from the first non-empty RFC-4180 header record without full-file parsing.
+ * Auto-detects delimiter (comma, semicolon, tab) using PapaParse preview.
+ */
+export function sniffCsvKind(text: string): LetterboxdCsvKind {
+  if (!text || typeof text !== 'string') return 'unknown';
+
+  const clean = text.replace(/^\uFEFF/, '').trimStart();
+  if (!clean) return 'unknown';
+
+  try {
+    const parseOutput = Papa.parse<string[]>(clean, {
+      preview: 1,
+      skipEmptyLines: 'greedy',
+    });
+
+    if (!parseOutput.data || parseOutput.data.length === 0) {
+      return 'unknown';
+    }
+
+    const headers = parseOutput.data[0];
+    if (!Array.isArray(headers) || headers.length === 0) {
+      return 'unknown';
+    }
+
+    if (headers.some((h) => typeof h === 'string' && h.trim() !== '')) {
+      return detectLetterboxdCsvKind(headers);
+    }
+  } catch {
+    return 'unknown';
+  }
+
+  return 'unknown';
+}
+
+export function parseWatchedCsv(csvContent: string): WatchedParseResult {
+  const cleanContent = csvContent.replace(/^\uFEFF/, '').trim();
+
+  const parseOutput = Papa.parse<Record<string, string>>(cleanContent, {
+    header: true,
+    skipEmptyLines: 'greedy',
+    transformHeader: (h) => h.trim().toLowerCase(),
+  });
+
+  const rows = parseOutput.data;
+  const accepted: WatchedRow[] = [];
+  const rejected: { row: number; title?: string; reason: string }[] = [];
+
+  if (!rows || rows.length === 0) {
+    return { accepted, rejected, totalRows: 0 };
+  }
+
+  rows.forEach((row, index) => {
+    const rowNum = index + 2; // 1-based + 1 for header
+    const rawTitle = row['name'] || row['title'] || '';
+    const rawYear = row['year'] || '';
+    const rawUri = row['letterboxd uri'] || row['uri'] || '';
+    const rawDate = row['date'] || row['watched date'] || '';
+
+    const title = rawTitle.trim();
+    if (!title) {
+      rejected.push({ row: rowNum, reason: 'Missing movie title' });
+      return;
+    }
+
+    const item: WatchedRow = { title };
+    const trimmedYear = rawYear.trim();
+    if (trimmedYear) {
+      item.year = trimmedYear.slice(0, 4);
+    }
+    const trimmedUri = rawUri.trim();
+    if (trimmedUri) {
+      item.sourceId = trimmedUri;
+    }
+    const watchedAt = parseWatchedDate(rawDate);
+    if (watchedAt !== undefined) {
+      item.watchedAt = watchedAt;
+    }
+
+    accepted.push(item);
+  });
+
+  return {
+    accepted,
+    rejected,
+    totalRows: rows.length,
+  };
 }
 
 /**
@@ -28,6 +144,108 @@ export function sanitizeCsvFormula(value: string): string {
     return `'${trimmed}`;
   }
   return trimmed;
+}
+
+/**
+ * Strict YYYY-MM-DD parsing as UTC midnight.
+ * An unparseable date or one in the future returns undefined.
+ */
+function parseYmdDate(raw?: string): number | undefined {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) return undefined;
+
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return undefined;
+  }
+
+  const d = new Date(0);
+  d.setUTCFullYear(year, month - 1, day);
+  d.setUTCHours(0, 0, 0, 0);
+
+  if (
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day
+  ) {
+    return undefined;
+  }
+
+  const utcMs = d.getTime();
+  const now = new Date(Date.now());
+  const tomorrowUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  const tomorrowLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+  const futureThreshold = Math.max(tomorrowUtc, tomorrowLocal);
+
+  if (utcMs >= futureThreshold) {
+    return undefined;
+  }
+
+  return utcMs;
+}
+
+/**
+ * Parses YYYY-MM-DD or parseable date string as UTC midnight.
+ * An unparseable date or one in the future returns undefined.
+ */
+function parseWatchedDate(raw?: string): number | undefined {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return parseYmdDate(trimmed);
+  }
+
+  const ms = Date.parse(trimmed);
+  if (isNaN(ms) || !Number.isFinite(ms)) {
+    return undefined;
+  }
+
+  const d = new Date(ms);
+  const utcMidnight = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const now = new Date(Date.now());
+  const tomorrowUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  const tomorrowLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+  const futureThreshold = Math.max(tomorrowUtc, tomorrowLocal);
+
+  if (utcMidnight >= futureThreshold) {
+    return undefined;
+  }
+
+  return utcMidnight;
+}
+
+/**
+ * Parses ISO string (written by CineMatch export) or YYYY-MM-DD.
+ * An unparseable date or one in the future returns undefined.
+ */
+function parseIsoDate(raw?: string): number | undefined {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return parseYmdDate(trimmed);
+  }
+
+  const ms = Date.parse(trimmed);
+  if (isNaN(ms) || !Number.isFinite(ms)) {
+    return undefined;
+  }
+
+  if (ms > Date.now()) {
+    return undefined;
+  }
+
+  return ms;
 }
 
 /**
@@ -73,6 +291,7 @@ export function parseMovieCsv(csvContent: string): CsvParseResult {
     let rawGenres: string | undefined;
     let rawDirector: string | undefined;
     let tmdbId: number | undefined;
+    let ratedAt: number | undefined;
 
     const rawTmdbId = row['tmdb_id'] || row['tmdb id'] || row['movie_id'] || row['movieid'];
     if (rawTmdbId) {
@@ -89,11 +308,13 @@ export function parseMovieCsv(csvContent: string): CsvParseResult {
       sourceId = row['const']; // e.g. tt1234567
       rawGenres = row['genres'];
       rawDirector = row['directors'];
+      ratedAt = parseYmdDate(row['date rated']);
     } else if (format === 'letterboxd') {
       rawTitle = row['name'] || '';
       rawYear = row['year'] || '';
       rawRating = row['rating'] || '';
       sourceId = row['letterboxd uri'];
+      ratedAt = parseYmdDate(row['watched date']) ?? parseYmdDate(row['date']);
     } else {
       // Generic fallback
       rawTitle = row['title'] || row['name'] || row['film'] || '';
@@ -101,6 +322,9 @@ export function parseMovieCsv(csvContent: string): CsvParseResult {
       rawRating = row['rating'] || row['user_rating'] || row['score'] || '';
       rawDirector = row['director'];
       rawGenres = row['genres'] || row['genre'];
+      if (row['rated_at'] || row['rated at']) {
+        ratedAt = parseIsoDate(row['rated_at'] || row['rated at']);
+      }
     }
 
     const title = rawTitle.trim();
@@ -150,6 +374,7 @@ export function parseMovieCsv(csvContent: string): CsvParseResult {
       tmdbId,
       director: rawDirector ? rawDirector.trim() : undefined,
       genres,
+      ratedAt,
     });
   });
 

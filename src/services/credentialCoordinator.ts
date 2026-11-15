@@ -153,6 +153,7 @@ class CredentialCoordinator {
             tmdbValue: res.credentials.tmdbValue,
             geminiApiKey: res.credentials.geminiApiKey,
             openRouterApiKey: res.credentials.openRouterApiKey,
+            groqApiKey: res.credentials.groqApiKey,
           });
           this.isRemembered = true;
         } else {
@@ -230,14 +231,17 @@ class CredentialCoordinator {
     tmdbValue: string;
     geminiApiKey: string;
     openRouterApiKey: string;
+    groqApiKey?: string;
     rememberOnDevice: boolean;
   }): Promise<{ success: boolean; error?: string }> {
     const opRev = ++this.operationRevision;
+    const groqKey = options.groqApiKey ?? '';
 
     // 1. Immediately commit credentials to session memory store
     credentialStore.setTmdbCredential(options.tmdbType, options.tmdbValue);
     credentialStore.setGeminiKey(options.geminiApiKey);
     credentialStore.setOpenRouterKey(options.openRouterApiKey);
+    credentialStore.setGroqKey(groqKey);
 
     if (!isVaultSupported()) {
       this.notify();
@@ -259,6 +263,7 @@ class CredentialCoordinator {
           tmdbValue: options.tmdbValue.trim(),
           geminiApiKey: options.geminiApiKey.trim(),
           openRouterApiKey: options.openRouterApiKey.trim(),
+          groqApiKey: groqKey.trim(),
         };
 
         if (options.rememberOnDevice) {
@@ -301,7 +306,7 @@ class CredentialCoordinator {
    * Clears session memory immediately, then rewrites remaining saved credentials or clears vault.
    * Preserves remember preference!
    */
-  public async forgetProvider(provider: 'tmdb' | 'gemini' | 'openRouter'): Promise<void> {
+  public async forgetProvider(provider: 'tmdb' | 'gemini' | 'openRouter' | 'groq'): Promise<void> {
     const opRev = ++this.operationRevision;
 
     // 1. Immediate session memory clear
@@ -311,6 +316,8 @@ class CredentialCoordinator {
       credentialStore.forgetGemini();
     } else if (provider === 'openRouter') {
       credentialStore.forgetOpenRouter();
+    } else if (provider === 'groq') {
+      credentialStore.forgetGroq();
     }
 
     if (!isVaultSupported() || !this.rememberEnabled || !this.isRemembered) {
@@ -325,6 +332,7 @@ class CredentialCoordinator {
         tmdbValue: current.tmdbValue,
         geminiApiKey: current.geminiApiKey,
         openRouterApiKey: current.openRouterApiKey,
+        groqApiKey: current.groqApiKey,
       };
 
       try {
@@ -443,6 +451,7 @@ class CredentialCoordinator {
               tmdbValue: current.tmdbValue,
               geminiApiKey: current.geminiApiKey,
               openRouterApiKey: current.openRouterApiKey,
+              groqApiKey: current.groqApiKey,
             });
             if (opRev === this.operationRevision) {
               this.isRemembered = true;
@@ -465,7 +474,8 @@ class CredentialCoordinator {
     return (
       (!creds.tmdbValue || !creds.tmdbValue.trim()) &&
       (!creds.geminiApiKey || !creds.geminiApiKey.trim()) &&
-      (!creds.openRouterApiKey || !creds.openRouterApiKey.trim())
+      (!creds.openRouterApiKey || !creds.openRouterApiKey.trim()) &&
+      (!creds.groqApiKey || !creds.groqApiKey.trim())
     );
   }
 }

@@ -1,9 +1,19 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Movie, UserRating, Recommendation, AISettings, TasteStats } from '../types';
+import { Movie, UserRating, HiddenFilm, Recommendation, AISettings, AIProviderId, TasteStats } from '../types';
 import { aiManager } from '../services/ai/aiManager';
-import { getCandidateRecommendationPool, getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
+import { getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
+import { matchesPreferredEras, sortAndRankRecommendations, coerceScore } from './recommendationUtils';
+import { getCandidateRecommendationPool } from '../services/recommendation/candidateSources';
+import { selectRejectedFilms } from '../services/recommendation/rejectedFilms';
+import { recsSettingsFingerprint } from '../services/recommendation/settingsFingerprint';
 import { credentialStore } from '../services/credentialStore';
 import { credentialCoordinator } from '../services/credentialCoordinator';
+import {
+  readRecommendationCache,
+  writeRecommendationCache,
+  patchRecommendationCache,
+  getFingerprintAndRatedCountFallbacks,
+} from './recommendationCache';
 import {
   STORAGE_KEYS,
   safeGetItem,
@@ -15,8 +25,11 @@ import {
   getStorageStatus,
   subscribeStorageStatus,
   hasUnsavedStorageChanges,
+  validateHiddenFilms,
+  capHiddenFilms,
 } from '../services/storage';
 import { OPENROUTER_DEFAULT_MODEL, sanitizeOpenRouterModel } from '../services/ai/openRouterProvider';
+import { GROQ_DEFAULT_MODEL, sanitizeGroqModel } from '../services/ai/groqProvider';
 
 const DEFAULT_SETTINGS: AISettings = {
   activeProvider: 'gemini',
@@ -24,18 +37,32 @@ const DEFAULT_SETTINGS: AISettings = {
   geminiModel: 'gemini-3.8-flash',
   openRouterApiKey: '',
   openRouterModel: OPENROUTER_DEFAULT_MODEL,
+  groqApiKey: '',
+  groqModel: GROQ_DEFAULT_MODEL,
   serendipityLevel: 40,
   selectedVibes: [],
   preferredEras: [],
 };
 
+export interface ToastAction {
+  label: string;
+  onAction: () => void;
+}
+
 interface MovieStoreContextType {
   ratings: Record<number, UserRating>;
   watchlist: number[];
+  hiddenFilms: HiddenFilm[];
+  hideFilm: (movieId: number, reason: HiddenFilm['reason'], title?: string) => void;
+  hideFilms: (entries: HiddenFilm[]) => void;
+  restoreFilm: (movieId: number) => void;
   watchlistMovies: Record<number, Movie>;
   aiSettings: AISettings;
   recommendations: Recommendation[];
   cachedRecsTimestamp: number | null;
+  recsSettingsStale: boolean;
+  lastRunFingerprint: string | null;
+  lastRunRatedCount: number | null;
   isGeneratingRecs: boolean;
   lastProviderUsed: string;
   recommendationError: string | null;
@@ -59,7 +86,8 @@ interface MovieStoreContextType {
   dismissRecommendation: (movieId: number) => void;
   tasteStats: TasteStats;
   toastMessage: string | null;
-  showToast: (msg: string) => void;
+  toastAction: ToastAction | null;
+  showToast: (msg: string, action?: ToastAction) => void;
   clearToast: () => void;
   storageWarning: string | null;
 }
@@ -204,6 +232,15 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   });
 
+  const [hiddenFilms, setHiddenFilms] = useState<HiddenFilm[]>(() => {
+    try {
+      const saved = safeGetItem(STORAGE_KEYS.HIDDEN_FILMS);
+      return saved ? validateHiddenFilms(JSON.parse(saved)) : [];
+    } catch {
+      return [];
+    }
+  });
+
   // 3. AI Settings State (sanitized without keys)
   const [aiSettings, setAiSettings] = useState<AISettings>(() => {
     try {
@@ -215,6 +252,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           activeProvider: parsed.activeProvider || 'gemini',
           geminiModel: parsed.geminiModel || 'gemini-3.8-flash',
           openRouterModel: sanitizeOpenRouterModel(parsed.openRouterModel),
+          groqModel: sanitizeGroqModel(parsed.groqModel),
           serendipityLevel: typeof parsed.serendipityLevel === 'number' ? parsed.serendipityLevel : 40,
           selectedVibes: Array.isArray(parsed.selectedVibes) ? parsed.selectedVibes : [],
           preferredEras: Array.isArray(parsed.preferredEras) ? parsed.preferredEras : [],
@@ -231,61 +269,53 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [selectedMovieForModal, setSelectedMovieForModal] = useState<Movie | null>(null);
   
   // Recommendations state (hydrated from cache if present for instant/offline display)
+  const [initialCachedRecs] = useState(() => readRecommendationCache());
+
   const [recommendations, setRecommendations] = useState<Recommendation[]>(() => {
-    try {
-      const cached = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return Array.isArray(parsed.recommendations) ? parsed.recommendations : [];
-      }
-      return [];
-    } catch {
-      return [];
-    }
+    if (!initialCachedRecs) return [];
+    const hiddenIds = new Set(hiddenFilms.map((h) => h.movieId));
+    return initialCachedRecs.recommendations
+      .filter((r: Recommendation) => !hiddenIds.has(r?.movie?.id))
+      .map((r: Recommendation, idx: number) => ({ ...r, rank: idx + 1 }));
   });
 
   const [cachedRecsTimestamp, setCachedRecsTimestamp] = useState<number | null>(() => {
-    try {
-      const cached = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return typeof parsed.generatedAt === 'number' ? parsed.generatedAt : null;
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    return initialCachedRecs ? initialCachedRecs.generatedAt : null;
   });
 
+  const [lastRunFingerprint, setLastRunFingerprint] = useState<string | null>(() => {
+    return initialCachedRecs?.settingsFingerprint ?? null;
+  });
+
+  const [lastRunRatedCount, setLastRunRatedCount] = useState<number | null>(() => {
+    return initialCachedRecs?.ratedCount ?? null;
+  });
+
+  const recsSettingsStale = useMemo(() => {
+    if (recommendations.length === 0) return false;
+    if (!lastRunFingerprint) return false;
+    const currentFingerprint = recsSettingsFingerprint(aiSettings);
+    return currentFingerprint !== lastRunFingerprint;
+  }, [recommendations.length, lastRunFingerprint, aiSettings]);
+
   const [lastProviderUsed, setLastProviderUsed] = useState<string>(() => {
-    try {
-      const cached = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return typeof parsed.usedProvider === 'string' ? parsed.usedProvider : '';
-      }
-      return '';
-    } catch {
-      return '';
-    }
+    return initialCachedRecs ? initialCachedRecs.usedProvider : '';
   });
 
   const [aiTasteAnalysis, setAiTasteAnalysis] = useState<string | null>(() => {
-    try {
-      const cached = safeGetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return typeof parsed.tasteAnalysis === 'string' ? parsed.tasteAnalysis : null;
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    return initialCachedRecs?.tasteAnalysis ?? null;
   });
 
   const [isGeneratingRecs, setIsGeneratingRecs] = useState<boolean>(false);
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<{
+    id: number;
+    message: string;
+    action: ToastAction | null;
+  } | null>(null);
+  const toastIdRef = useRef<number>(0);
+  const toastMessage = toast?.message ?? null;
+  const toastAction = toast?.action ?? null;
   const [storageStatus, setStorageStatus] = useState(() => getStorageStatus());
 
   // References for request racing and cancellation
@@ -294,13 +324,29 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const ratingVersionsRef = useRef<Map<number, number>>(new Map());
   const failedWatchlistIdsRef = useRef<Set<number>>(new Set());
   const storeEpochRef = useRef<number>(0);
+  const hiddenFilmsRef = useRef<HiddenFilm[]>(hiddenFilms);
+  const recommendationsRef = useRef<Recommendation[]>(recommendations);
+  const watchlistRef = useRef<number[]>(watchlist);
 
-  const showToast = useCallback((msg: string) => {
-    setToastMessage(msg);
+  useEffect(() => {
+    recommendationsRef.current = recommendations;
+  }, [recommendations]);
+
+  useEffect(() => {
+    watchlistRef.current = watchlist;
+  }, [watchlist]);
+
+  const showToast = useCallback((msg: string, action?: ToastAction) => {
+    toastIdRef.current += 1;
+    setToast({
+      id: toastIdRef.current,
+      message: msg,
+      action: action ?? null,
+    });
   }, []);
 
   const clearToast = useCallback(() => {
-    setToastMessage(null);
+    setToast(null);
   }, []);
 
   const cancelGeneration = useCallback(() => {
@@ -340,12 +386,13 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [storageStatus]);
 
   useEffect(() => {
-    if (!toastMessage) return;
+    if (!toast) return;
+    const durationMs = toast.action ? 8000 : 3000;
     const timer = setTimeout(() => {
-      setToastMessage(null);
-    }, 3000);
+      setToast(null);
+    }, durationMs);
     return () => clearTimeout(timer);
-  }, [toastMessage]);
+  }, [toast]);
 
   // Persistence Effects (safe against QuotaExceededError; storage warning banner shown reactively via storageStatus)
   useEffect(() => {
@@ -357,6 +404,10 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [watchlist]);
 
   useEffect(() => {
+    hiddenFilmsRef.current = hiddenFilms;
+  }, [hiddenFilms]);
+
+  useEffect(() => {
     safeSetItem(STORAGE_KEYS.WATCHLIST_MOVIES, JSON.stringify(watchlistMovies));
   }, [watchlistMovies]);
 
@@ -366,6 +417,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       activeProvider: aiSettings.activeProvider,
       geminiModel: aiSettings.geminiModel,
       openRouterModel: aiSettings.openRouterModel,
+      groqModel: aiSettings.groqModel,
       serendipityLevel: aiSettings.serendipityLevel,
       selectedVibes: aiSettings.selectedVibes,
       preferredEras: aiSettings.preferredEras,
@@ -485,23 +537,127 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, [cancelGeneration]);
 
-  const dismissRecommendation = useCallback((movieId: number) => {
-    setRecommendations((prev) => {
-      const next = prev
+  const dismissRecommendation = useCallback(
+    (movieId: number) => {
+      const next = recommendationsRef.current
         .filter((r) => r.movie.id !== movieId)
         .map((r, idx) => ({ ...r, rank: idx + 1 }));
-      safeSetItem(
-        STORAGE_KEYS.CACHED_RECOMMENDATIONS,
-        JSON.stringify({
+
+      recommendationsRef.current = next;
+      setRecommendations(next);
+
+      const cached = readRecommendationCache();
+      if (cached) {
+        patchRecommendationCache({
           recommendations: next,
-          generatedAt: Date.now(),
+          ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
+        });
+      } else {
+        writeRecommendationCache({
+          recommendations: next,
+          generatedAt: cachedRecsTimestamp ?? Date.now(),
           usedProvider: lastProviderUsed,
           tasteAnalysis: aiTasteAnalysis,
-        })
-      );
-      return next;
-    });
-  }, [lastProviderUsed, aiTasteAnalysis]);
+          ...getFingerprintAndRatedCountFallbacks({}, lastRunFingerprint, lastRunRatedCount),
+        });
+      }
+    },
+    [cachedRecsTimestamp, lastProviderUsed, aiTasteAnalysis, lastRunFingerprint, lastRunRatedCount]
+  );
+
+  const hideFilm = useCallback(
+    (movieId: number, reason: HiddenFilm['reason'], title?: string) => {
+      const hiddenAt = Date.now();
+      const rec = recommendationsRef.current.find((r) => r?.movie?.id === movieId);
+      let year: string | undefined;
+      let genres: string[] | undefined;
+      if (rec) {
+        if (rec.movie.release_date) {
+          const match = rec.movie.release_date.match(/\b(\d{4})\b/);
+          if (match) {
+            year = match[1];
+          }
+        }
+        if (Array.isArray(rec.movie.genres)) {
+          const names = rec.movie.genres
+            .map((g) => (typeof g === 'string' ? g : g?.name))
+            .filter((name): name is string => typeof name === 'string' && name.trim().length > 0);
+          if (names.length > 0) {
+            genres = names;
+          }
+        }
+      }
+
+      const resolvedTitle =
+        typeof title === 'string' && title.trim().length > 0
+          ? title.trim()
+          : rec?.movie?.title?.trim();
+
+      const entry: HiddenFilm = {
+        movieId,
+        reason,
+        hiddenAt,
+        ...(resolvedTitle !== undefined ? { title: resolvedTitle } : {}),
+        ...(year !== undefined ? { year } : {}),
+        ...(genres !== undefined ? { genres } : {}),
+      };
+
+      const applyHide = (list: HiddenFilm[]): HiddenFilm[] => {
+        const filtered = list.some((h) => h.movieId === movieId)
+          ? list.filter((h) => h.movieId !== movieId)
+          : list;
+        return capHiddenFilms([...filtered, entry]);
+      };
+
+      const nextHidden = applyHide(hiddenFilmsRef.current);
+      hiddenFilmsRef.current = nextHidden;
+      safeSetItem(STORAGE_KEYS.HIDDEN_FILMS, JSON.stringify(nextHidden));
+      setHiddenFilms(nextHidden);
+
+      if (recommendationsRef.current.some((r) => r.movie.id === movieId)) {
+        const next = recommendationsRef.current
+          .filter((r) => r.movie.id !== movieId)
+          .map((r, idx) => ({ ...r, rank: idx + 1 }));
+        recommendationsRef.current = next;
+        setRecommendations(next);
+
+        const cached = readRecommendationCache();
+        if (cached) {
+          patchRecommendationCache({
+            recommendations: next,
+            ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
+          });
+        } else {
+          writeRecommendationCache({
+            recommendations: next,
+            generatedAt: cachedRecsTimestamp ?? Date.now(),
+            usedProvider: lastProviderUsed,
+            tasteAnalysis: aiTasteAnalysis,
+            ...getFingerprintAndRatedCountFallbacks({}, lastRunFingerprint, lastRunRatedCount),
+          });
+        }
+      } else {
+        const cached = readRecommendationCache();
+        if (cached && cached.recommendations.some((r) => r?.movie?.id === movieId)) {
+          const filteredRecs = cached.recommendations
+            .filter((r) => r?.movie?.id !== movieId)
+            .map((r, idx) => ({ ...r, rank: idx + 1 }));
+          patchRecommendationCache({
+            recommendations: filteredRecs,
+            ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
+          });
+        }
+      }
+    },
+    [cachedRecsTimestamp, lastProviderUsed, aiTasteAnalysis, lastRunFingerprint, lastRunRatedCount]
+  );
+
+  const restoreFilm = useCallback((movieId: number) => {
+    const nextHidden = hiddenFilmsRef.current.filter((h) => h.movieId !== movieId);
+    hiddenFilmsRef.current = nextHidden;
+    safeSetItem(STORAGE_KEYS.HIDDEN_FILMS, JSON.stringify(nextHidden));
+    setHiddenFilms(nextHidden);
+  }, []);
 
   const removeRating = useCallback((movieId: number) => {
     cancelGeneration();
@@ -522,14 +678,17 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const movieId = typeof movieOrId === 'number' ? movieOrId : movieOrId.id;
     const movieObj = typeof movieOrId === 'object' ? movieOrId : null;
 
-    setWatchlist((prev) => {
-      const removing = prev.includes(movieId);
-      if (removing) {
-        removeLegacyWatchlistRecord(movieId);
-        return prev.filter((id) => id !== movieId);
-      }
-      return [movieId, ...prev];
-    });
+    const removing = watchlistRef.current.includes(movieId);
+    if (removing) {
+      removeLegacyWatchlistRecord(movieId);
+      const next = watchlistRef.current.filter((id) => id !== movieId);
+      watchlistRef.current = next;
+      setWatchlist(next);
+    } else {
+      const next = [movieId, ...watchlistRef.current];
+      watchlistRef.current = next;
+      setWatchlist(next);
+    }
 
     setWatchlistMovies((prev) => {
       const next = { ...prev };
@@ -544,6 +703,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const clearWatchlist = useCallback(() => {
     failedWatchlistIdsRef.current.clear();
+    watchlistRef.current = [];
     setWatchlist([]);
     setWatchlistMovies({});
     const r1 = safeRemoveItem(STORAGE_KEYS.WATCHLIST);
@@ -563,11 +723,13 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const importRatingsList = useCallback((newRatings: UserRating[]) => {
     cancelGeneration();
+    newRatings.forEach((r) => {
+      const currentVersion = (ratingVersionsRef.current.get(r.movieId) || 0) + 1;
+      ratingVersionsRef.current.set(r.movieId, currentVersion);
+    });
     setRatings((prev) => {
       const next = { ...prev };
       newRatings.forEach((r) => {
-        const currentVersion = (ratingVersionsRef.current.get(r.movieId) || 0) + 1;
-        ratingVersionsRef.current.set(r.movieId, currentVersion);
         next[r.movieId] = r;
       });
       return next;
@@ -604,16 +766,23 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     credentialCoordinator.clearAllData();
     setRatings({});
     setWatchlist([]);
+    watchlistRef.current = [];
     setWatchlistMovies({});
+    setHiddenFilms([]);
+    hiddenFilmsRef.current = [];
     setRecommendations([]);
+    recommendationsRef.current = [];
     setAiTasteAnalysis(null);
     setCachedRecsTimestamp(null);
+    setLastRunFingerprint(null);
+    setLastRunRatedCount(null);
 
     // Explicitly remove v2 keys
     const r1 = safeRemoveItem(STORAGE_KEYS.RATINGS);
     const r2 = safeRemoveItem(STORAGE_KEYS.WATCHLIST);
     const r3 = safeRemoveItem(STORAGE_KEYS.WATCHLIST_MOVIES);
     const r4 = safeRemoveItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
+    const rHidden = safeRemoveItem(STORAGE_KEYS.HIDDEN_FILMS);
 
     // Invalidate and remove all legacy recovery sources so nothing can resurrect
     const r5 = safeRemoveItem(STORAGE_KEYS.LEGACY_RATINGS);
@@ -624,7 +793,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     // Authoritatively mark migration complete so fresh launches never re-migrate
     const r9 = safeSetItem(STORAGE_KEYS.STORAGE_META, 'migrated_from_v1');
 
-    if (!r1 || !r2 || !r3 || !r4 || !r5 || !r6 || !r7 || !r8 || !r9 || hasUnsavedStorageChanges()) {
+    if (!r1 || !r2 || !r3 || !r4 || !rHidden || !r5 || !r6 || !r7 || !r8 || !r9 || hasUnsavedStorageChanges()) {
       showToast('All data cleared in memory, but some storage changes could not be saved.');
     } else {
       showToast('All data cleared.');
@@ -726,20 +895,25 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     try {
       const userRatingsList = Object.values(ratings);
       const ratedIds = new Set(userRatingsList.map((r) => r.movieId));
+      const hiddenIds = new Set(hiddenFilmsRef.current.map((h) => h.movieId));
+      const excludedIds = new Set<number>([...ratedIds, ...hiddenIds]);
 
       // Seeds: top rated movies
       const topSeeds = [...userRatingsList]
-        .filter((r) => r.rating >= 7)
+        .filter((r) => r.rating >= 7 && !hiddenIds.has(r.movieId))
         .sort((a, b) => b.rating - a.rating)
         .map((r) => r.movieId);
+
+      const unhiddenRatings = userRatingsList.filter((r) => !hiddenIds.has(r.movieId));
 
       // 1. Fetch candidates from TMDB
       const candidatePool = await getCandidateRecommendationPool(
         {
           seedMovieIds: topSeeds,
-          excludeIds: ratedIds,
+          excludeIds: excludedIds,
           preferredEras: aiSettings.preferredEras,
           selectedVibes: aiSettings.selectedVibes,
+          userRatings: unhiddenRatings,
         },
         controller.signal
       );
@@ -750,8 +924,20 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const providerId = aiSettings.activeProvider;
       const creds = credentialStore.getCredentials();
-      const apiKey = providerId === 'gemini' ? creds.geminiApiKey : creds.openRouterApiKey;
-      const model = providerId === 'gemini' ? aiSettings.geminiModel : aiSettings.openRouterModel;
+      const apiKeyByProvider: Record<AIProviderId, string | undefined> = {
+        gemini: creds.geminiApiKey,
+        openrouter: creds.openRouterApiKey,
+        groq: creds.groqApiKey,
+        local: '',
+      };
+      const apiKey = apiKeyByProvider[providerId];
+      const modelByProvider: Record<AIProviderId, string | undefined> = {
+        gemini: aiSettings.geminiModel,
+        openrouter: aiSettings.openRouterModel,
+        groq: aiSettings.groqModel,
+        local: undefined,
+      };
+      const model = modelByProvider[providerId];
 
       // 2. Dispatch to AI Provider (or Local fallback)
       const result = await aiManager.generateRecommendations(
@@ -762,6 +948,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           serendipityLevel: aiSettings.serendipityLevel,
           selectedVibes: aiSettings.selectedVibes,
           preferredEras: aiSettings.preferredEras,
+          rejectedFilms: selectRejectedFilms(hiddenFilmsRef.current),
           apiKey,
           model,
         },
@@ -773,6 +960,10 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
 
       let finalRecommendations: Recommendation[] = [];
+      const mappedPoolRecs = (result.recommendations || []).map((rec) => ({
+        ...rec,
+        score: coerceScore(rec.score),
+      }));
 
       // 3. Hydrate AI unconstrained discoveries if present
       if (result.unconstrainedDiscoveries && result.unconstrainedDiscoveries.length > 0 && credentialStore.hasTmdb()) {
@@ -785,15 +976,19 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           return;
         }
 
+        const latestExcludedIds = new Set<number>([
+          ...excludedIds,
+          ...hiddenFilmsRef.current.map((h) => h.movieId),
+        ]);
         const discoveryRecs: Recommendation[] = [];
         const seenIds = new Set<number>();
 
         for (const { item: discovery, movie } of paired) {
-          if (!ratedIds.has(movie.id) && !seenIds.has(movie.id)) {
+          if (!latestExcludedIds.has(movie.id) && !seenIds.has(movie.id) && matchesPreferredEras(movie.release_date, aiSettings.preferredEras)) {
             seenIds.add(movie.id);
             discoveryRecs.push({
               movie,
-              score: discovery.score,
+              score: coerceScore(discovery.score),
               rank: 0,
               reason: discovery.reason,
               serendipityType: 'ai_cinephile_discovery',
@@ -803,29 +998,33 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           }
         }
 
-        const poolRecs = (result.recommendations || []).filter(
-          (rec) => !seenIds.has(rec.movie.id) && !ratedIds.has(rec.movie.id)
+        const poolRecs = mappedPoolRecs.filter(
+          (rec) => !seenIds.has(rec.movie.id) && !latestExcludedIds.has(rec.movie.id)
         );
 
-        const merged = [...discoveryRecs, ...poolRecs].sort((a, b) => b.score - a.score);
-        finalRecommendations = merged.map((rec, idx) => ({
-          ...rec,
-          rank: idx + 1,
-        }));
+        finalRecommendations = sortAndRankRecommendations([...discoveryRecs, ...poolRecs]);
       } else {
-        finalRecommendations = (result.recommendations || [])
-          .filter((rec) => !ratedIds.has(rec.movie.id))
-          .map((rec, idx) => ({
-            ...rec,
-            rank: idx + 1,
-          }));
+        const latestExcludedIds = new Set<number>([
+          ...excludedIds,
+          ...hiddenFilmsRef.current.map((h) => h.movieId),
+        ]);
+        const poolRecs = mappedPoolRecs.filter(
+          (rec) => !latestExcludedIds.has(rec.movie.id)
+        );
+        finalRecommendations = sortAndRankRecommendations(poolRecs);
       }
 
       if (activeGenerationIdRef.current === generationId && !controller.signal.aborted) {
         const timestamp = Date.now();
+        const fingerprint = recsSettingsFingerprint(aiSettings);
+        const currentRatedCount = userRatingsList.length;
+
+        recommendationsRef.current = finalRecommendations;
         setRecommendations(finalRecommendations);
         setCachedRecsTimestamp(timestamp);
         setLastProviderUsed(result.usedProvider);
+        setLastRunFingerprint(fingerprint);
+        setLastRunRatedCount(currentRatedCount);
         if (result.tasteAnalysis) {
           setAiTasteAnalysis(result.tasteAnalysis);
         }
@@ -834,15 +1033,14 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
 
         // Persist last successful recommendations
-        safeSetItem(
-          STORAGE_KEYS.CACHED_RECOMMENDATIONS,
-          JSON.stringify({
-            recommendations: finalRecommendations,
-            generatedAt: timestamp,
-            usedProvider: result.usedProvider,
-            tasteAnalysis: result.tasteAnalysis,
-          })
-        );
+        writeRecommendationCache({
+          recommendations: finalRecommendations,
+          generatedAt: timestamp,
+          usedProvider: result.usedProvider,
+          tasteAnalysis: result.tasteAnalysis,
+          settingsFingerprint: fingerprint,
+          ratedCount: currentRatedCount,
+        });
       }
     } catch (err: unknown) {
       if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
@@ -858,17 +1056,81 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         activeAbortControllerRef.current = null;
       }
     }
-  }, [ratings, aiSettings, cancelGeneration, showToast]);
+  }, [ratings, hiddenFilms, aiSettings, cancelGeneration, showToast]);
+
+  const hideFilms = useCallback(
+    (entries: HiddenFilm[]) => {
+      if (!entries || entries.length === 0) return;
+
+      const newEntriesMap = new Map<number, HiddenFilm>();
+      for (const entry of entries) {
+        newEntriesMap.set(entry.movieId, entry);
+      }
+
+      const remaining = hiddenFilmsRef.current.filter((h) => !newEntriesMap.has(h.movieId));
+      const combined = [...remaining, ...newEntriesMap.values()];
+      const nextHidden = capHiddenFilms(combined);
+
+      hiddenFilmsRef.current = nextHidden;
+      safeSetItem(STORAGE_KEYS.HIDDEN_FILMS, JSON.stringify(nextHidden));
+      setHiddenFilms(nextHidden);
+
+      const newlyHiddenIds = new Set(entries.map((e) => e.movieId));
+
+      if (recommendationsRef.current.some((r) => newlyHiddenIds.has(r.movie.id))) {
+        const next = recommendationsRef.current
+          .filter((r) => !newlyHiddenIds.has(r.movie.id))
+          .map((r, idx) => ({ ...r, rank: idx + 1 }));
+        recommendationsRef.current = next;
+        setRecommendations(next);
+
+        const cached = readRecommendationCache();
+        if (cached) {
+          patchRecommendationCache({
+            recommendations: next,
+            ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
+          });
+        } else {
+          writeRecommendationCache({
+            recommendations: next,
+            generatedAt: cachedRecsTimestamp ?? Date.now(),
+            usedProvider: lastProviderUsed,
+            tasteAnalysis: aiTasteAnalysis,
+            ...getFingerprintAndRatedCountFallbacks({}, lastRunFingerprint, lastRunRatedCount),
+          });
+        }
+      } else {
+        const cached = readRecommendationCache();
+        if (cached && cached.recommendations.some((r) => newlyHiddenIds.has(r?.movie?.id))) {
+          const filteredRecs = cached.recommendations
+            .filter((r) => !newlyHiddenIds.has(r?.movie?.id))
+            .map((r, idx) => ({ ...r, rank: idx + 1 }));
+          patchRecommendationCache({
+            recommendations: filteredRecs,
+            ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
+          });
+        }
+      }
+    },
+    [cachedRecsTimestamp, lastProviderUsed, aiTasteAnalysis, lastRunFingerprint, lastRunRatedCount]
+  );
 
   return (
     <MovieStoreContext.Provider
       value={{
         ratings,
         watchlist,
+        hiddenFilms,
+        hideFilm,
+        hideFilms,
+        restoreFilm,
         watchlistMovies,
         aiSettings,
         recommendations,
         cachedRecsTimestamp,
+        recsSettingsStale,
+        lastRunFingerprint,
+        lastRunRatedCount,
         isGeneratingRecs,
         lastProviderUsed,
         recommendationError,
@@ -890,6 +1152,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         dismissRecommendation,
         tasteStats,
         toastMessage,
+        toastAction,
         showToast,
         clearToast,
         storageWarning,

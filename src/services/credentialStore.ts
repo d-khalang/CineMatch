@@ -5,6 +5,7 @@ export interface CredentialsState {
   tmdbValue: string;
   geminiApiKey: string;
   openRouterApiKey: string;
+  groqApiKey: string;
 }
 
 export type ConnectionStatus = 'untested' | 'testing' | 'valid' | 'invalid';
@@ -19,6 +20,7 @@ export interface CredentialStatusState {
   tmdb: ProviderStatus;
   gemini: ProviderStatus;
   openRouter: ProviderStatus;
+  groq: ProviderStatus;
 }
 
 type CredentialListener = () => void;
@@ -30,12 +32,14 @@ class SessionCredentialStore {
     tmdbValue: '',
     geminiApiKey: '',
     openRouterApiKey: '',
+    groqApiKey: '',
   };
 
   private statuses: CredentialStatusState = {
     tmdb: { status: 'untested' },
     gemini: { status: 'untested' },
     openRouter: { status: 'untested' },
+    groq: { status: 'untested' },
   };
 
   // Generation/version token to invalidate inflight connection tests on credential changes
@@ -51,6 +55,7 @@ class SessionCredentialStore {
       tmdb: { ...this.statuses.tmdb },
       gemini: { ...this.statuses.gemini },
       openRouter: { ...this.statuses.openRouter },
+      groq: { ...this.statuses.groq },
     };
   }
 
@@ -80,6 +85,13 @@ class SessionCredentialStore {
     this.notify();
   }
 
+  public setGroqKey(key: string): void {
+    this.versionToken += 1;
+    this.credentials.groqApiKey = key.trim();
+    this.statuses.groq = { status: 'untested' };
+    this.notify();
+  }
+
   public forgetTmdb(): void {
     this.versionToken += 1;
     this.credentials.tmdbValue = '';
@@ -101,6 +113,13 @@ class SessionCredentialStore {
     this.notify();
   }
 
+  public forgetGroq(): void {
+    this.versionToken += 1;
+    this.credentials.groqApiKey = '';
+    this.statuses.groq = { status: 'untested' };
+    this.notify();
+  }
+
   public forgetAll(): void {
     this.versionToken += 1;
     this.credentials = {
@@ -108,11 +127,13 @@ class SessionCredentialStore {
       tmdbValue: '',
       geminiApiKey: '',
       openRouterApiKey: '',
+      groqApiKey: '',
     };
     this.statuses = {
       tmdb: { status: 'untested' },
       gemini: { status: 'untested' },
       openRouter: { status: 'untested' },
+      groq: { status: 'untested' },
     };
     this.notify();
   }
@@ -124,17 +145,19 @@ class SessionCredentialStore {
       tmdbValue: creds.tmdbValue.trim(),
       geminiApiKey: creds.geminiApiKey.trim(),
       openRouterApiKey: creds.openRouterApiKey.trim(),
+      groqApiKey: creds.groqApiKey.trim(),
     };
     this.statuses = {
       tmdb: { status: 'untested' },
       gemini: { status: 'untested' },
       openRouter: { status: 'untested' },
+      groq: { status: 'untested' },
     };
     this.notify();
   }
 
   public setStatus(
-    provider: 'tmdb' | 'gemini' | 'openRouter',
+    provider: 'tmdb' | 'gemini' | 'openRouter' | 'groq',
     status: ConnectionStatus,
     message?: string,
     versionAtTestStart?: number
@@ -161,6 +184,10 @@ class SessionCredentialStore {
 
   public hasOpenRouter(): boolean {
     return Boolean(this.credentials.openRouterApiKey);
+  }
+
+  public hasGroq(): boolean {
+    return Boolean(this.credentials.groqApiKey);
   }
 
   public subscribe(listener: CredentialListener): () => void {

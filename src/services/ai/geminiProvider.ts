@@ -1,6 +1,7 @@
 import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './types';
 import { Movie } from '../../types';
 import { validateAndSanitizeAIResponse } from './aiResponseValidator';
+import { formatRejectedFilmsBlock } from '../recommendation/rejectedFilms';
 
 export const GEMINI_AVAILABLE_MODELS = [
   { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Latest & Recommended)', speed: 'Fastest', tier: 'Free Quota' },
@@ -106,11 +107,14 @@ export class GeminiProvider implements IAIProvider {
       overview: m.overview ? m.overview.slice(0, 200) + '...' : '',
     }));
 
+    const rejectedBlock = formatRejectedFilmsBlock(request.rejectedFilms || []);
+    const rejectedSection = rejectedBlock ? `\n\n${rejectedBlock}` : '';
+
     const systemPrompt = `You are Cinephile AI, an expert cinematic curator and film critic.
 Synthesize the user's taste based on their 1-10 movie ratings.
 
 User Profile:
-${JSON.stringify(ratingsSummary, null, 2)}
+${JSON.stringify(ratingsSummary, null, 2)}${rejectedSection}
 
 Serendipity Preference: ${serendipityLevel}% (0 = Safe bets matching user comfort zone, 100 = Wildcard discoveries).
 Vibe Filters: ${selectedVibes.length ? selectedVibes.join(', ') : 'None'}

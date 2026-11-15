@@ -1,87 +1,43 @@
 import { Movie, UserRating } from '../types';
-import { credentialStore, TmdbCredentialType } from './credentialStore';
+import { type TmdbCredentialType } from './credentialStore';
 import { getSeriesKey, FRANCHISE_ALIASES } from '../constants/franchises';
-export { getSeriesKey, FRANCHISE_ALIASES };
+import {
+  BASE_URL,
+  BoundedLRUMap,
+  clearTmdbCache,
+  ERA_DATE_RANGES,
+  fetchFromTMDB,
+  GENRE_MAP,
+  getEraDateRange,
+  getGenreIdsForVibes,
+  MissingTmdbCredentialError,
+  VIBE_GENRE_MAP,
+  VIBE_KEYWORD_MAP,
+} from './tmdbClient';
+import {
+  getCandidateRecommendationPool,
+  type CandidateRecommendationOptions,
+} from './recommendation/candidateSources';
 
-export class MissingTmdbCredentialError extends Error {
-  constructor() {
-    super(
-      'TMDB credential required. Please configure your TMDB API Read Access Token or API Key in Settings.'
-    );
-    this.name = 'MissingTmdbCredentialError';
-  }
-}
+export {
+  getSeriesKey,
+  FRANCHISE_ALIASES,
+  BoundedLRUMap,
+  clearTmdbCache,
+  ERA_DATE_RANGES,
+  fetchFromTMDB,
+  GENRE_MAP,
+  getEraDateRange,
+  getGenreIdsForVibes,
+  MissingTmdbCredentialError,
+  VIBE_GENRE_MAP,
+  VIBE_KEYWORD_MAP,
+  getCandidateRecommendationPool,
+  type CandidateRecommendationOptions,
+};
 
-// Bounded LRU Map to prevent unbounded memory growth during long browsing sessions
-export class BoundedLRUMap<K, V> {
-  private max: number;
-  private map: Map<K, V>;
-
-  constructor(max = 250) {
-    this.max = max;
-    this.map = new Map();
-  }
-
-  get(key: K): V | undefined {
-    const item = this.map.get(key);
-    if (item !== undefined) {
-      this.map.delete(key);
-      this.map.set(key, item);
-    }
-    return item;
-  }
-
-  set(key: K, value: V): void {
-    if (this.map.has(key)) {
-      this.map.delete(key);
-    } else if (this.map.size >= this.max) {
-      const oldestKey = this.map.keys().next().value;
-      if (oldestKey !== undefined) {
-        this.map.delete(oldestKey);
-      }
-    }
-    this.map.set(key, value);
-  }
-
-  has(key: K): boolean {
-    return this.map.has(key);
-  }
-
-  clear(): void {
-    this.map.clear();
-  }
-
-  get size(): number {
-    return this.map.size;
-  }
-}
-
-const BASE_URL = 'https://api.themoviedb.org/3';
 export const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 export const BACKDROP_BASE_URL = 'https://image.tmdb.org/t/p/w1280';
-
-// Genre Dictionary
-export const GENRE_MAP: Record<number, string> = {
-  28: 'Action',
-  12: 'Adventure',
-  16: 'Animation',
-  35: 'Comedy',
-  80: 'Crime',
-  99: 'Documentary',
-  18: 'Drama',
-  10751: 'Family',
-  14: 'Fantasy',
-  36: 'History',
-  27: 'Horror',
-  10402: 'Music',
-  9648: 'Mystery',
-  10749: 'Romance',
-  878: 'Sci-Fi',
-  10770: 'TV Movie',
-  53: 'Thriller',
-  10752: 'War',
-  37: 'Western',
-};
 
 // Curated Taste Calibration Archetypes
 export const CALIBRATION_CATEGORIES = [
@@ -95,7 +51,6 @@ export const CALIBRATION_CATEGORIES = [
 ];
 
 // Bounded in-memory caches
-const cache = new BoundedLRUMap<string, any>(250);
 const hydrationCache = new BoundedLRUMap<string, Movie | null>(250);
 export const failedMovieIds = new Set<number>();
 
@@ -109,20 +64,6 @@ export function redactTmdbUrl(urlStr: string): string {
   } catch {
     return urlStr.replace(/api_key=[^&]+/gi, 'api_key=[REDACTED]');
   }
-}
-
-// Helper to compose multiple abort signals safely
-function composeSignals(signals: (AbortSignal | undefined)[]): AbortSignal {
-  const controller = new AbortController();
-  for (const s of signals) {
-    if (!s) continue;
-    if (s.aborted) {
-      controller.abort(s.reason);
-      return controller.signal;
-    }
-    s.addEventListener('abort', () => controller.abort(s.reason), { once: true });
-  }
-  return controller.signal;
 }
 
 export async function testTmdbConnection(
@@ -159,69 +100,6 @@ export async function testTmdbConnection(
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, message: `Connection error: ${msg}` };
-  }
-}
-
-async function fetchFromTMDB<T>(
-  endpoint: string,
-  params: Record<string, string | number> = {},
-  signal?: AbortSignal
-): Promise<T> {
-  const creds = credentialStore.getCredentials();
-  if (!creds.tmdbValue) {
-    throw new MissingTmdbCredentialError();
-  }
-
-  const queryObj: Record<string, string> = {
-    language: 'en-US',
-    ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
-  };
-
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-  };
-
-  if (creds.tmdbType === 'read_access_token') {
-    headers['Authorization'] = `Bearer ${creds.tmdbValue}`;
-  } else {
-    // API key parameter (v3 query auth exception)
-    queryObj['api_key'] = creds.tmdbValue;
-  }
-
-  const query = new URLSearchParams(queryObj);
-  const url = `${BASE_URL}${endpoint}?${query.toString()}`;
-
-  // Cache key excludes credentials
-  const cleanCacheKey = `${endpoint}?${new URLSearchParams({
-    language: 'en-US',
-    ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
-  }).toString()}`;
-
-  if (cache.has(cleanCacheKey)) {
-    return cache.get(cleanCacheKey) as T;
-  }
-
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(new Error('TMDB request timed out after 15s')), 15000);
-  const combinedSignal = composeSignals([signal, timeoutController.signal]);
-
-  try {
-    const response = await fetch(url, { headers, signal: combinedSignal });
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        throw new Error('Invalid TMDB credential. Please verify your token/key in Settings.');
-      }
-      if (response.status === 429) {
-        throw new Error('TMDB rate limit reached. Please wait a moment before retrying.');
-      }
-      throw new Error(`TMDB API Error: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    cache.set(cleanCacheKey, data);
-    return data;
-  } finally {
-    clearTimeout(timeoutId);
   }
 }
 
@@ -481,7 +359,6 @@ export async function getCalibrationMovies(
   return { movies: dedupedMovies, totalPages: data.total_pages || 10 };
 }
 
-
 export async function searchMovies(
   query: string,
   page = 1,
@@ -585,312 +462,6 @@ export async function findMovieByExternalId(
   } catch {
     return null;
   }
-}
-
-// Era date range mapping (e.g., '70s' -> 1970-01-01 to 1979-12-31)
-export const ERA_DATE_RANGES: Record<string, { gte: string; lte: string }> = {
-  '70s': { gte: '1970-01-01', lte: '1979-12-31' },
-  '80s': { gte: '1980-01-01', lte: '1989-12-31' },
-  '90s': { gte: '1990-01-01', lte: '1999-12-31' },
-  '2000s': { gte: '2000-01-01', lte: '2009-12-31' },
-  '2010s': { gte: '2010-01-01', lte: '2019-12-31' },
-  '2020s': { gte: '2020-01-01', lte: '2029-12-31' },
-};
-
-export function getEraDateRange(era: string): { gte: string; lte: string } | null {
-  const normalized = era.trim().toLowerCase();
-  if (ERA_DATE_RANGES[normalized]) {
-    return ERA_DATE_RANGES[normalized];
-  }
-  // Match 4-digit era like "1970s" or "2000s"
-  const fourDigitMatch = normalized.match(/^(\d{4})s?$/);
-  if (fourDigitMatch) {
-    const startYear = parseInt(fourDigitMatch[1], 10);
-    return {
-      gte: `${startYear}-01-01`,
-      lte: `${startYear + 9}-12-31`,
-    };
-  }
-  // Match 2-digit era like "60s"
-  const twoDigitMatch = normalized.match(/^(\d{2})s?$/);
-  if (twoDigitMatch) {
-    const twoDigits = parseInt(twoDigitMatch[1], 10);
-    const startYear = twoDigits >= 30 ? 1900 + twoDigits : 2000 + twoDigits;
-    return {
-      gte: `${startYear}-01-01`,
-      lte: `${startYear + 9}-12-31`,
-    };
-  }
-  return null;
-}
-
-// Vibe mapping to TMDB Genre IDs
-export const VIBE_GENRE_MAP: Record<string, number[]> = {
-  'mind-bending': [878, 9648, 53],       // Sci-Fi, Mystery, Thriller
-  'dark & gritty': [80, 53, 27],         // Crime, Thriller, Horror
-  'heartfelt': [18, 10749, 35, 10751],   // Drama, Romance, Comedy, Family
-  'atmospheric': [9648, 27, 878, 18],    // Mystery, Horror, Sci-Fi, Drama
-  'fast-paced': [28, 12, 53],            // Action, Adventure, Thriller
-  'philosophical': [18, 878, 9648],      // Drama, Sci-Fi, Mystery
-  'visually stunning': [878, 14, 12, 16],// Sci-Fi, Fantasy, Adventure, Animation
-  'plot twists': [9648, 53, 80],         // Mystery, Thriller, Crime
-  'slow-burn': [18, 9648, 53],           // Drama, Mystery, Thriller
-  'high tension': [53, 28, 80],          // Thriller, Action, Crime
-};
-
-// Vibe mapping to TMDB Keyword IDs for additional thematic depth
-export const VIBE_KEYWORD_MAP: Record<string, number[]> = {
-  'mind-bending': [4379, 310, 9715], // time travel, artificial intelligence, psychological thriller
-  'dark & gritty': [10714, 5340],     // serial killer, neo-noir
-  'plot twists': [275311, 9715],      // plot twist, psychological thriller
-  'atmospheric': [9715, 5340],        // psychological thriller, neo-noir
-};
-
-export function getGenreIdsForVibes(vibes: string[]): number[] {
-  const genreSet = new Set<number>();
-  for (const v of vibes) {
-    const key = v.trim().toLowerCase();
-    if (VIBE_GENRE_MAP[key]) {
-      VIBE_GENRE_MAP[key].forEach((id) => genreSet.add(id));
-      continue;
-    }
-    // Keyword or partial matches
-    if (key.includes('mind') || key.includes('scifi') || key.includes('sci-fi')) {
-      [878, 9648, 53].forEach((id) => genreSet.add(id));
-    } else if (key.includes('dark') || key.includes('grit') || key.includes('crime')) {
-      [80, 53, 27].forEach((id) => genreSet.add(id));
-    } else if (key.includes('heart') || key.includes('feel') || key.includes('romance')) {
-      [18, 10749, 35, 10751].forEach((id) => genreSet.add(id));
-    } else if (key.includes('twist') || key.includes('mystery')) {
-      [9648, 53, 80].forEach((id) => genreSet.add(id));
-    } else if (key.includes('action') || key.includes('fast') || key.includes('tension')) {
-      [28, 53, 80].forEach((id) => genreSet.add(id));
-    } else if (key.includes('horror') || key.includes('scary')) {
-      [27, 53, 9648].forEach((id) => genreSet.add(id));
-    } else if (key.includes('comedy') || key.includes('funny')) {
-      [35, 10749].forEach((id) => genreSet.add(id));
-    }
-  }
-  return Array.from(genreSet);
-}
-
-export interface CandidateRecommendationOptions {
-  seedMovieIds?: number[];
-  genres?: number[];
-  minVoteAverage?: number;
-  excludeIds?: Set<number>;
-  preferredEras?: string[];
-  selectedVibes?: string[];
-}
-
-export async function getCandidateRecommendationPool(
-  options: CandidateRecommendationOptions = {},
-  signal?: AbortSignal
-): Promise<Movie[]> {
-  const {
-    seedMovieIds = [],
-    genres = [],
-    minVoteAverage,
-    excludeIds = new Set(),
-    preferredEras = [],
-    selectedVibes = [],
-  } = options;
-
-  // 1. Fetch recommendations & similar movies for top seeds
-  const seedPromises = seedMovieIds.slice(0, 4).map(async (id) => {
-    try {
-      const recs = await fetchFromTMDB<{ results: any[] }>(`/movie/${id}/recommendations`, {}, signal);
-      const similar = await fetchFromTMDB<{ results: any[] }>(`/movie/${id}/similar`, {}, signal);
-      return [...(recs.results || []), ...(similar.results || [])];
-    } catch {
-      return [];
-    }
-  });
-
-  // 2. Discover trending & top critically rated movies as baseline
-  const baseDiscoverPromises = [
-    fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-      sort_by: 'vote_average.desc',
-      'vote_count.gte': 800,
-      page: 1,
-    }, signal)
-      .then((d) => d.results || [])
-      .catch(() => []),
-    fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-      sort_by: 'popularity.desc',
-      'vote_count.gte': 1500,
-      page: 1,
-    }, signal)
-      .then((d) => d.results || [])
-      .catch(() => []),
-    fetchFromTMDB<{ results: any[] }>('/trending/movie/week', {}, signal)
-      .then((d) => d.results || [])
-      .catch(() => []),
-  ];
-
-  // 3. Resolve Genre IDs and Keyword IDs for selected vibes
-  const vibeGenreIds = getGenreIdsForVibes(selectedVibes);
-  const targetGenreIds = Array.from(new Set([...vibeGenreIds, ...genres]));
-  const withGenresParam = targetGenreIds.length > 0 ? targetGenreIds.join('|') : undefined;
-
-  const keywordIds = Array.from(
-    new Set(
-      selectedVibes.flatMap((v) => VIBE_KEYWORD_MAP[v.trim().toLowerCase()] || [])
-    )
-  );
-
-  // 4. Era-targeted Discover queries
-  const eraPromises: Promise<any[]>[] = [];
-  if (preferredEras.length > 0) {
-    preferredEras.slice(0, 4).forEach((era) => {
-      const range = getEraDateRange(era);
-      if (range) {
-        // High-rated in this era
-        eraPromises.push(
-          fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-            'primary_release_date.gte': range.gte,
-            'primary_release_date.lte': range.lte,
-            sort_by: 'vote_average.desc',
-            'vote_count.gte': 300,
-            page: 1,
-          }, signal)
-            .then((d) => d.results || [])
-            .catch(() => [])
-        );
-
-        // Popular in this era
-        eraPromises.push(
-          fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-            'primary_release_date.gte': range.gte,
-            'primary_release_date.lte': range.lte,
-            sort_by: 'popularity.desc',
-            'vote_count.gte': 400,
-            page: 1,
-          }, signal)
-            .then((d) => d.results || [])
-            .catch(() => [])
-        );
-
-        // Targeted Era + Vibe genre query
-        if (withGenresParam) {
-          eraPromises.push(
-            fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-              'primary_release_date.gte': range.gte,
-              'primary_release_date.lte': range.lte,
-              with_genres: withGenresParam,
-              sort_by: 'vote_average.desc',
-              'vote_count.gte': 150,
-              page: 1,
-            }, signal)
-              .then((d) => d.results || [])
-              .catch(() => [])
-          );
-        }
-      }
-    });
-  }
-
-  // 5. Vibe-targeted Discover queries (broad across all eras if vibes are selected)
-  const vibePromises: Promise<any[]>[] = [];
-  if (withGenresParam) {
-    vibePromises.push(
-      fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-        with_genres: withGenresParam,
-        sort_by: 'vote_average.desc',
-        'vote_count.gte': 600,
-        page: 1,
-      }, signal)
-        .then((d) => d.results || [])
-        .catch(() => [])
-    );
-    vibePromises.push(
-      fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-        with_genres: withGenresParam,
-        sort_by: 'popularity.desc',
-        'vote_count.gte': 1000,
-        page: 1,
-      }, signal)
-        .then((d) => d.results || [])
-        .catch(() => [])
-    );
-  }
-
-  if (keywordIds.length > 0) {
-    vibePromises.push(
-      fetchFromTMDB<{ results: any[] }>('/discover/movie', {
-        with_keywords: keywordIds.join('|'),
-        sort_by: 'vote_average.desc',
-        'vote_count.gte': 250,
-        page: 1,
-      }, signal)
-        .then((d) => d.results || [])
-        .catch(() => [])
-    );
-  }
-
-  // Execute all queries concurrently
-  const [seedResultsArray, baseResultsArray, eraResultsArray, vibeResultsArray] = await Promise.all([
-    Promise.all(seedPromises),
-    Promise.all(baseDiscoverPromises),
-    Promise.all(eraPromises),
-    Promise.all(vibePromises),
-  ]);
-
-  const formatRawMovie = (m: any): Movie | null => {
-    if (!m || !m.id || !m.poster_path || excludeIds.has(m.id)) return null;
-    if (minVoteAverage && (m.vote_average || 0) < minVoteAverage) return null;
-    return {
-      id: m.id,
-      title: m.title,
-      overview: m.overview || '',
-      poster_path: m.poster_path,
-      backdrop_path: m.backdrop_path,
-      release_date: m.release_date || '',
-      vote_average: m.vote_average || 0,
-      vote_count: m.vote_count || 0,
-      genre_ids: m.genre_ids || [],
-      genres: (m.genre_ids || []).map((gid: number) => ({ id: gid, name: GENRE_MAP[gid] || 'Other' })),
-    };
-  };
-
-  const toMovieList = (rawList: any[]): Movie[] => {
-    const list: Movie[] = [];
-    const seen = new Set<number>();
-    for (const item of rawList) {
-      const formatted = formatRawMovie(item);
-      if (formatted && !seen.has(formatted.id)) {
-        seen.add(formatted.id);
-        list.push(formatted);
-      }
-    }
-    return list;
-  };
-
-  const seedList = toMovieList(seedResultsArray.flat());
-  const eraList = toMovieList(eraResultsArray.flat());
-  const vibeList = toMovieList(vibeResultsArray.flat());
-  const baseList = toMovieList(baseResultsArray.flat());
-
-  // 6. Blend candidates: interleave seed similarity, era-targeted, vibe-targeted, and base discoveries
-  const poolMap = new Map<number, Movie>();
-  const addMovie = (m: Movie) => {
-    if (!poolMap.has(m.id)) {
-      poolMap.set(m.id, m);
-    }
-  };
-
-  const streams = [seedList, eraList, vibeList, baseList].filter((s) => s.length > 0);
-  const maxLen = Math.max(0, ...streams.map((s) => s.length));
-
-  for (let i = 0; i < maxLen; i++) {
-    for (const stream of streams) {
-      if (i < stream.length) {
-        addMovie(stream[i]);
-      }
-    }
-  }
-
-  return Array.from(poolMap.values());
 }
 
 export async function hydrateMovieByTitleAndYear(
@@ -1028,4 +599,3 @@ export async function hydrateBatchWithDiscoveries<T extends { title: string; yea
 
   return paired;
 }
-

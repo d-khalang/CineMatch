@@ -111,6 +111,15 @@ export const handlers = [
     });
   }),
 
+  http.get('https://api.themoviedb.org/3/trending/movie/:timeWindow', () => {
+    return HttpResponse.json({
+      page: 1,
+      results: [],
+      total_pages: 1,
+      total_results: 0,
+    });
+  }),
+
   // Gemini Mock
   http.post('https://generativelanguage.googleapis.com/v1beta/models/:model', async () => {
     return HttpResponse.json({
@@ -136,6 +145,41 @@ export const handlers = [
             ],
           },
         },
+      ],
+    });
+  }),
+
+  // Groq Mocks
+  http.post('https://api.groq.com/openai/v1/chat/completions', async () => {
+    return HttpResponse.json({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              taste_analysis: 'Groq synthesized profile.',
+              pool_rankings: [
+                {
+                  id: 101,
+                  score: 93,
+                  reason: 'Matches taste for cerebral sci-fi thrillers.',
+                  serendipityType: 'safe_bet',
+                  highlightTags: ['Sci-Fi', 'Thriller'],
+                },
+              ],
+              unconstrained_discoveries: [],
+            }),
+          },
+        },
+      ],
+    });
+  }),
+
+  http.get('https://api.groq.com/openai/v1/models', () => {
+    return HttpResponse.json({
+      data: [
+        { id: 'llama-3.3-70b-versatile', active: true },
+        { id: 'llama-3.1-8b-instant', active: true },
+        { id: 'whisper-large-v3', active: true },
       ],
     });
   }),

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X,
   Cpu,
@@ -14,20 +14,74 @@ import {
   Lock,
 } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
-import { aiManager } from '../services/ai/aiManager';
+import { aiManager, stripGroqOrgId } from '../services/ai/aiManager';
 import { GEMINI_AVAILABLE_MODELS } from '../services/ai/geminiProvider';
 import {
   OPENROUTER_AVAILABLE_MODELS,
   OPENROUTER_DEFAULT_MODEL,
   sanitizeOpenRouterModel,
 } from '../services/ai/openRouterProvider';
+import {
+  GROQ_DEFAULT_MODEL,
+  sanitizeGroqModel,
+  fetchGroqModels,
+} from '../services/ai/groqProvider';
 import { testTmdbConnection } from '../services/tmdb';
 import { credentialStore, TmdbCredentialType } from '../services/credentialStore';
 import { isVaultSupported } from '../services/nativeCredentialVault';
 import { credentialCoordinator } from '../services/credentialCoordinator';
 import { AIProviderId } from '../types';
+import { useModalA11y } from './useModalA11y';
 
 const CUSTOM_OPENROUTER_OPTION = '__custom__';
+const GROQ_RATE_LIMIT_MESSAGE = 'Groq is rate limiting this key. Try again in a minute.';
+
+function getSavedGroqModel(model?: string): string {
+  const trimmed = typeof model === 'string' ? model.trim() : '';
+  return trimmed && trimmed !== GROQ_DEFAULT_MODEL ? trimmed : '';
+}
+
+function formatGroqError(err: unknown, fallback = 'Failed to load Groq models.'): string {
+  if (err && typeof err === 'object') {
+    const status = 'status' in err ? (err as { status: unknown }).status : undefined;
+    if (status === 413 || status === 429) {
+      return GROQ_RATE_LIMIT_MESSAGE;
+    }
+  }
+  const rawMsg = err instanceof Error ? err.message : String(err ?? '');
+  const msg = rawMsg.trim() || fallback;
+  if (/\b(413|429)\b|rate[ _-]?limit|too many requests/i.test(msg)) {
+    return GROQ_RATE_LIMIT_MESSAGE;
+  }
+  return stripGroqOrgId(msg) || fallback;
+}
+
+function buildGroqOptions(
+  models: { id: string; name: string }[],
+  savedModel: string,
+  selectedModel: string
+): { id: string; label: string }[] {
+  const options: { id: string; label: string }[] = [];
+  const seenIds = new Set<string>();
+
+  if (savedModel && !models.some((m) => m.id === savedModel)) {
+    options.push({ id: savedModel, label: `${savedModel} (saved)` });
+    seenIds.add(savedModel);
+  }
+
+  for (const m of models) {
+    if (!seenIds.has(m.id)) {
+      options.push({ id: m.id, label: m.id === savedModel ? `${m.id} (saved)` : m.name || m.id });
+      seenIds.add(m.id);
+    }
+  }
+
+  if (selectedModel && !seenIds.has(selectedModel)) {
+    options.push({ id: selectedModel, label: selectedModel });
+  }
+
+  return options;
+}
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -35,7 +89,61 @@ interface SettingsModalProps {
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
-  const { aiSettings, updateAISettings, showToast } = useMovieStore();
+  const modalRef = useModalA11y(isOpen, onClose);
+  const { aiSettings, updateAISettings, showToast, hiddenFilms = [], restoreFilm } = useMovieStore();
+
+  const sortedHiddenFilms = useMemo(() => {
+    return [...hiddenFilms].sort(
+      (a, b) => (Number(b.hiddenAt) || 0) - (Number(a.hiddenAt) || 0)
+    );
+  }, [hiddenFilms]);
+
+  const visibleHiddenFilms = useMemo(() => {
+    return sortedHiddenFilms.slice(0, 50);
+  }, [sortedHiddenFilms]);
+
+  const pendingRestoreFocusRef = useRef<{ type: 'button'; movieId: number } | { type: 'heading' } | null>(null);
+  const hiddenFilmsHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const restoreButtonsRef = useRef<Record<number, HTMLButtonElement | null>>({});
+
+  const handleRestoreFilm = (movieId: number) => {
+    const currentIndex = visibleHiddenFilms.findIndex((f) => f.movieId === movieId);
+    if (currentIndex !== -1) {
+      if (visibleHiddenFilms.length <= 1) {
+        pendingRestoreFocusRef.current = { type: 'heading' };
+      } else if (currentIndex < visibleHiddenFilms.length - 1) {
+        pendingRestoreFocusRef.current = {
+          type: 'button',
+          movieId: visibleHiddenFilms[currentIndex + 1].movieId,
+        };
+      } else {
+        pendingRestoreFocusRef.current = {
+          type: 'button',
+          movieId: visibleHiddenFilms[currentIndex - 1].movieId,
+        };
+      }
+    }
+    restoreFilm(movieId);
+  };
+
+  useEffect(() => {
+    if (!pendingRestoreFocusRef.current) return;
+    const target = pendingRestoreFocusRef.current;
+    pendingRestoreFocusRef.current = null;
+
+    if (target.type === 'heading') {
+      hiddenFilmsHeadingRef.current?.focus();
+    } else if (target.type === 'button') {
+      const btn =
+        restoreButtonsRef.current[target.movieId] ||
+        document.querySelector<HTMLButtonElement>(`button[aria-label^="Restore:"][data-movie-id="${target.movieId}"]`);
+      if (btn) {
+        btn.focus();
+      } else {
+        hiddenFilmsHeadingRef.current?.focus();
+      }
+    }
+  });
 
   const [provider, setProvider] = useState<AIProviderId>(aiSettings.activeProvider);
   const [geminiModel, setGeminiModel] = useState<string>(aiSettings.geminiModel || 'gemini-3.8-flash');
@@ -53,6 +161,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     isInitialCustomOpenRouter ? initialOpenRouterModel : ''
   );
 
+  const initialGroqModel = sanitizeGroqModel(aiSettings.groqModel);
+  const [groqModel, setGroqModel] = useState<string>(initialGroqModel);
+  const [savedGroqModel, setSavedGroqModel] = useState<string>(() =>
+    getSavedGroqModel(aiSettings.groqModel)
+  );
+  const [groqModels, setGroqModels] = useState<{ id: string; name: string }[]>([]);
+  const [isLoadingGroqModels, setIsLoadingGroqModels] = useState<boolean>(false);
+  const [groqModelsError, setGroqModelsError] = useState<string | null>(null);
+
+  const groqFetchAbortControllerRef = useRef<AbortController | null>(null);
+  const groqFetchRequestIdRef = useRef<number>(0);
+  const hasAutoLoadedGroqRef = useRef<boolean>(false);
+  const aiTestRequestIdRef = useRef<number>(0);
+
   // In-memory credentials state
   const [tmdbType, setTmdbType] = useState<TmdbCredentialType>(
     credentialStore.getCredentials().tmdbType
@@ -61,6 +183,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [geminiKey, setGeminiKey] = useState<string>(credentialStore.getCredentials().geminiApiKey);
   const [openRouterKey, setOpenRouterKey] = useState<string>(
     credentialStore.getCredentials().openRouterApiKey
+  );
+  const [groqKey, setGroqKey] = useState<string>(
+    credentialStore.getCredentials().groqApiKey
   );
 
   // Coordinator state & remember preference
@@ -72,6 +197,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [showTmdbKey, setShowTmdbKey] = useState<boolean>(false);
   const [showGeminiKey, setShowGeminiKey] = useState<boolean>(false);
   const [showOpenRouterKey, setShowOpenRouterKey] = useState<boolean>(false);
+  const [showGroqKey, setShowGroqKey] = useState<boolean>(false);
 
   // Separate test connection statuses
   const [tmdbTesting, setTmdbTesting] = useState<{ loading: boolean; success?: boolean; message?: string }>({
@@ -80,6 +206,57 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [aiTesting, setAiTesting] = useState<{ loading: boolean; success?: boolean; message?: string }>({
     loading: false,
   });
+
+  const resetAiTesting = () => {
+    aiTestRequestIdRef.current += 1;
+    setAiTesting({ loading: false });
+  };
+
+  const clearGroqModelsState = () => {
+    groqFetchRequestIdRef.current += 1;
+    groqFetchAbortControllerRef.current?.abort();
+    groqFetchAbortControllerRef.current = null;
+    setIsLoadingGroqModels(false);
+    setGroqModels((prev) => (prev.length === 0 ? prev : []));
+    setGroqModelsError(null);
+  };
+
+  const handleLoadGroqModels = async (keyToUse: string) => {
+    const trimmedKey = keyToUse.trim();
+    if (!trimmedKey) return;
+
+    if (groqFetchAbortControllerRef.current) {
+      groqFetchAbortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    groqFetchAbortControllerRef.current = controller;
+    const reqId = ++groqFetchRequestIdRef.current;
+
+    setIsLoadingGroqModels(true);
+    setGroqModelsError(null);
+
+    try {
+      const models = await fetchGroqModels(trimmedKey, controller.signal);
+      if (reqId === groqFetchRequestIdRef.current && !controller.signal.aborted) {
+        setGroqModels(models);
+        setIsLoadingGroqModels(false);
+      }
+    } catch (err: unknown) {
+      if (controller.signal.aborted || reqId !== groqFetchRequestIdRef.current) {
+        return;
+      }
+      setIsLoadingGroqModels(false);
+      setGroqModelsError(formatGroqError(err));
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (groqFetchAbortControllerRef.current) {
+        groqFetchAbortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   // Subscribe to coordinator state changes
   useEffect(() => {
@@ -98,6 +275,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setTmdbValue(creds.tmdbValue);
       setGeminiKey(creds.geminiApiKey);
       setOpenRouterKey(creds.openRouterApiKey);
+      const currentGroqKey = creds.groqApiKey;
+      setGroqKey(currentGroqKey);
       setProvider(aiSettings.activeProvider);
       setGeminiModel(aiSettings.geminiModel || 'gemini-3.8-flash');
       const activeModel = sanitizeOpenRouterModel(aiSettings.openRouterModel);
@@ -105,9 +284,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       setOpenRouterModel(activeModel);
       setIsCustomOpenRouterModel(isCustom);
       setCustomOpenRouterModelInput(isCustom ? activeModel : '');
+      const activeGroqModel = sanitizeGroqModel(aiSettings.groqModel);
+      setGroqModel(activeGroqModel);
+      setSavedGroqModel(getSavedGroqModel(aiSettings.groqModel));
       setRememberOnDevice(coord.rememberEnabled);
+      hasAutoLoadedGroqRef.current = false;
+      clearGroqModelsState();
+      if (aiSettings.activeProvider === 'groq' && currentGroqKey.trim()) {
+        hasAutoLoadedGroqRef.current = true;
+        handleLoadGroqModels(currentGroqKey.trim());
+      }
       setTmdbTesting({ loading: false });
-      setAiTesting({ loading: false });
+      resetAiTesting();
+    } else {
+      hasAutoLoadedGroqRef.current = false;
+      clearGroqModelsState();
+      resetAiTesting();
     }
   }, [isOpen, aiSettings]);
 
@@ -127,26 +319,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   // Invalidate AI test when drafts change
   const handleGeminiKeyChange = (val: string) => {
     setGeminiKey(val);
-    setAiTesting({ loading: false });
+    resetAiTesting();
+  };
+
+  const handleGroqKeyChange = (val: string) => {
+    setGroqKey(val);
+    resetAiTesting();
+    // A list loaded for the old key doesn't apply to this one.
+    clearGroqModelsState();
   };
 
   const handleOpenRouterKeyChange = (val: string) => {
     setOpenRouterKey(val);
-    setAiTesting({ loading: false });
+    resetAiTesting();
+  };
+
+  const handleGroqModelChange = (m: string) => {
+    setGroqModel(m);
+    resetAiTesting();
   };
 
   const handleProviderChange = (p: AIProviderId) => {
     setProvider(p);
-    setAiTesting({ loading: false });
+    if (p === 'groq' && groqKey.trim() && !hasAutoLoadedGroqRef.current) {
+      hasAutoLoadedGroqRef.current = true;
+      handleLoadGroqModels(groqKey.trim());
+    }
+    resetAiTesting();
   };
 
   const handleGeminiModelChange = (m: string) => {
     setGeminiModel(m);
-    setAiTesting({ loading: false });
+    resetAiTesting();
   };
 
   const handleOpenRouterSelectChange = (val: string) => {
-    setAiTesting({ loading: false });
+    resetAiTesting();
     if (val === CUSTOM_OPENROUTER_OPTION) {
       setIsCustomOpenRouterModel(true);
       const current = customOpenRouterModelInput.trim();
@@ -160,7 +368,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const handleCustomOpenRouterModelChange = (val: string) => {
     setCustomOpenRouterModelInput(val);
     setOpenRouterModel(val.trim() || OPENROUTER_DEFAULT_MODEL);
-    setAiTesting({ loading: false });
+    resetAiTesting();
   };
 
   const handleAppendFreeSuffix = () => {
@@ -169,9 +377,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       const updated = `${current}:free`;
       setCustomOpenRouterModelInput(updated);
       setOpenRouterModel(updated);
-      setAiTesting({ loading: false });
+      resetAiTesting();
     }
   };
+
+  const groqOptions = buildGroqOptions(groqModels, savedGroqModel, groqModel);
 
   const handleTestTmdb = async () => {
     if (!tmdbValue.trim()) {
@@ -197,28 +407,58 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       return;
     }
 
-    const key = provider === 'gemini' ? geminiKey : openRouterKey;
+    let key = '';
+    let providerName = '';
+    let model = '';
+    let statusKey: 'gemini' | 'openRouter' | 'groq' = 'gemini';
+
+    if (provider === 'gemini') {
+      key = geminiKey;
+      providerName = 'Gemini';
+      model = geminiModel;
+      statusKey = 'gemini';
+    } else if (provider === 'openrouter') {
+      key = openRouterKey;
+      providerName = 'OpenRouter';
+      model = isCustomOpenRouterModel
+        ? customOpenRouterModelInput.trim() || OPENROUTER_DEFAULT_MODEL
+        : openRouterModel;
+      statusKey = 'openRouter';
+    } else if (provider === 'groq') {
+      key = groqKey;
+      providerName = 'Groq';
+      model = groqModel || GROQ_DEFAULT_MODEL;
+      statusKey = 'groq';
+    }
     if (!key.trim()) {
-      setAiTesting({ loading: false, success: false, message: `Please enter your ${provider === 'gemini' ? 'Gemini' : 'OpenRouter'} API key first.` });
+      setAiTesting({ loading: false, success: false, message: `Please enter your ${providerName} API key first.` });
       return;
     }
 
+    const testReqId = ++aiTestRequestIdRef.current;
     setAiTesting({ loading: true });
     const version = credentialStore.getVersion();
     const activeProviderObj = aiManager.getProvider(provider);
-    const rawModel = provider === 'gemini' ? geminiModel : openRouterModel;
-    const model =
-      provider === 'openrouter' && isCustomOpenRouterModel
-        ? customOpenRouterModelInput.trim() || OPENROUTER_DEFAULT_MODEL
-        : rawModel;
 
-    const statusKey: 'gemini' | 'openRouter' = provider === 'openrouter' ? 'openRouter' : 'gemini';
     try {
       const result = await activeProviderObj.testConnection(key.trim(), model);
-      setAiTesting({ loading: false, success: result.success, message: result.message });
-      credentialStore.setStatus(statusKey, result.success ? 'valid' : 'invalid', result.message, version);
+      if (testReqId !== aiTestRequestIdRef.current) {
+        return;
+      }
+      let displayMessage = result.message;
+      if (provider === 'groq' && !result.success) {
+        displayMessage = formatGroqError(displayMessage, 'Connection test failed.');
+      }
+      setAiTesting({ loading: false, success: result.success, message: displayMessage });
+      credentialStore.setStatus(statusKey, result.success ? 'valid' : 'invalid', displayMessage, version);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Connection test failed.';
+      if (testReqId !== aiTestRequestIdRef.current) {
+        return;
+      }
+      let msg = err instanceof Error ? err.message : 'Connection test failed.';
+      if (provider === 'groq') {
+        msg = formatGroqError(err, 'Connection test failed.');
+      }
       setAiTesting({ loading: false, success: false, message: msg });
       credentialStore.setStatus(statusKey, 'invalid', msg, version);
     }
@@ -233,13 +473,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const handleForgetGemini = async () => {
     setGeminiKey('');
-    setAiTesting({ loading: false });
+    resetAiTesting();
     await credentialCoordinator.forgetProvider('gemini');
+  };
+
+  const handleForgetGroq = async () => {
+    handleGroqKeyChange('');
+    await credentialCoordinator.forgetProvider('groq');
   };
 
   const handleForgetOpenRouter = async () => {
     setOpenRouterKey('');
-    setAiTesting({ loading: false });
+    resetAiTesting();
     await credentialCoordinator.forgetProvider('openRouter');
   };
 
@@ -252,6 +497,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         tmdbValue,
         geminiApiKey: geminiKey,
         openRouterApiKey: openRouterKey,
+        groqApiKey: groqKey,
         rememberOnDevice,
       });
 
@@ -264,11 +510,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         activeProvider: provider,
         geminiModel,
         openRouterModel: resolvedOpenRouterModel,
+        groqModel: sanitizeGroqModel(groqModel),
       });
 
       if (!res.success) {
         showToast(`Keys usable for this session. Persistence error: ${res.error || 'Failed to save to device.'}`);
-      } else if (isVaultSupported() && rememberOnDevice && (tmdbValue.trim() || geminiKey.trim() || openRouterKey.trim())) {
+      } else if (isVaultSupported() && rememberOnDevice && (tmdbValue.trim() || geminiKey.trim() || openRouterKey.trim() || groqKey.trim())) {
         showToast('Keys saved on this device.');
       } else {
         showToast('Keys available for this session only.');
@@ -279,14 +526,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }
   };
 
-
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 animate-fadeIn"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-xl max-h-[90dvh] flex flex-col rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-2xl overflow-hidden p-6 sm:p-8 space-y-5"
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-modal-title"
+        className="relative w-full max-w-xl max-h-[90dvh] flex flex-col rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-lg overflow-hidden p-6 sm:p-8 space-y-5"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -296,13 +546,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               <Cpu className="w-5 h-5 text-[var(--accent-secondary)]" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">API Credentials & AI Engine</h2>
+              <h2 id="settings-modal-title" className="text-lg font-bold text-white">API Credentials & AI Engine</h2>
               <p className="text-xs text-slate-400">Configure direct client-side provider access</p>
             </div>
           </div>
 
           <button
             onClick={onClose}
+            aria-label="Close settings"
             className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-[var(--bg-surface-hover)] transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -315,7 +566,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           {coordinatorState.deletionFailureWarning && (
             <div
               role="alert"
-              className="p-3.5 rounded-2xl bg-amber-950/80 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between gap-3 shadow-md"
+              className="p-3.5 rounded-2xl bg-amber-950/80 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between gap-3"
             >
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
@@ -349,7 +600,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
           {/* Android: Remember on this device Switch */}
           {isVaultSupported() && (
-            <div className="p-4 rounded-2xl bg-[var(--surface-hover)] border border-[var(--border-subtle)] space-y-2">
+            <div className="p-4 rounded-2xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] space-y-2">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5 pr-4">
                   <div className="flex items-center gap-2">
@@ -370,7 +621,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     onChange={(e) => setRememberOnDevice(e.target.checked)}
                     className="sr-only peer"
                   />
-                  <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--accent-primary)]"></div>
+                  <div className="w-11 h-6 bg-slate-700 focus-ring rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--accent-primary)]"></div>
                 </label>
               </div>
               <div className="text-[11px] text-slate-400 flex items-center gap-1.5 pt-1 border-t border-white/5">
@@ -389,7 +640,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           )}
 
           {/* TMDB Credentials Section */}
-          <div className="space-y-3 p-4 rounded-2xl bg-[var(--surface-hover)] border border-[var(--border-subtle)]">
+          <div className="space-y-3 p-4 rounded-2xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)]">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Film className="w-4 h-4 text-[var(--accent-primary)]" />
@@ -445,7 +696,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       ? 'eyJhbGciOiJIUzI1NiJ9... (v4 Access Token)'
                       : '6e19ae2b... (v3 API Key)'
                   }
-                  className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-[var(--accent-primary)] pr-20 font-mono"
+                  className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-slate-600 focus-ring pr-20 font-mono"
                 />
                 <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                   <button
@@ -495,7 +746,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           </div>
 
           {/* AI Provider Section */}
-          <div className="space-y-3 p-4 rounded-2xl bg-[var(--surface-hover)] border border-[var(--border-subtle)]">
+          <div className="space-y-3 p-4 rounded-2xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)]">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
                 AI Recommendation Engine
@@ -503,7 +754,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </div>
 
             {/* Provider Tabs */}
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
                 type="button"
                 onClick={() => handleProviderChange('local')}
@@ -542,6 +793,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <span className="font-semibold block text-xs">OpenRouter</span>
                 <span className="text-[10px] text-slate-400">Free & Custom</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => handleProviderChange('groq')}
+                className={`p-2.5 rounded-xl border text-center transition-all ${
+                  provider === 'groq'
+                    ? 'bg-[var(--accent-primary)]/15 border-[var(--accent-primary)] text-white'
+                    : 'bg-black/20 border-white/5 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span className="font-semibold block text-xs">Groq</span>
+                <span className="text-[10px] text-slate-400">Ultra-Fast</span>
+              </button>
             </div>
 
             {/* Provider Details */}
@@ -574,7 +838,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     value={geminiKey}
                     onChange={(e) => handleGeminiKeyChange(e.target.value)}
                     placeholder="AIzaSy..."
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-[var(--accent-primary)] pr-20 font-mono"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-slate-600 focus-ring pr-20 font-mono"
                   />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                     <button
@@ -602,7 +866,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   <select
                     value={geminiModel}
                     onChange={(e) => handleGeminiModelChange(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[var(--accent-primary)]"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus-ring"
                   >
                     {GEMINI_AVAILABLE_MODELS.map((m) => (
                       <option key={m.id} value={m.id}>
@@ -634,7 +898,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     value={openRouterKey}
                     onChange={(e) => handleOpenRouterKeyChange(e.target.value)}
                     placeholder="sk-or-v1-..."
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-[var(--accent-primary)] pr-20 font-mono"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-slate-600 focus-ring pr-20 font-mono"
                   />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                     <button
@@ -664,7 +928,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     aria-label="OpenRouter Model"
                     value={isCustomOpenRouterModel ? CUSTOM_OPENROUTER_OPTION : openRouterModel}
                     onChange={(e) => handleOpenRouterSelectChange(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[var(--accent-primary)]"
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus-ring"
                   >
                     {OPENROUTER_AVAILABLE_MODELS.map((m) => (
                       <option key={m.id} value={m.id}>
@@ -699,11 +963,111 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                         value={customOpenRouterModelInput}
                         onChange={(e) => handleCustomOpenRouterModelChange(e.target.value)}
                         placeholder="e.g. meta-llama/llama-3.3-70b-instruct:free or openai/gpt-4o"
-                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-[var(--accent-primary)] font-mono"
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-500 focus-ring font-mono"
                       />
                       <p className="text-[11px] text-slate-400 leading-relaxed">
                         Tip: Free models on OpenRouter require the <code className="text-emerald-400 bg-white/5 px-1 py-0.5 rounded">:free</code> suffix (or use <code className="text-emerald-400 bg-white/5 px-1 py-0.5 rounded">openrouter/free</code>). Paid models do not require a suffix.
                       </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {provider === 'groq' && (
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center justify-between text-xs">
+                  <label htmlFor="groq-api-key-input" className="text-slate-300 font-medium">Groq API Key</label>
+                  <a
+                    href="https://console.groq.com/keys"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] text-[var(--accent-primary)] hover:underline inline-flex items-center gap-1"
+                  >
+                    Get Free Key <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+
+                <div className="relative">
+                  <input
+                    id="groq-api-key-input"
+                    aria-label="Groq API Key"
+                    type={showGroqKey ? 'text' : 'password'}
+                    value={groqKey}
+                    onChange={(e) => handleGroqKeyChange(e.target.value)}
+                    placeholder="gsk_..."
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-slate-600 focus-ring pr-20 font-mono"
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                    <button
+                      type="button"
+                      aria-label={showGroqKey ? 'Hide Groq API key' : 'Show Groq API key'}
+                      onClick={() => setShowGroqKey(!showGroqKey)}
+                      className="p-1.5 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                    >
+                      {showGroqKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                    {groqKey && (
+                      <button
+                        type="button"
+                        onClick={handleForgetGroq}
+                        className="p-1.5 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                        title="Forget Groq Key"
+                        aria-label="Forget Groq Key"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="groq-model-select" className="text-xs text-slate-400 block">
+                    Model Selection
+                  </label>
+
+                  <select
+                    id="groq-model-select"
+                    aria-label="Groq Model"
+                    value={groqModel}
+                    onChange={(e) => handleGroqModelChange(e.target.value)}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus-ring"
+                  >
+                    {groqOptions.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="flex items-center justify-end">
+                    <button
+                      type="button"
+                      aria-busy={isLoadingGroqModels}
+                      onClick={() => handleLoadGroqModels(groqKey)}
+                      disabled={isLoadingGroqModels || !groqKey.trim()}
+                      className="text-[11px] text-[var(--accent-primary)] hover:underline inline-flex items-center gap-1 font-medium transition-colors disabled:opacity-40 disabled:no-underline cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      {isLoadingGroqModels && <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />}
+                      Load models
+                    </button>
+                  </div>
+
+                  <span className="sr-only" role="status" aria-live="polite">
+                    {isLoadingGroqModels
+                      ? 'Loading Groq models...'
+                      : groqModels.length > 0
+                      ? `Loaded ${groqModels.length} Groq ${groqModels.length === 1 ? 'model' : 'models'}.`
+                      : ''}
+                  </span>
+
+                  {groqModelsError && (
+                    <div
+                      role="alert"
+                      className="text-xs text-rose-400 flex items-center gap-1.5 pt-0.5"
+                    >
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{groqModelsError}</span>
                     </div>
                   )}
                 </div>
@@ -736,6 +1100,73 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               </div>
             )}
           </div>
+
+          {/* Hidden Films Section */}
+          <div className="space-y-3 p-4 rounded-2xl bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <EyeOff className="w-4 h-4 text-[var(--accent-primary)]" />
+                <h3
+                  ref={hiddenFilmsHeadingRef}
+                  tabIndex={-1}
+                  className="text-xs font-bold uppercase tracking-wider text-slate-200 focus:outline-none"
+                >
+                  Hidden films ({hiddenFilms.length})
+                </h3>
+              </div>
+            </div>
+
+            {hiddenFilms.length === 0 ? (
+              <p className="text-xs text-slate-400 py-1">No hidden films.</p>
+            ) : (
+              <div className="space-y-2">
+                <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                  {visibleHiddenFilms.map((film, index) => {
+                    const displayTitle =
+                      film.title && film.title.trim() ? film.title.trim() : `#${film.movieId}`;
+                    const reasonLabel = film.reason === 'seen' ? 'Seen' : 'Not for me';
+
+                    return (
+                      <div
+                        key={`${film.movieId}-${film.hiddenAt || index}`}
+                        className="flex items-center justify-between gap-3 p-2 rounded-xl bg-black/20 border border-white/5 text-xs"
+                      >
+                        <div className="min-w-0 flex-1 flex items-center gap-2">
+                          <span className="font-medium text-slate-200 truncate">
+                            {displayTitle}
+                          </span>
+                          <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full palette-tag-secondary font-medium">
+                            {reasonLabel}
+                          </span>
+                        </div>
+                        <button
+                          ref={(el) => {
+                            if (el) {
+                              restoreButtonsRef.current[film.movieId] = el;
+                            } else {
+                              delete restoreButtonsRef.current[film.movieId];
+                            }
+                          }}
+                          data-movie-id={film.movieId}
+                          type="button"
+                          onClick={() => handleRestoreFilm(film.movieId)}
+                          aria-label={`Restore: ${displayTitle}`}
+                          className="shrink-0 px-2.5 py-2 sm:py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-medium border border-white/10 transition-colors cursor-pointer focus-ring"
+                        >
+                          Restore
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                {hiddenFilms.length > 50 && (
+                  <p className="text-xs text-slate-400 text-center pt-1">
+                    …and {hiddenFilms.length - 50} more
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer */}
@@ -743,7 +1174,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           <button
             onClick={onClose}
             disabled={isSaving}
-            className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-[var(--surface-hover)] transition-colors"
+            className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-[var(--bg-surface-hover)] transition-colors"
           >
             Cancel
           </button>

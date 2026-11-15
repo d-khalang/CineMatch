@@ -9,6 +9,43 @@ const VALID_SERENDIPITY_TYPES = new Set<Recommendation['serendipityType']>([
   'ai_cinephile_discovery',
 ]);
 
+export function composeSignals(signals: (AbortSignal | undefined)[]): AbortSignal {
+  const controller = new AbortController();
+  for (const s of signals) {
+    if (!s) continue;
+    if (s.aborted) {
+      controller.abort(s.reason);
+      return controller.signal;
+    }
+    s.addEventListener('abort', () => controller.abort(s.reason), { once: true });
+  }
+  return controller.signal;
+}
+
+export function parseAIJsonResponse(content: string, providerLabel: string): unknown {
+  // Strip reasoning <think>...</think> wrappers
+  const withoutThinking = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  // Clean markdown fences
+  const cleanJson = withoutThinking
+    .replace(/^```json/im, '')
+    .replace(/^```/im, '')
+    .replace(/```$/im, '')
+    .trim();
+
+  try {
+    return JSON.parse(cleanJson);
+  } catch {
+    // Fallback: search for first { and last }
+    const start = cleanJson.indexOf('{');
+    const end = cleanJson.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+      return JSON.parse(cleanJson.slice(start, end + 1));
+    }
+    throw new Error(`Failed to parse structured JSON from ${providerLabel}.`);
+  }
+}
+
 export function sanitizeString(val: unknown, fallback: string, maxLength = 500): string {
   if (typeof val === 'string') {
     const trimmed = val.trim();
