@@ -4,6 +4,7 @@ import { aiManager } from '../services/ai/aiManager';
 import { getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
 import { matchesPreferredEras, sortAndRankRecommendations, coerceScore } from './recommendationUtils';
 import { getCandidateRecommendationPool } from '../services/recommendation/candidateSources';
+import { toCandidates } from '../services/recommendation/candidateMovies';
 import { selectRejectedFilms } from '../services/recommendation/rejectedFilms';
 import { recsSettingsFingerprint } from '../services/recommendation/settingsFingerprint';
 import { credentialStore } from '../services/credentialStore';
@@ -945,6 +946,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         {
           userRatings: userRatingsList,
           candidatePool,
+          candidates: toCandidates(candidatePool),
           serendipityLevel: aiSettings.serendipityLevel,
           selectedVibes: aiSettings.selectedVibes,
           preferredEras: aiSettings.preferredEras,

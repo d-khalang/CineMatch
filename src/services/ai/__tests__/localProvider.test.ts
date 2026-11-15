@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { LocalProvider } from '../localProvider';
+import { toCandidates } from '../../recommendation/candidateMovies';
 import { Movie, UserRating } from '../../../types';
 
 describe('LocalProvider Heuristic Engine', () => {
@@ -162,5 +163,87 @@ describe('LocalProvider Heuristic Engine', () => {
         controller.signal
       )
     ).rejects.toThrow();
+  });
+
+  it('uses starter baseline when candidates are passed but userRatings is empty', async () => {
+    const result = await provider.generateRecommendations({
+      userRatings: [],
+      candidatePool: mockCandidatePool,
+      candidates: toCandidates(mockCandidatePool),
+      serendipityLevel: 30,
+    });
+
+    expect(result.recommendations).toHaveLength(3);
+    expect(result.recommendations[0].bucket).toBeUndefined();
+    expect(result.recommendations[0].serendipityType).toBe('safe_bet');
+  });
+
+  it('forwards preferredEras, selectedVibes, and rejectedFilms when candidates are provided', async () => {
+    const userRatings: UserRating[] = [
+      {
+        movieId: 99,
+        title: 'Rated Drama',
+        rating: 9,
+        posterPath: null,
+        genres: ['Drama'],
+        ratedAt: Date.now(),
+      },
+    ];
+    const eraVibePool: Movie[] = [
+      {
+        id: 21,
+        title: 'Eighties Neon',
+        overview: 'A neon cyberpunk thriller.',
+        release_date: '1984-06-01',
+        vote_average: 7.8,
+        vote_count: 1000,
+        poster_path: null,
+        backdrop_path: null,
+        genres: [{ id: 18, name: 'Drama' }, { id: 53, name: 'Thriller' }],
+        keywords: ['cyberpunk'],
+        candidateSources: ['era', 'vibe'],
+        seedNeighbour: true,
+      },
+      {
+        id: 22,
+        title: 'Plain Modern',
+        overview: 'A quiet contemporary story.',
+        release_date: '2019-06-01',
+        vote_average: 7.8,
+        vote_count: 1000,
+        poster_path: null,
+        backdrop_path: null,
+        genres: [{ id: 18, name: 'Drama' }, { id: 53, name: 'Thriller' }],
+        candidateSources: ['acclaimed_baseline'],
+        seedNeighbour: true,
+      },
+    ];
+
+    const baseline = await provider.generateRecommendations({
+      userRatings,
+      candidatePool: eraVibePool,
+      candidates: toCandidates(eraVibePool),
+      serendipityLevel: 30,
+      preferredEras: ['1980s'],
+      selectedVibes: ['cyberpunk'],
+    });
+
+    const penalized = await provider.generateRecommendations({
+      userRatings,
+      candidatePool: eraVibePool,
+      candidates: toCandidates(eraVibePool),
+      serendipityLevel: 30,
+      preferredEras: ['1980s'],
+      selectedVibes: ['cyberpunk'],
+      rejectedFilms: [{ title: 'Rejected 80s', year: '1986', genres: ['Drama', 'Thriller'] }],
+    });
+
+    const base21 = baseline.recommendations.find((r) => r.movie.id === 21)!;
+    const base22 = baseline.recommendations.find((r) => r.movie.id === 22)!;
+    expect(base21.score).toBeGreaterThan(base22.score);
+    expect(base21.bucket).toBeDefined();
+
+    const pen21 = penalized.recommendations.find((r) => r.movie.id === 21)!;
+    expect(pen21.score).toBeLessThan(base21.score);
   });
 });

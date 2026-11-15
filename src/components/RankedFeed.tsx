@@ -332,8 +332,37 @@ export const RankedFeed: React.FC = () => {
     return 'bg-[var(--bg-surface-elevated)] text-slate-400 font-bold border border-[var(--border-subtle)]';
   };
 
-  const getSerendipityBadge = (type: string) => {
-    switch (type) {
+  const getSerendipityBadge = (rec: Recommendation) => {
+    if (rec.bucket) {
+      switch (rec.bucket) {
+        case 'safe_bet':
+          return (
+            <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
+              <Award className="w-3 h-3 text-[var(--accent-secondary)]" /> Safe pick
+            </span>
+          );
+        case 'stretch':
+          return (
+            <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
+              <Compass className="w-3 h-3 text-[var(--accent-secondary)]" /> A stretch for you
+            </span>
+          );
+        case 'wildcard':
+          return (
+            <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
+              <Flame className="w-3 h-3 text-[var(--accent-primary)]" /> Wildcard
+            </span>
+          );
+        case 'below_floor':
+          return (
+            <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
+              <Compass className="w-3 h-3 text-slate-400" /> Long shot
+            </span>
+          );
+      }
+    }
+
+    switch (rec.serendipityType) {
       case 'ai_cinephile_discovery':
         return (
           <span className="inline-flex items-center gap-1.5 text-[11px] px-3 py-1 rounded-md palette-tag-primary font-bold">
@@ -575,7 +604,7 @@ export const RankedFeed: React.FC = () => {
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <div className="flex flex-wrap items-center gap-2 mb-1">
-                          {getSerendipityBadge(serendipityType)}
+                          {getSerendipityBadge(rec)}
                           {highlightTags &&
                             highlightTags.map((tag, idx) => (
                               <span

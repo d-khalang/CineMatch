@@ -825,3 +825,171 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('RankedFeed Bucket Badges (CIN-9)', () => {
+  const seededRatings = {
+    101: {
+      movieId: 101,
+      title: 'Rated Film One',
+      rating: 9,
+      ratedAt: 1000,
+      genres: ['Drama'],
+    },
+    202: {
+      movieId: 202,
+      title: 'Rated Film Two',
+      rating: 8,
+      ratedAt: 2000,
+      genres: ['Sci-Fi'],
+    },
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    clearInMemoryStoreForTesting();
+    vi.clearAllMocks();
+  });
+
+  it('shows "A stretch for you" when a recommendation has bucket: "stretch"', () => {
+    localStorage.setItem(STORAGE_KEYS.RATINGS, JSON.stringify(seededRatings));
+    localStorage.setItem(
+      STORAGE_KEYS.CACHED_RECOMMENDATIONS,
+      JSON.stringify({
+        recommendations: [
+          {
+            movie: {
+              id: 701,
+              title: 'Stretch Candidate',
+              overview: 'A bold pick',
+              release_date: '2021-03-01',
+              vote_average: 7.8,
+              vote_count: 500,
+              poster_path: null,
+              backdrop_path: null,
+              genres: [{ id: 18, name: 'Drama' }],
+            },
+            score: 82,
+            rank: 1,
+            reason: 'Bridges your taste into new territory.',
+            serendipityType: 'thematic_gem',
+            bucket: 'stretch',
+            highlightTags: ['Drama'],
+          },
+        ],
+        generatedAt: 100000,
+        usedProvider: 'Local Smart Heuristic (Zero Config)',
+        settingsFingerprint: 'fp',
+        ratedCount: 2,
+      })
+    );
+
+    render(
+      <MovieStoreProvider>
+        <RankedFeed />
+      </MovieStoreProvider>
+    );
+
+    expect(screen.getByText('A stretch for you')).toBeInTheDocument();
+  });
+
+  it('shows honest bucket labels for safe_bet, wildcard, and below_floor, and keeps legacy badges without bucket', () => {
+    localStorage.setItem(STORAGE_KEYS.RATINGS, JSON.stringify(seededRatings));
+    localStorage.setItem(
+      STORAGE_KEYS.CACHED_RECOMMENDATIONS,
+      JSON.stringify({
+        recommendations: [
+          {
+            movie: {
+              id: 801,
+              title: 'Safe Film',
+              overview: '',
+              release_date: '2020-01-01',
+              vote_average: 8.0,
+              vote_count: 1000,
+              poster_path: null,
+              backdrop_path: null,
+              genres: [{ id: 18, name: 'Drama' }],
+            },
+            score: 90,
+            rank: 1,
+            reason: 'Safe match',
+            serendipityType: 'safe_bet',
+            bucket: 'safe_bet',
+            highlightTags: [],
+          },
+          {
+            movie: {
+              id: 802,
+              title: 'Wildcard Film',
+              overview: '',
+              release_date: '2019-01-01',
+              vote_average: 7.9,
+              vote_count: 400,
+              poster_path: null,
+              backdrop_path: null,
+              genres: [{ id: 35, name: 'Comedy' }],
+            },
+            score: 75,
+            rank: 2,
+            reason: 'Wildcard match',
+            serendipityType: 'wildcard_discovery',
+            bucket: 'wildcard',
+            highlightTags: [],
+          },
+          {
+            movie: {
+              id: 803,
+              title: 'Long Shot Film',
+              overview: '',
+              release_date: '2018-01-01',
+              vote_average: 7.2,
+              vote_count: 300,
+              poster_path: null,
+              backdrop_path: null,
+              genres: [{ id: 27, name: 'Horror' }],
+            },
+            score: 40,
+            rank: 3,
+            reason: 'Long shot match',
+            serendipityType: 'thematic_gem',
+            bucket: 'below_floor',
+            highlightTags: [],
+          },
+          {
+            movie: {
+              id: 804,
+              title: 'Legacy AI Film',
+              overview: '',
+              release_date: '2022-01-01',
+              vote_average: 8.2,
+              vote_count: 1200,
+              poster_path: null,
+              backdrop_path: null,
+              genres: [{ id: 18, name: 'Drama' }],
+            },
+            score: 92,
+            rank: 4,
+            reason: 'AI pick',
+            serendipityType: 'safe_bet',
+            highlightTags: [],
+          },
+        ],
+        generatedAt: 100000,
+        usedProvider: 'gemini',
+        settingsFingerprint: 'fp',
+        ratedCount: 2,
+      })
+    );
+
+    render(
+      <MovieStoreProvider>
+        <RankedFeed />
+      </MovieStoreProvider>
+    );
+
+    expect(screen.getByText('Safe pick')).toBeInTheDocument();
+    expect(screen.getByText('Wildcard')).toBeInTheDocument();
+    expect(screen.getByText('Long shot')).toBeInTheDocument();
+    expect(screen.getByText('Safe Bet (High Match)')).toBeInTheDocument();
+  });
+});

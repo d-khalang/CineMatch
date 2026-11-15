@@ -1,3 +1,5 @@
+import type { Bucket, CandidateSource } from '../services/recommendation/types';
+
 export interface Movie {
   id: number;
   title: string;
@@ -16,6 +18,8 @@ export interface Movie {
   runtime?: number;
   trailer_key?: string;
   imdb_id?: string;
+  candidateSources?: CandidateSource[];
+  seedNeighbour?: boolean;
 }
 
 export interface UserRating {
@@ -57,6 +61,8 @@ export interface Recommendation {
   highlightTags: string[];
   isAiCurated?: boolean;
   origin?: 'ai' | 'local_backfill';
+  bucket?: Bucket;
+  sources?: CandidateSource[];
 }
 
 export type AIProviderId = 'gemini' | 'openrouter' | 'groq' | 'local';

@@ -121,9 +121,17 @@ class AIServiceManager {
           });
 
           if (remainingPool.length > 0) {
+            const remainingIds = new Set(remainingPool.map((m) => m.id));
+            const remainingCandidates = request.candidates
+              ? request.candidates.filter((c) => c?.movie && remainingIds.has(c.movie.id))
+              : undefined;
             const local = this.getProvider('local');
             const localRes = await local.generateRecommendations(
-              { ...request, candidatePool: remainingPool },
+              {
+                ...request,
+                candidatePool: remainingPool,
+                ...(remainingCandidates !== undefined ? { candidates: remainingCandidates } : {}),
+              },
               signal
             );
 
@@ -156,6 +164,8 @@ class AIServiceManager {
                 serendipityType: rec.serendipityType,
                 highlightTags: rec.highlightTags,
                 origin: 'local_backfill',
+                ...(rec.bucket !== undefined ? { bucket: rec.bucket } : {}),
+                ...(rec.sources !== undefined ? { sources: rec.sources } : {}),
                 ...(rec.isAiCurated !== undefined ? { isAiCurated: rec.isAiCurated } : {}),
               });
             }

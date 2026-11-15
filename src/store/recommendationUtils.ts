@@ -70,7 +70,12 @@ export function sortAndRankRecommendations(recs: Recommendation[]): Recommendati
   const scoreOf = (r: Recommendation) =>
     typeof r.score === 'number' && Number.isFinite(r.score) ? r.score : 0;
 
-  nonBackfill.sort((a, b) => scoreOf(b) - scoreOf(a));
+  // Preserve buildRankedList's bucket-interleaved + MMR order when items carry pipeline buckets.
+  const isPipelineRanked =
+    nonBackfill.length > 0 && nonBackfill.every((r) => r.bucket !== undefined);
+  if (!isPipelineRanked) {
+    nonBackfill.sort((a, b) => scoreOf(b) - scoreOf(a));
+  }
   backfill.sort((a, b) => scoreOf(b) - scoreOf(a));
 
   return [...nonBackfill, ...backfill].map((rec, idx) => ({
