@@ -311,9 +311,10 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
     expect(screen.getByText('Candidate Film A')).toBeInTheDocument();
     expect(screen.getByText('Candidate Film B')).toBeInTheDocument();
 
-    // Click "Seen it: Candidate Film A"
+    // Click "Seen it: Candidate Film A" then "Skip"
     const seenBtn = screen.getByRole('button', { name: 'Seen it: Candidate Film A' });
     fireEvent.click(seenBtn);
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
 
     // Card A is removed, Card B remains
     expect(screen.queryByText('Candidate Film A')).toBeNull();
@@ -391,6 +392,7 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
     // Hide Candidate Film A
     const seenBtn = screen.getByRole('button', { name: 'Seen it: Candidate Film A' });
     fireEvent.click(seenBtn);
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
 
     expect(screen.queryByText('Candidate Film A')).toBeNull();
 
@@ -584,10 +586,11 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
       </MovieStoreProvider>
     );
 
-    // 1. Click "Seen it: Candidate Film A" (index 0).
+    // 1. Click "Seen it: Candidate Film A" (index 0) then "Skip".
     // Focus moves to the next card's "Seen it" button (Candidate Film B).
     const seenBtnA = screen.getByRole('button', { name: 'Seen it: Candidate Film A' });
     fireEvent.click(seenBtnA);
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
 
     const seenBtnB = screen.getByRole('button', { name: 'Seen it: Candidate Film B' });
     expect(document.activeElement).toBe(seenBtnB);
@@ -601,9 +604,10 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
     expect(document.activeElement).toBe(seenBtnB);
     expect(document.activeElement).not.toBe(document.body);
 
-    // 3. Click "Seen it: Candidate Film B" (the only card remaining).
+    // 3. Click "Seen it: Candidate Film B" (the only card remaining) then "Skip".
     // When there are none at all, focus moves to the feed's h1.
     fireEvent.click(seenBtnB);
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
 
     const heading = screen.getByRole('heading', { level: 1, name: /Top Ranked Movies for You/i });
     expect(document.activeElement).toBe(heading);
@@ -658,6 +662,7 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
 
     const seenBtn = screen.getByRole('button', { name: 'Seen it: Candidate Film A' });
     fireEvent.click(seenBtn);
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
 
     // Card is removed and empty batch state is rendered
     expect(screen.queryByText('Candidate Film A')).toBeNull();
@@ -765,9 +770,10 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
       expect(screen.getByText(/Grade saved! Hiding soon\.\.\./i)).toBeInTheDocument();
       expect(screen.getByText('Candidate Film A')).toBeInTheDocument();
 
-      // Click "Seen it: Candidate Film A"
+      // Click "Seen it: Candidate Film A" then "Skip"
       const seenBtn = screen.getByRole('button', { name: 'Seen it: Candidate Film A' });
       fireEvent.click(seenBtn);
+      fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
 
       // Card is immediately removed, grace banner is gone
       expect(screen.queryByText('Candidate Film A')).toBeNull();
@@ -813,6 +819,7 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
     expect(notForMeBtn).toBeInTheDocument();
 
     fireEvent.click(seenBtn);
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
     expect(
       screen.getByText('Hidden "#999". Restore it in Settings → Hidden films.')
     ).toBeInTheDocument();
