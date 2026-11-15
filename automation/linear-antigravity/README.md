@@ -9,19 +9,19 @@ Planning and review are governed by the repository's `AGENTS.md` and the repo sc
 ## One-time setup
 
 1. The CineMatch team, the two projects, the `antigravity-ready` team issue label, and the GitHub connection are present in Linear. The worker uses its existing **Todo**, **In Progress**, and **In Review** states.
-2. A CineMatch-only personal Linear API key has been created with Read, Create issues, and Create comments permissions. Copy it from Linear's one-time display and save it locally with the masked PowerShell prompt below. Run this command from the repository root (`C:\Users\Noor\Desktop\Programming\Git\movie-recom`); the relative file path will not work from `C:\Users\Noor`. The team UUID is configured in the worker. If you move to a different Windows account, create and save a new key there.
+2. A CineMatch-only personal Linear API key has been created with Read, Create issues, and Create comments permissions. Copy it from Linear's one-time display and save it locally with the masked PowerShell prompt below. Run this command from the repository root; the relative file path will not work from any other folder. The team UUID is configured in the worker. If you move to a different Windows account, create and save a new key there.
 
    ```powershell
    Read-Host 'Paste Linear key' -AsSecureString | ConvertFrom-SecureString | Set-Content -LiteralPath '.\automation\linear-antigravity\linear-key.local'
    ```
 
    The resulting `.local` file is encrypted for your Windows account and ignored by Git. The prompt does not put the key in shell history. The worker uses Windows PowerShell to decrypt it.
-3. Create a fine-grained GitHub token scoped to `d-khalang/CineMatch` with **Pull requests: read/write**. Copy it, then save it once in your Windows PowerShell session:
+3. Create a fine-grained GitHub token scoped to `d-khalang/CineMatch` with **Pull requests: read/write**. Copy it, then save it once from the repository root in Windows PowerShell:
 
    ```powershell
    $token = (Get-Clipboard -Raw).Trim()
    if ($token -notmatch '^github_pat_[A-Za-z0-9_]+$') { throw 'Copy the fine-grained GitHub token first' }
-   ConvertTo-SecureString $token -AsPlainText -Force | ConvertFrom-SecureString | Set-Content -LiteralPath 'C:\Users\Noor\Desktop\Programming\Git\movie-recom\automation\linear-antigravity\github-token.local'
+   ConvertTo-SecureString $token -AsPlainText -Force | ConvertFrom-SecureString | Set-Content -LiteralPath '.\automation\linear-antigravity\github-token.local'
    Remove-Variable token
    Set-Clipboard -Value ''
    ```
@@ -44,6 +44,16 @@ Write acceptance criteria in the issue description. Once the issue is ready to i
 The worker runs `npm ci`, `npm run typecheck`, `npm run lint`, `npm run test`, and `npm run build` before it pushes a branch. It never merges a PR. A reviewer should inspect the diff, exercise the affected user flow, and decide whether the evidence meets the issue's acceptance criteria.
 
 GitHub attributes the PR creation to the owner of the saved GitHub token. Commits use the unlinked `CineMatch Antigravity Worker <worker@cinematch.invalid>` identity, which is a label rather than a separate GitHub account.
+
+## Loop dashboard
+
+One local page with the loop's state: what needs the owner, each worker lane, the pipeline board, a per-issue state timeline, and the activity feed (Owner, Coordinator, Gemini, Codex). Click any issue for its full history.
+
+```powershell
+node .\automation\linear-antigravity\dashboard.mjs
+```
+
+Open http://127.0.0.1:4317. It reads Linear with the saved key, GitHub through the signed-in `gh` CLI, and the lane folders under `%TEMP%\cinematch-agy-a` and `-b`. It refreshes every 60 seconds and writes nothing. Every Linear write uses one API key, so the actor shown for an event is inferred from its content and transition. Optional: `DASHBOARD_PORT`, `DASHBOARD_SECONDS`, `LOOP_MILESTONE`, `AGY_WORK_ROOT_A`, `AGY_WORK_ROOT_B`.
 
 ## Configuration
 
