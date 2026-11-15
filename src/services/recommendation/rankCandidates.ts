@@ -2,10 +2,12 @@ import type { Movie, Recommendation, UserRating } from '../../types';
 import type { Bucket, Candidate, CandidateSource } from './types';
 import { getSeriesKey } from '../../constants/franchises';
 import { rejectionPenalty, type RejectedFilm } from './rejectedFilms';
+import { famePenalty } from './fame';
 import {
   buildTasteProfile,
   scoreCandidates,
   buildRankedList,
+  assignBuckets,
   mixForSerendipityLevel,
   getDecade,
   type TasteProfile,
@@ -257,8 +259,26 @@ export function rankCandidates(
     preferredEras,
     selectedVibes,
   });
+  // Penalties ("Not for me" neighbours, fame for heavy raters) lower relevance before
+  // bucketing and list construction, so they change a film's position, not just its score.
+  const penalised = assignBuckets(
+    scored.map((item) => {
+      const points =
+        (Array.isArray(rejectedFilms) && rejectedFilms.length > 0 ? rejectionPenalty(item.movie, rejectedFilms) : 0) +
+        famePenalty(item.movie.vote_count, serendipityLevel, safeRatings.length);
+      if (!(points > 0) || !Number.isFinite(item.scores.relevance) || item.scores.relevance <= 0) {
+        return item;
+      }
+      const relevance = Math.max(0, item.scores.relevance - points / 100);
+      const ratio = relevance / item.scores.relevance;
+      return {
+        ...item,
+        scores: { ...item.scores, relevance, serendipity: item.scores.serendipity * ratio },
+      };
+    })
+  );
   const ranked = buildRankedList(
-    scored,
+    penalised,
     mixForSerendipityLevel(serendipityLevel),
     targetSize
   );
@@ -269,11 +289,7 @@ export function rankCandidates(
     const rawScore = Number.isFinite(item.scores.relevance)
       ? Math.round(100 * item.scores.relevance)
       : 0;
-    const penalty =
-      Array.isArray(rejectedFilms) && rejectedFilms.length > 0
-        ? rejectionPenalty(item.movie, rejectedFilms)
-        : 0;
-    const score = Math.max(0, Math.min(100, rawScore - penalty));
+    const score = Math.max(0, Math.min(100, rawScore));
 
     const movieGenres = extractMovieGenreNames(item.movie);
     const matchedGenres = getMatchedGenres(movieGenres, profile);
