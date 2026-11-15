@@ -1,4 +1,5 @@
 import { Movie, Recommendation, UserRating } from '../../types';
+import type { RejectedFilm } from '../recommendation/rejectedFilms';
 
 export interface RecommendationRequest {
   userRatings: UserRating[];
@@ -6,6 +7,7 @@ export interface RecommendationRequest {
   serendipityLevel: number; // 0 (Safe) to 100 (Wildcard/Exploratory)
   selectedVibes?: string[];
   preferredEras?: string[];
+  rejectedFilms?: RejectedFilm[];
   apiKey?: string;
   model?: string;
 }

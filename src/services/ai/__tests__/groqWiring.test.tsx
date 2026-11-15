@@ -133,10 +133,28 @@ describe('Groq Part 1 Wiring & Regression Suite (CIN-67)', () => {
 
     it('caps the reply and sends a compact prompt, so a run fits the free-tier token limit', async () => {
       const body = await generateBody();
-      expect(body.max_tokens).toBe(3500);
+      expect(body.max_tokens).toBe(4000);
       const prompt = body.messages[1].content;
       expect(prompt).toContain('[{"title":"Rated"');
       expect(prompt).not.toContain('\n  {\n    "title"');
+    });
+
+    it('sends fewer ratings in a compact prompt, and keeps 80 for OpenRouter', () => {
+      const userRatings = Array.from({ length: 100 }, (_, i) => ({
+        movieId: i,
+        title: `Rated-${i}-`,
+        rating: 5,
+        posterPath: null,
+        genres: ['Drama'],
+        ratedAt: i,
+      }));
+      const count = (prompt: string) => prompt.match(/Rated-\d+-/g)?.length;
+      const request = { userRatings, candidatePool: [] } as never;
+
+      expect(count(buildOpenRouterPrompt(request, { compact: true }))).toBe(50);
+      expect(buildOpenRouterPrompt(request, { compact: true })).toContain('50 omitted above');
+      expect(count(buildOpenRouterPrompt(request))).toBe(80);
+      expect(buildOpenRouterPrompt(request)).toContain('20 omitted above');
     });
 
     it('keeps the pretty-printed prompt for OpenRouter', () => {
