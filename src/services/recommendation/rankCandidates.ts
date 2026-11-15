@@ -2,11 +2,13 @@ import type { Movie, Recommendation, UserRating } from '../../types';
 import type { Bucket, Candidate, CandidateSource } from './types';
 import { getSeriesKey } from '../../constants/franchises';
 import { rejectionPenalty, type RejectedFilm } from './rejectedFilms';
+import { famePenalty } from './fame';
 import {
   buildTasteProfile,
   scoreCandidates,
   buildRankedList,
   mixForSerendipityLevel,
+  DEFAULT_RELEVANCE_FLOOR,
   getDecade,
   type TasteProfile,
   type RankedCandidate,
@@ -302,8 +304,27 @@ export function rankCandidates(
     preferredEras,
     selectedVibes,
   });
+  // Penalties ("Not for me" neighbours, fame for heavy raters) lower relevance before list
+  // construction. Buckets stay as scored (re-bucketing would move a penalised film into the
+  // low-serendipity "safe" band, which is listed first); a film pushed below the relevance
+  // floor becomes a long shot.
+  const penalised = scored.map((item) => {
+    const points =
+      (Array.isArray(rejectedFilms) && rejectedFilms.length > 0 ? rejectionPenalty(item.movie, rejectedFilms) : 0) +
+      famePenalty(item.movie.vote_count, serendipityLevel, safeRatings.length);
+    if (!(points > 0) || !Number.isFinite(item.scores.relevance) || item.scores.relevance <= 0) {
+      return item;
+    }
+    const relevance = Math.max(0, item.scores.relevance - points / 100);
+    const belowFloor = relevance < DEFAULT_RELEVANCE_FLOOR;
+    return {
+      ...item,
+      scores: { ...item.scores, relevance, serendipity: belowFloor ? 0 : item.scores.serendipity },
+      bucket: belowFloor ? ('below_floor' as const) : item.bucket,
+    };
+  });
   const ranked = buildRankedList(
-    scored,
+    penalised,
     mixForSerendipityLevel(serendipityLevel),
     targetSize
   );
@@ -314,11 +335,7 @@ export function rankCandidates(
     const rawScore = Number.isFinite(item.scores.relevance)
       ? Math.round(100 * item.scores.relevance)
       : 0;
-    const penalty =
-      Array.isArray(rejectedFilms) && rejectedFilms.length > 0
-        ? rejectionPenalty(item.movie, rejectedFilms)
-        : 0;
-    const score = Math.max(0, Math.min(100, rawScore - penalty));
+    const score = Math.max(0, Math.min(100, rawScore));
 
     const movieGenres = extractMovieGenreNames(item.movie);
     const matchedGenres = getMatchedGenres(movieGenres, profile);

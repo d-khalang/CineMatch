@@ -111,6 +111,22 @@ export const handlers = [
     });
   }),
 
+  http.get('https://api.themoviedb.org/3/movie/:id/credits', ({ params }) => {
+    return HttpResponse.json({
+      id: Number(params.id),
+      cast: [],
+      crew: [],
+    });
+  }),
+
+  http.get('https://api.themoviedb.org/3/person/:id/movie_credits', ({ params }) => {
+    return HttpResponse.json({
+      id: Number(params.id),
+      cast: [],
+      crew: [],
+    });
+  }),
+
   http.get('https://api.themoviedb.org/3/trending/movie/:timeWindow', () => {
     return HttpResponse.json({
       page: 1,

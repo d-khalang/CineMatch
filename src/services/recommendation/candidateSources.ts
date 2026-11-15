@@ -2,6 +2,7 @@ import type { Movie, UserRating } from '../../types';
 import type { Candidate, CandidateSource } from './types';
 import { annotateCandidateMovies } from './candidateMovies';
 import {
+  BoundedLRUMap,
   fetchFromTMDB,
   GENRE_MAP,
   getEraDateRange,
@@ -9,6 +10,31 @@ import {
   VIBE_KEYWORD_MAP,
   MissingTmdbCredentialError,
 } from '../tmdbClient';
+
+const MAX_REQUESTS_PER_GENERATION = 45;
+const CREATOR_CACHE_MAX_ENTRIES = 200;
+const CREATOR_MIN_RATING = 8;
+const CREATOR_MIN_HIGH_RATINGS = 3;
+const CREATOR_MAX_SEED_MOVIES = 6;
+const CREATOR_MAX_PEOPLE = 8;
+const CREATOR_MIN_VOTE_COUNT = 30;
+const CREATOR_JOBS = new Set(['Director', 'Screenplay', 'Writer']);
+
+interface CachedCreatorRef {
+  id: number;
+  isDirector: boolean;
+}
+
+const movieCreditsCache = new BoundedLRUMap<number, CachedCreatorRef[]>(CREATOR_CACHE_MAX_ENTRIES);
+const personMovieCreditsCache = new BoundedLRUMap<number, any[]>(CREATOR_CACHE_MAX_ENTRIES);
+
+/**
+ * Clears session-scoped creator-graph credit caches (for tests or session resets).
+ */
+export function clearCreatorGraphCache(): void {
+  movieCreditsCache.clear();
+  personMovieCreditsCache.clear();
+}
 
 export interface CandidateOptions {
   seedMovieIds?: number[];
@@ -25,7 +51,7 @@ export interface CandidateOptions {
 /**
  * Concurrency and budget limiter for TMDB API calls.
  * Enforces at most 6 requests in-flight simultaneously,
- * and at most 45 requests total per generation.
+ * and at most 45 requests total per generation by default.
  */
 export class RequestLimiter {
   private running = 0;
@@ -39,7 +65,7 @@ export class RequestLimiter {
   constructor(
     private signal?: AbortSignal,
     private readonly maxConcurrency = 6,
-    private readonly maxRequests = 45
+    private readonly maxRequests = MAX_REQUESTS_PER_GENERATION
   ) {
     if (this.signal) {
       if (this.signal.aborted) {
@@ -468,10 +494,195 @@ export function applyFirst40CapAndFloors(
 }
 
 /**
+ * Selects up to 6 distinct rated films with rating >= 8 (highest rating first, then newest ratedAt).
+ * Returns an empty array when fewer than 3 qualifying ratings exist.
+ */
+export function selectCreatorSeedRatings(ratingsList: UserRating[]): UserRating[] {
+  const highRatings = ratingsList.filter(
+    (r) =>
+      !!r &&
+      typeof r === 'object' &&
+      typeof r.movieId === 'number' &&
+      Number.isFinite(r.movieId) &&
+      Number.isFinite(r.rating) &&
+      r.rating >= CREATOR_MIN_RATING
+  );
+
+  const sorted = [...highRatings].sort((a, b) => {
+    if (b.rating !== a.rating) {
+      return b.rating - a.rating;
+    }
+    const aTime = typeof a.ratedAt === 'number' && Number.isFinite(a.ratedAt) ? a.ratedAt : 0;
+    const bTime = typeof b.ratedAt === 'number' && Number.isFinite(b.ratedAt) ? b.ratedAt : 0;
+    return bTime - aTime;
+  });
+
+  const seenMovieIds = new Set<number>();
+  const uniqueHighRatings: UserRating[] = [];
+  for (const r of sorted) {
+    if (!seenMovieIds.has(r.movieId)) {
+      seenMovieIds.add(r.movieId);
+      uniqueHighRatings.push(r);
+    }
+  }
+
+  if (uniqueHighRatings.length < CREATOR_MIN_HIGH_RATINGS) {
+    return [];
+  }
+
+  return uniqueHighRatings.slice(0, CREATOR_MAX_SEED_MOVIES);
+}
+
+/**
+ * Fetches directing and writing credits for up to 8 distinct creators (directors first)
+ * derived from the user's top rated films (>= 8), using bounded session caches.
+ */
+async function fetchCreatorGraphResults(
+  seedRatings: UserRating[],
+  internalSignal: AbortSignal,
+  safeFetchObject: <T>(endpoint: string) => Promise<T | null>
+): Promise<any[]> {
+  if (seedRatings.length === 0 || internalSignal.aborted) {
+    return [];
+  }
+
+  const movieCreditsList = await Promise.all(
+    seedRatings.map(async (r): Promise<CachedCreatorRef[]> => {
+      const cached = movieCreditsCache.get(r.movieId);
+      if (cached !== undefined) {
+        return cached;
+      }
+
+      const data = await safeFetchObject<{ crew?: any[] }>(`/movie/${r.movieId}/credits`);
+      if (!data || !Array.isArray(data.crew)) {
+        return [];
+      }
+
+      const perMovieMap = new Map<number, CachedCreatorRef>();
+      for (const member of data.crew) {
+        if (
+          !member ||
+          typeof member.id !== 'number' ||
+          !Number.isFinite(member.id) ||
+          typeof member.job !== 'string' ||
+          !CREATOR_JOBS.has(member.job)
+        ) {
+          continue;
+        }
+        const isDirector = member.job === 'Director';
+        const existing = perMovieMap.get(member.id);
+        if (existing) {
+          if (isDirector) {
+            existing.isDirector = true;
+          }
+        } else {
+          perMovieMap.set(member.id, { id: member.id, isDirector });
+        }
+      }
+
+      const refs = Array.from(perMovieMap.values());
+      movieCreditsCache.set(r.movieId, refs);
+      return refs;
+    })
+  );
+
+  if (internalSignal.aborted) {
+    return [];
+  }
+
+  const creatorMap = new Map<number, { id: number; isDirector: boolean; firstFilmIdx: number }>();
+  movieCreditsList.forEach((refs, filmIdx) => {
+    for (const ref of refs) {
+      const existing = creatorMap.get(ref.id);
+      if (existing) {
+        if (ref.isDirector) {
+          existing.isDirector = true;
+        }
+      } else {
+        creatorMap.set(ref.id, {
+          id: ref.id,
+          isDirector: ref.isDirector,
+          firstFilmIdx: filmIdx,
+        });
+      }
+    }
+  });
+
+  if (creatorMap.size === 0) {
+    return [];
+  }
+
+  const selectedCreators = Array.from(creatorMap.values())
+    .sort((a, b) => {
+      if (a.isDirector !== b.isDirector) {
+        return a.isDirector ? -1 : 1;
+      }
+      return a.firstFilmIdx - b.firstFilmIdx;
+    })
+    .slice(0, CREATOR_MAX_PEOPLE);
+
+  const personFilmLists = await Promise.all(
+    selectedCreators.map(async (creator): Promise<any[]> => {
+      const cached = personMovieCreditsCache.get(creator.id);
+      if (cached !== undefined) {
+        return cached;
+      }
+
+      const data = await safeFetchObject<{ crew?: any[] }>(
+        `/person/${creator.id}/movie_credits`
+      );
+      if (!data || !Array.isArray(data.crew)) {
+        return [];
+      }
+
+      const seenMovieIds = new Set<number>();
+      const filtered: any[] = [];
+      for (const credit of data.crew) {
+        if (
+          !credit ||
+          typeof credit.id !== 'number' ||
+          !Number.isFinite(credit.id) ||
+          typeof credit.job !== 'string' ||
+          !CREATOR_JOBS.has(credit.job) ||
+          typeof credit.poster_path !== 'string' ||
+          !credit.poster_path.trim() ||
+          typeof credit.vote_count !== 'number' ||
+          !Number.isFinite(credit.vote_count) ||
+          credit.vote_count < CREATOR_MIN_VOTE_COUNT
+        ) {
+          continue;
+        }
+        if (seenMovieIds.has(credit.id)) {
+          continue;
+        }
+        seenMovieIds.add(credit.id);
+        filtered.push(credit);
+      }
+
+      personMovieCreditsCache.set(creator.id, filtered);
+      return filtered;
+    })
+  );
+
+  // Round-robin interleave across creators so every creator gets early representation
+  const combined: any[] = [];
+  const maxPersonLen = Math.max(0, ...personFilmLists.map((list) => list.length));
+  for (let i = 0; i < maxPersonLen; i++) {
+    for (const list of personFilmLists) {
+      if (i < list.length) {
+        combined.push(list[i]);
+      }
+    }
+  }
+  return combined;
+}
+
+/**
  * Generates recommendation candidates across multi-source queries:
  * 1. Seed graph: /recommendations and /similar (pages 1-2) for weighted loved seeds
  * 2. Hidden gems: /discover/movie in top 3 genres with vote_count 50-800, vote_avg >= 7 (pages 1-2)
  * 3. Acclaimed baseline: top rated, popular, trending, eras, and vibes (page 1)
+ * 4. Creator graph: other directing/writing credits of directors/writers from loved films (>= 8)
  *
  * Deduplicates by movie ID, merging source tags, excluding rated and poster-less films.
  */
@@ -514,7 +725,7 @@ export async function generateCandidates(
     callerSignal.addEventListener('abort', onCallerAbort, { once: true });
   }
 
-  const limiter = new RequestLimiter(internalSignal, 6, 45);
+  const limiter = new RequestLimiter(internalSignal, 6, MAX_REQUESTS_PER_GENERATION);
 
   try {
     const rawRatingsList: UserRating[] = Array.isArray(userRatings)
@@ -524,44 +735,64 @@ export async function generateCandidates(
       (r): r is UserRating => !!r && typeof r === 'object' && typeof r.rating === 'number'
     );
 
-    const safeFetch = async (
-      endpoint: string,
-      params: Record<string, string | number> = {}
-    ): Promise<any[]> => {
+    const runLimitedQuery = async <T>(
+      task: () => Promise<T>,
+      fallback: T,
+      rethrowMissingCredential: boolean
+    ): Promise<T> => {
       if (internalSignal.aborted) {
         if (callerSignal?.aborted) {
           throw callerSignal.reason || new DOMException('The operation was aborted', 'AbortError');
         }
-        return [];
+        return fallback;
       }
 
       try {
         const res = await limiter.schedule(async () => {
           try {
-            const data = await fetchFromTMDB<{ results: any[] }>(endpoint, params, internalSignal);
-            return data.results || [];
+            return await task();
           } catch (err: any) {
             if (callerSignal?.aborted) {
               throw err;
             }
-            if (err instanceof MissingTmdbCredentialError) {
+            if (rethrowMissingCredential && err instanceof MissingTmdbCredentialError) {
               throw err;
             }
             // Failing individual query must not fail the whole candidate pool
-            return [];
+            return fallback;
           }
         });
-        return res || [];
+        return res ?? fallback;
       } catch (err: any) {
         if (callerSignal?.aborted) {
           throw err;
         }
-        if (err instanceof MissingTmdbCredentialError) {
+        if (rethrowMissingCredential && err instanceof MissingTmdbCredentialError) {
           throw err;
         }
-        return [];
+        return fallback;
       }
     };
+
+    const safeFetch = (
+      endpoint: string,
+      params: Record<string, string | number> = {}
+    ): Promise<any[]> =>
+      runLimitedQuery(
+        async () => {
+          const data = await fetchFromTMDB<{ results: any[] }>(endpoint, params, internalSignal);
+          return data.results || [];
+        },
+        [],
+        true
+      );
+
+    const safeFetchObject = <T>(endpoint: string): Promise<T | null> =>
+      runLimitedQuery(
+        () => fetchFromTMDB<T>(endpoint, {}, internalSignal),
+        null,
+        false
+      );
 
     // 1. Era-targeted queries (guaranteed budget first)
     const preferredEras = (options.preferredEras || []).filter(
@@ -721,8 +952,19 @@ export async function generateCandidates(
       chosenSeedIds = options.seedMovieIds.slice(0, requestedSeedCount);
     }
 
-    const remainingBudget = Math.max(0, 45 - reserved);
-    const maxSeedPairs = Math.floor(remainingBudget / 2);
+    const creatorSeedRatings = selectCreatorSeedRatings(ratingsList);
+    const remainingBudget = Math.max(0, MAX_REQUESTS_PER_GENERATION - reserved);
+    // Reserve budget for creator graph within the 45-request ceiling when qualifying >= 8
+    // ratings exist, while preserving at least 1 seed pair when remainingBudget >= 2.
+    const creatorReserve =
+      creatorSeedRatings.length > 0
+        ? Math.min(
+            creatorSeedRatings.length + CREATOR_MAX_PEOPLE,
+            Math.max(0, remainingBudget - 2)
+          )
+        : 0;
+    const seedBudget = Math.max(0, remainingBudget - creatorReserve);
+    const maxSeedPairs = Math.floor(seedBudget / 2);
 
     const page1PairsCount = Math.min(chosenSeedIds.length, maxSeedPairs);
     const page2PairsCount = Math.min(
@@ -778,6 +1020,17 @@ export async function generateCandidates(
       throw callerSignal.reason || new DOMException('The operation was aborted', 'AbortError');
     }
 
+    // 6. Creator Graph: scheduled after seed graph so tight budget or deadline cuts it first
+    const creatorGraphResults = await fetchCreatorGraphResults(
+      creatorSeedRatings,
+      internalSignal,
+      safeFetchObject
+    );
+
+    if (callerSignal?.aborted) {
+      throw callerSignal.reason || new DOMException('The operation was aborted', 'AbortError');
+    }
+
     const seedResults = seedGraphArrays.flat();
     const hiddenGemResults = hiddenGemArrays.flat();
     const baseResults = baseArrays.flat();
@@ -828,7 +1081,7 @@ export async function generateCandidates(
       }
     };
 
-    // Interleave streams to ensure a rich balance of eras, vibes, baseline, seeds, and hidden gems
+    // Interleave streams to ensure a rich balance of eras, vibes, baseline, seeds, hidden gems, and creator graph
     const streams = [
       ...eraArrays.map((items) => ({
         items,
@@ -843,6 +1096,7 @@ export async function generateCandidates(
       { items: baseResults, source: 'acclaimed_baseline' as CandidateSource, isSeed: false },
       { items: seedResults, source: 'seed_graph' as CandidateSource, isSeed: true },
       { items: hiddenGemResults, source: 'hidden_gem' as CandidateSource, isSeed: false },
+      { items: creatorGraphResults, source: 'creator_graph' as CandidateSource, isSeed: false },
     ];
     const maxLen = Math.max(0, ...streams.map((s) => s.items.length));
 
