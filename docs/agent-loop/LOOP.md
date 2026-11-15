@@ -40,13 +40,13 @@ Each loop milestone has a parent issue. The Coordinator posts one short comment 
 
 ## Issue contract
 
-Every dispatched issue contains: Goal, Context and decision, Scope, Constraints, Acceptance criteria, Verification, Dependencies, Review focus. Sized for one Gemini run (well under 30 minutes). Two concurrently dispatched issues must not touch the same files.
+Every dispatched issue contains: Goal, Context and decision, Scope, Constraints, Acceptance criteria, Verification, Dependencies, Review focus. Sized as one slice a user can notice, not "part 1" plus follow-ups. (The old "well under 30 minutes" size was set for Gemini Flash; Hydrogen handles larger slices.) Two concurrently dispatched issues must not touch the same files.
 
-**Frozen acceptance tests** (adopted after M1: both large M1 issues needed three passes, and some tests were bent to fit the code). For logic issues, the Coordinator or a Sonnet agent first commits to a frozen branch `codex/antigravity-<spec issue id>`, cut from `agents/integration`:
+**Frozen acceptance tests** (adopted after M1: both large M1 issues needed three passes, and some tests were bent to fit the code). For logic issues, the Coordinator or a Sonnet agent first commits to a frozen branch `codex/antigravity-<issue id>`, cut from `agents/integration`:
 - the interface stub, if it is new
 - the failing acceptance and fixture tests, including one end-to-end test across dependent modules
 
-Failing tests never land on `agents/integration` itself, because they would fail every other lane's checks. The worker cannot branch from its own issue's branch, so the frozen branch is named after the spec issue (or the owner's bug report), and a separate dispatch issue starts with `Branch from: codex/antigravity-<spec issue id>`. If `agents/integration` moves before dispatch, merge it into the frozen branch; don't rebase it.
+Failing tests never land on `agents/integration` itself, because they would fail every other lane's checks. The issue's first description line is `Branch from: codex/antigravity-<issue id>`. The worker may start from its own issue's branch (since 2026-11-15); a separate spec issue is still fine when the spec covers several dispatch issues. If `agents/integration` moves before dispatch, bring the frozen branch up to date: rebasing is fine while nobody has built on it, merge otherwise. The Coordinator checks that the reference shape passes the frozen tests before committing them, and runs `tsc` on them.
 
 The worker implements until those tests pass. It may add tests, but it must not edit or weaken the frozen ones. The PR description maps each acceptance criterion to the test that proves it. Parallel issues that share an interface get that interface frozen first.
 
@@ -73,15 +73,21 @@ When the rework PR merges, the Coordinator closes the original PR and marks both
 1. Stop if the milestone issue has `loop-stop`. Read open `owner-directive` issues first.
 2. For each `In Review` issue: mark its PR ready, which starts the `chatgpt-codex-connector` review (about 4 minutes), and run the Reviewer. Merge only when the Reviewer returns `PASS` and the Codex review has completed on the head commit with no unaddressed P1. A Codex P2 is either fixed, filed, or answered on the PR. Then squash-merge into `agents/integration`, mark `Done`, and unblock dependents. `CHANGES` → rework issue or escalate per the attempt rules.
 3. For each `In Progress` issue whose worker run stopped with an error: diagnose, then rework, rescope or escalate.
-4. After every third merge: run the user persona and critic on `agents/integration`, then triage their findings.
-5. Keep each lane at one or two `Todo` issues, in dependency order.
-6. Post the cycle comment on the milestone issue.
+4. **Persona and critic once per window**, after the milestone build. Each files at most three new issues, and each issue names what a user would notice.
+5. **No empty lane.** While workers run, scope the next issue and its frozen tests, so each lane always has one `Todo` waiting. Two lanes never hold issues that touch the same files.
+6. **Roadmap first.** A free lane takes the next engine roadmap issue, in this order: CIN-9, CIN-22, CIN-10, CIN-12, CIN-49, CIN-8, CIN-11, CIN-25, CIN-13 (and their split-off parts, such as CIN-72). Only an `owner-directive` or a bug a user would hit goes ahead of it.
+7. **Follow-ups are capped at one dispatch in three.** Minor review findings go into one running backlog issue per area (for the feed: CIN-52), not one issue each. Fix a one-line finding on the PR itself.
+8. Post the cycle comment on the milestone issue.
+
+**At pause:** leave four dispatch-ready issues in Backlog (two per lane, no shared files), so the next window starts by labelling them. The pause comment opens with **What a user would notice**, and says how many commits wait for the owner's merge into `main`.
 
 ## State and resume
 
 Durable loop state lives in Linear, never in a session. Every cycle comment on the milestone issue ends with a state line:
 
-`State: merges N | attempts CIN-x 1, CIN-y 2 | lane A CIN-x | lane B idle | Claude: coordinator + reviewer`
+`State: merges N | attempts CIN-x 1, CIN-y 2 | lane A CIN-x (idle 4m) | lane B idle (idle 12m) | Claude: coordinator + reviewer`
+
+The worker logs `[HH:MM:SS] CIN-x phase: ...` lines and posts `Timings: ...` on the issue's Draft PR comment. Add each lane's idle minutes in the window to the State line.
 
 To resume in a new Coordinator session: read this file, `docs/vision.md`, and the latest milestone comments. Then start one worker per lane from the main checkout (they stop when the session that started them ends):
 
