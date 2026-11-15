@@ -2,6 +2,7 @@ import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './ty
 import { Recommendation, Movie } from '../../types';
 import { rejectionPenalty } from '../recommendation/rejectedFilms';
 import { rankCandidates } from '../recommendation/rankCandidates';
+import { famePenalty } from '../recommendation/fame';
 
 export class LocalProvider implements IAIProvider {
   readonly id = 'local';
@@ -174,6 +175,8 @@ export class LocalProvider implements IAIProvider {
       if (request.rejectedFilms && request.rejectedFilms.length > 0) {
         score -= rejectionPenalty(movie, request.rejectedFilms);
       }
+
+      score -= famePenalty(movie.vote_count, serendipityLevel, userRatings.length);
 
       // Bound score between 45 and 99
       const finalScore = Math.min(99, Math.max(45, Math.round(score)));
