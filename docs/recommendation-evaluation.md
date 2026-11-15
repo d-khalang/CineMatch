@@ -21,7 +21,7 @@ Offline evaluation suite and beyond-accuracy quality gates for `rankCandidates` 
 
 ## Measured Values
 
-Measured by the Coordinator on 2026-11-15 with `rankCandidates` at `agents/integration` after CIN-9, CIN-8 and the penalty fix (#121). The worker could not run commands, so the first draft held estimates; the table above now shows these observed values, and the diversity and novelty thresholds were raised from 0.70 and 0.35 to sit about halfway between the naive ranker and the pipeline.
+Measured by the Coordinator on 2026-11-15 with `rankCandidates` as of CIN-9 (the PR's base, before the creator graph #120 and the penalty fix #121; the fame penalty can lower the heavy profile's numbers at serendipity 85, and CI on the merged branch checks the thresholds still hold). The worker could not run commands, so the first draft held estimates; the table above now shows these observed values, and the diversity and novelty thresholds were raised from 0.70 and 0.35 to sit about halfway between the naive ranker and the pipeline.
 
 | Profile | Serendipity | Supply | Diversity | Novelty | Mix safe/stretch/wild/below | Non-seed share | Niche top-10 head |
 |---|---|---|---|---|---|---|---|
