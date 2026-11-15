@@ -94,6 +94,23 @@ function getMatchedGenres(movieGenres: string[], profile: TasteProfile): string[
     .map((entry) => entry.name);
 }
 
+function getSharedLikedKeyword(movie: Movie, profile: TasteProfile): string | null {
+  if (!Array.isArray(movie.keywords) || movie.keywords.length === 0) return null;
+  let bestKeyword: string | null = null;
+  let bestAff = 0;
+  for (const raw of movie.keywords) {
+    if (typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const aff = profile.keywords.get(trimmed.toLowerCase()) ?? 0;
+    if (aff > bestAff) {
+      bestAff = aff;
+      bestKeyword = trimmed;
+    }
+  }
+  return bestKeyword;
+}
+
 function buildReason(
   item: RankedCandidate,
   profile: TasteProfile,
@@ -148,32 +165,64 @@ function buildReason(
     movieDecade && profile.usualDecades.size > 0 && !profile.usualDecades.has(movieDecade)
   );
 
-  let newAngle: string;
+  let intro: string;
   if (unfamiliarGenres.length > 0 && isNewDecade) {
-    newAngle = `${unfamiliarGenres[0]} from the ${movieDecade}`;
+    intro =
+      bucket === 'wildcard'
+        ? `New ground for you (${unfamiliarGenres[0]} from the ${movieDecade})`
+        : `A stretch into ${unfamiliarGenres[0]} from the ${movieDecade}`;
   } else if (unfamiliarGenres.length > 0) {
-    newAngle = unfamiliarGenres[0];
+    intro =
+      bucket === 'wildcard'
+        ? `New ground for you in ${unfamiliarGenres[0]}`
+        : `A stretch into ${unfamiliarGenres[0]}`;
   } else if (isNewDecade) {
-    newAngle = `${movieDecade} cinema`;
-  } else if (sources.includes('creator_graph') && director) {
-    newAngle = `a different side of ${director}`;
+    intro =
+      bucket === 'wildcard'
+        ? `New ground for you in ${movieDecade} cinema`
+        : `A stretch into ${movieDecade} cinema`;
+  } else if (sources.includes('creator_graph') && director && !likedDirector) {
+    intro =
+      bucket === 'wildcard'
+        ? `New ground for you with ${director}`
+        : `A stretch into a different side of ${director}`;
   } else if (sources.includes('hidden_gem')) {
-    newAngle = 'an under-the-radar hidden gem';
+    intro =
+      bucket === 'wildcard'
+        ? 'New ground for you with an under-the-radar pick'
+        : 'A stretch into an under-the-radar hidden gem';
   } else {
-    newAngle = bucket === 'wildcard' ? 'unexplored territory' : 'a fresh tonal direction';
+    intro = 'New ground for you';
   }
 
-  let bridge: string;
+  const sharedKeyword = getSharedLikedKeyword(movie, profile);
+  const likedDecade =
+    movieDecade && (profile.decades.get(movieDecade) ?? 0) > 0 ? movieDecade : null;
+
+  // Bridge link preference order: liked director -> shared keyword -> liked decade -> liked genre
+  let bridgeKind: 'director' | 'keyword' | 'decade' | 'genre' | 'fallback';
+  let bridgeClause: string;
   if (likedDirector) {
-    bridge = `your appreciation for ${likedDirector}`;
+    bridgeKind = 'director';
+    bridgeClause = `it's by ${likedDirector}, whose films you rate highly`;
+  } else if (sharedKeyword) {
+    bridgeKind = 'keyword';
+    bridgeClause = `it shares the "${sharedKeyword}" theme you rate highly`;
+  } else if (likedDecade) {
+    bridgeKind = 'decade';
+    bridgeClause = `it's from the ${likedDecade}, an era you rate highly`;
   } else if (matchedGenres.length > 0) {
-    bridge = `your taste for ${matchedGenres[0]}`;
-  } else if (profile.totalRatings > 0 && (seedNeighbour || sources.includes('seed_graph'))) {
-    bridge = 'titles similar to your top-rated films';
-  } else if (topLikedGenre) {
-    bridge = `tonal overlap with your ${topLikedGenre} favorites`;
+    bridgeKind = 'genre';
+    bridgeClause = `it brings in the ${matchedGenres[0]} elements you rate highly`;
   } else {
-    bridge = `strong critical craft (${voteText})`;
+    bridgeKind = 'fallback';
+    if (profile.totalRatings > 0 && (seedNeighbour || sources.includes('seed_graph'))) {
+      bridgeClause = 'it connects to films you rated highly';
+    } else if (topLikedGenre) {
+      bridgeClause = `it echoes the tone of your ${topLikedGenre} favorites`;
+    } else {
+      bridgeClause = `it stands out on strong critical craft (${voteText})`;
+    }
   }
 
   let worthRisk: string;
@@ -181,17 +230,13 @@ function buildReason(
     worthRisk = `its ${voteAvg.toFixed(1)}/10 acclaim`;
   } else if (sources.includes('hidden_gem')) {
     worthRisk = 'standout cinephile word-of-mouth';
-  } else if (likedDirector) {
+  } else if (likedDirector && bridgeKind !== 'director') {
     worthRisk = `${likedDirector}'s track record in your ratings`;
   } else {
     worthRisk = 'a rewarding departure from your usual rotation';
   }
 
-  if (bucket === 'stretch') {
-    return `A stretch into ${newAngle}, bridged by ${bridge} — worth the risk for ${worthRisk}.`;
-  }
-
-  return `Wildcard discovery exploring ${newAngle}, bridged by ${bridge} — worth the risk for ${worthRisk}.`;
+  return `${intro}, but ${bridgeClause} — worth the risk for ${worthRisk}.`;
 }
 
 /**

@@ -103,7 +103,9 @@ describe('RankedFeed Auto-Generation & Infinite Retry Guard', () => {
     expect(aiManager.generateRecommendations).toHaveBeenCalledTimes(1);
 
     // Verify error banner is rendered with a manual Retry button
-    expect(screen.getByText(/AI Status:/)).toBeDefined();
+    expect(screen.getByText(/Note:/)).toBeDefined();
+    expect(screen.getByText(/Simulated API failure/)).toBeDefined();
+    expect(screen.queryByText(/AI Status:/)).toBeNull();
     const retryBtn = screen.getByText('Retry Generation');
     expect(retryBtn).toBeDefined();
 
@@ -988,7 +990,8 @@ describe('RankedFeed Bucket Badges (CIN-9)', () => {
     );
 
     expect(screen.getByText('Safe pick')).toBeInTheDocument();
-    expect(screen.getByText('Wildcard')).toBeInTheDocument();
+    // CIN-12 adds a "Wildcard" filter chip (a button); the badge is the non-button match.
+    expect(screen.getAllByText('Wildcard').some((el) => !el.closest('button'))).toBe(true);
     expect(screen.getByText('Long shot')).toBeInTheDocument();
     expect(screen.getByText('Safe Bet (High Match)')).toBeInTheDocument();
   });

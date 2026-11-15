@@ -6,9 +6,19 @@ import { useMovieStore } from '../store/useMovieStore';
 import { RatingControl } from './RatingControl';
 import { ShareButton } from './ShareButton';
 import { useModalA11y } from './useModalA11y';
+import { BucketBadge } from './RankedFeed';
 
 export const MovieDetailsModal: React.FC = () => {
-  const { selectedMovieForModal, setSelectedMovieForModal, ratings, setRating, removeRating, watchlist, toggleWatchlist } = useMovieStore();
+  const {
+    selectedMovieForModal,
+    setSelectedMovieForModal,
+    recommendations,
+    ratings,
+    setRating,
+    removeRating,
+    watchlist,
+    toggleWatchlist,
+  } = useMovieStore();
   const [movieDetails, setMovieDetails] = useState<Movie | null>(null);
   const [showTrailer, setShowTrailer] = useState<boolean>(false);
 
@@ -50,6 +60,7 @@ export const MovieDetailsModal: React.FC = () => {
   if (!isOpen || !selectedMovieForModal) return null;
 
   const movie = movieDetails || selectedMovieForModal;
+  const matchingBucket = (recommendations || []).find((r) => r.movie.id === movie.id)?.bucket;
   const userRating = ratings[movie.id]?.rating;
   const inWatchlist = watchlist.includes(movie.id);
   const backdropUrl = movie.backdrop_path ? `${BACKDROP_BASE_URL}${movie.backdrop_path}` : null;
@@ -114,6 +125,11 @@ export const MovieDetailsModal: React.FC = () => {
           {/* Main Title & Action Row */}
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
             <div className="space-y-1">
+              {matchingBucket && (
+                <div className="mb-1">
+                  <BucketBadge bucket={matchingBucket} />
+                </div>
+              )}
               <h2 id="movie-details-modal-title" className="font-heading text-xl sm:text-3xl font-extrabold text-white tracking-tight">
                 {movie.title}
               </h2>
