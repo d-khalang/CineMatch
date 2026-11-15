@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../test/mocks/server';
@@ -34,6 +34,10 @@ describe('SettingsModal Groq Provider & Live Model Picker (CIN-68)', () => {
     clearInMemoryStoreForTesting();
     credentialStore.forgetAll();
     credentialCoordinator.resetForTesting();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('1. Selecting Groq shows the key field and the picker', async () => {
@@ -146,10 +150,11 @@ describe('SettingsModal Groq Provider & Live Model Picker (CIN-68)', () => {
     fireEvent.click(loadModelsBtn);
 
     await waitFor(() => {
-      // 413/429 should show the friendly message and NOT the raw org ID
+      // 429 on Load models should read as a rate limit without mentioning ratings or the raw org ID
       expect(
-        screen.getByText("This model's free limit is too small for your ratings. Try another model.")
+        screen.getByText('Groq is rate limiting this key. Try again in a minute.')
       ).toBeInTheDocument();
+      expect(screen.queryByText(/ratings/i)).not.toBeInTheDocument();
       expect(screen.queryByText(/org_test_secret123/)).not.toBeInTheDocument();
     });
 
@@ -369,5 +374,375 @@ describe('SettingsModal Groq Provider & Live Model Picker (CIN-68)', () => {
 
     expect(screen.queryByRole('option', { name: /llama-3.1-8b-instant/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Load models/i })).toBeEnabled();
+  });
+
+  it('Forget clears loaded models, error alert, and test status, and disables Load models', async () => {
+    let callCount = 0;
+
+    server.use(
+      http.get('https://api.groq.com/openai/v1/models', () => {
+        callCount++;
+        if (callCount === 1) {
+          return HttpResponse.json({
+            data: [{ id: 'loaded-before-error-model', active: true }],
+          });
+        }
+        return HttpResponse.json(
+          { error: { message: 'Invalid API Key' } },
+          { status: 401 }
+        );
+      }),
+      http.post('https://api.groq.com/openai/v1/chat/completions', () => {
+        return HttpResponse.json(
+          { error: { message: 'Invalid API Key' } },
+          { status: 401 }
+        );
+      })
+    );
+
+    renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /^Groq/i }));
+
+    const keyInput = screen.getByLabelText('Groq API Key') as HTMLInputElement;
+    fireEvent.change(keyInput, { target: { value: 'gsk_first_key' } });
+
+    const loadModelsBtn = screen.getByRole('button', { name: /Load models/i });
+    fireEvent.click(loadModelsBtn);
+    await screen.findByRole('option', { name: /loaded-before-error-model/i });
+
+    fireEvent.click(screen.getByRole('button', { name: /Test AI Connection/i }));
+    await screen.findByText(/Groq Error: Invalid API Key/);
+
+    fireEvent.click(loadModelsBtn);
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert')).toHaveTextContent(/Invalid API Key/);
+
+    fireEvent.click(screen.getByRole('button', { name: /Forget Groq Key/i }));
+
+    await waitFor(() => {
+      expect(keyInput.value).toBe('');
+      expect(loadModelsBtn).toBeDisabled();
+      expect(
+        screen.queryByRole('option', { name: /loaded-before-error-model/i })
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Groq Error: Invalid API Key/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('Forget cancels an in-flight load and prevents stale models from filling in', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    let resolveDelayed!: (value: Response) => void;
+
+    server.use(
+      http.get('https://api.groq.com/openai/v1/models', async () => {
+        return await new Promise<Response>((resolve) => {
+          resolveDelayed = resolve;
+        });
+      })
+    );
+
+    renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /^Groq/i }));
+
+    const keyInput = screen.getByLabelText('Groq API Key') as HTMLInputElement;
+    fireEvent.change(keyInput, { target: { value: 'gsk_inflight_key' } });
+
+    const loadModelsBtn = screen.getByRole('button', { name: /Load models/i });
+    fireEvent.click(loadModelsBtn);
+
+    const modelsCall = fetchSpy.mock.calls.find(([url]) =>
+      String(url).includes('/openai/v1/models')
+    );
+    const inFlightSignal = modelsCall?.[1]?.signal as AbortSignal;
+    expect(inFlightSignal.aborted).toBe(false);
+    expect(loadModelsBtn).toHaveAttribute('aria-busy', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: /Forget Groq Key/i }));
+
+    await waitFor(() => {
+      expect(inFlightSignal.aborted).toBe(true);
+      expect(keyInput.value).toBe('');
+      expect(loadModelsBtn).toBeDisabled();
+      expect(loadModelsBtn).toHaveAttribute('aria-busy', 'false');
+    });
+
+    // Resolving the aborted request afterward must not repopulate the list or show an error
+    resolveDelayed(
+      HttpResponse.json({
+        data: [{ id: 'stale-after-forget-model', active: true }],
+      })
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(
+      screen.queryByRole('option', { name: /stale-after-forget-model/i })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('Forget during an in-flight Test AI Connection prevents the stale error from appearing', async () => {
+    let resolveTest!: (value: Response) => void;
+    server.use(
+      http.post('https://api.groq.com/openai/v1/chat/completions', async () => {
+        return await new Promise<Response>((resolve) => {
+          resolveTest = resolve;
+        });
+      })
+    );
+
+    renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /^Groq/i }));
+    fireEvent.change(screen.getByLabelText('Groq API Key'), {
+      target: { value: 'gsk_inflight_test_key' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Test AI Connection/i }));
+    await waitFor(() => {
+      expect(resolveTest).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Forget Groq Key/i }));
+
+    resolveTest(
+      HttpResponse.json(
+        { error: { message: 'Invalid API Key' } },
+        { status: 401 }
+      )
+    );
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(screen.queryByText(/Invalid API Key/i)).not.toBeInTheDocument();
+    expect(credentialStore.getStatuses().groq.status).toBe('untested');
+  });
+
+  it('closing and reopening the modal does not retain a previously loaded model list', async () => {
+    const { rerender } = render(
+      <MovieStoreProvider>
+        <SettingsModal isOpen={true} onClose={vi.fn()} />
+      </MovieStoreProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^Groq/i }));
+    fireEvent.change(screen.getByLabelText('Groq API Key'), {
+      target: { value: 'gsk_draft_key' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Load models/i }));
+    await screen.findByRole('option', { name: /llama-3.1-8b-instant/i });
+
+    rerender(
+      <MovieStoreProvider>
+        <SettingsModal isOpen={false} onClose={vi.fn()} />
+      </MovieStoreProvider>
+    );
+    rerender(
+      <MovieStoreProvider>
+        <SettingsModal isOpen={true} onClose={vi.fn()} />
+      </MovieStoreProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^Groq/i }));
+    expect(
+      screen.queryByRole('option', { name: /llama-3.1-8b-instant/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it('429 on Test Connection reads as a rate limit and does not mention ratings', async () => {
+    server.use(
+      http.post('https://api.groq.com/openai/v1/chat/completions', () => {
+        return HttpResponse.json(
+          {
+            error: {
+              message: 'Rate limit reached for model in organization org_test_secret123',
+            },
+          },
+          { status: 429 }
+        );
+      })
+    );
+
+    renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /^Groq/i }));
+    fireEvent.change(screen.getByLabelText('Groq API Key'), {
+      target: { value: 'gsk_rate_limited_key' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Test AI Connection/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Groq is rate limiting this key. Try again in a minute.')
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/ratings/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/org_test_secret123/)).not.toBeInTheDocument();
+      expect(credentialStore.getStatuses().groq.status).toBe('invalid');
+    });
+  });
+
+  it('strips organization org_ ids from non-rate-limit Groq errors in Settings and aiManager fallback label', async () => {
+    server.use(
+      http.get('https://api.groq.com/openai/v1/models', () => {
+        return HttpResponse.json(
+          {
+            error: {
+              message: 'Access denied in organization org_abc: key revoked',
+            },
+          },
+          { status: 403 }
+        );
+      }),
+      http.post('https://api.groq.com/openai/v1/chat/completions', () => {
+        return HttpResponse.json(
+          {
+            error: {
+              message: 'Model access disabled for organization org_abc',
+            },
+          },
+          { status: 403 }
+        );
+      })
+    );
+
+    renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /^Groq/i }));
+    fireEvent.change(screen.getByLabelText('Groq API Key'), {
+      target: { value: 'gsk_org_error_key' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Load models/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/Access denied: key revoked/);
+      expect(screen.queryByText(/org_/)).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Test AI Connection/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Model access disabled/)).toBeInTheDocument();
+      expect(screen.queryByText(/org_/)).not.toBeInTheDocument();
+      expect(credentialStore.getStatuses().groq.message).not.toMatch(/org_/);
+    });
+
+    const fallbackResult = await aiManager.generateRecommendations('groq', {
+      userRatings: [
+        {
+          movieId: 1,
+          title: 'Interstellar',
+          rating: 9,
+          posterPath: null,
+          genres: ['Sci-Fi'],
+          ratedAt: 1,
+        },
+      ],
+      candidatePool: [
+        {
+          id: 101,
+          title: 'Arrival',
+          overview: 'First contact.',
+          release_date: '2016-11-11',
+          vote_average: 7.9,
+          vote_count: 15000,
+          poster_path: null,
+          backdrop_path: null,
+          genres: [{ id: 878, name: 'Sci-Fi' }],
+        },
+      ],
+      serendipityLevel: 30,
+      apiKey: 'gsk_org_error_key',
+    });
+
+    expect(fallbackResult.usedProvider).toMatch(/^Local Engine \(Fallback: /);
+    expect(fallbackResult.usedProvider).toContain('Model access disabled');
+    expect(fallbackResult.usedProvider).not.toMatch(/org_/);
+    expect(fallbackResult.error).not.toMatch(/org_/);
+  });
+
+  it('omits the (saved) label on the default model when nothing is saved, and keeps it for a saved model', async () => {
+    server.use(
+      http.get('https://api.groq.com/openai/v1/models', () => {
+        return HttpResponse.json({
+          data: [
+            { id: 'openai/gpt-oss-120b', active: true },
+            { id: 'llama-3.3-70b-versatile', active: true },
+            { id: 'llama-3.1-8b-instant', active: true },
+          ],
+        });
+      })
+    );
+
+    const { unmount } = renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /^Groq/i }));
+
+    const defaultOption = screen.getByRole('option', {
+      name: 'openai/gpt-oss-120b',
+    }) as HTMLOptionElement;
+    expect(defaultOption).toBeInTheDocument();
+    expect(defaultOption.textContent).not.toContain('(saved)');
+
+    fireEvent.change(screen.getByLabelText('Groq API Key'), {
+      target: { value: 'gsk_test_key' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Load models/i }));
+    await screen.findByRole('option', { name: /llama-3.3-70b-versatile/i });
+
+    expect(screen.queryByText(/\(saved\)/i)).not.toBeInTheDocument();
+
+    // Save a chosen model, then reopen Settings
+    fireEvent.change(screen.getByLabelText(/Groq Model/i), {
+      target: { value: 'llama-3.3-70b-versatile' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Save & Apply Settings/i }));
+    await waitFor(() => {
+      expect(JSON.parse(safeGetItem(STORAGE_KEYS.SETTINGS) || '{}').groqModel).toBe(
+        'llama-3.3-70b-versatile'
+      );
+    });
+
+    unmount();
+    renderModal();
+
+    await screen.findByRole('option', { name: /llama-3.1-8b-instant/i });
+    expect(
+      screen.getByRole('option', { name: 'llama-3.3-70b-versatile (saved)' })
+    ).toBeInTheDocument();
+  });
+
+  it('places the model picker before Load models in the DOM and sets aria-busy while loading', async () => {
+    let resolveModels!: () => void;
+    const modelsGate = new Promise<void>((resolve) => {
+      resolveModels = resolve;
+    });
+    server.use(
+      http.get('https://api.groq.com/openai/v1/models', async () => {
+        await modelsGate;
+        return HttpResponse.json({
+          data: [{ id: 'llama-3.3-70b-versatile', active: true }],
+        });
+      })
+    );
+
+    renderModal();
+    fireEvent.click(screen.getByRole('button', { name: /^Groq/i }));
+
+    const modelPicker = screen.getByLabelText(/Groq Model/i);
+    const loadModelsBtn = screen.getByRole('button', { name: /Load models/i });
+
+    expect(
+      modelPicker.compareDocumentPosition(loadModelsBtn) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(loadModelsBtn).toHaveAttribute('aria-busy', 'false');
+
+    fireEvent.change(screen.getByLabelText('Groq API Key'), {
+      target: { value: 'gsk_busy_test_key' },
+    });
+    fireEvent.click(loadModelsBtn);
+
+    expect(loadModelsBtn).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent(/Loading Groq models/i);
+
+    resolveModels();
+
+    await waitFor(() => {
+      expect(loadModelsBtn).toHaveAttribute('aria-busy', 'false');
+      expect(screen.getByRole('option', { name: /llama-3.3-70b-versatile/i })).toBeInTheDocument();
+    });
   });
 });
