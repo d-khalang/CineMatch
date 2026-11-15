@@ -18,6 +18,58 @@ import { RatingControl } from './RatingControl';
 import { DiscoveryFilters } from './DiscoveryFilters';
 import { ShareButton } from './ShareButton';
 import { Movie, Recommendation } from '../types';
+import { Bucket } from '../services/recommendation/types';
+
+type BucketFilter = 'all' | 'safe_bet' | 'stretch' | 'wildcard';
+
+const BUCKET_FILTER_OPTIONS: { id: BucketFilter; label: string; emptyNoun: string }[] = [
+  { id: 'all', label: 'All', emptyNoun: '' },
+  { id: 'safe_bet', label: 'Safe', emptyNoun: 'safe' },
+  { id: 'stretch', label: 'Stretch', emptyNoun: 'stretch' },
+  { id: 'wildcard', label: 'Wildcard', emptyNoun: 'wildcard' },
+];
+
+const BUCKET_BADGE_CONFIG: Record<
+  Bucket,
+  {
+    label: string;
+    Icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+    iconClass: string;
+  }
+> = {
+  safe_bet: {
+    label: 'Safe pick',
+    Icon: Award,
+    iconClass: 'w-3 h-3 text-[var(--accent-secondary)]',
+  },
+  stretch: {
+    label: 'A stretch for you',
+    Icon: Compass,
+    iconClass: 'w-3 h-3 text-[var(--accent-secondary)]',
+  },
+  wildcard: {
+    label: 'Wildcard',
+    Icon: Flame,
+    iconClass: 'w-3 h-3 text-[var(--accent-primary)]',
+  },
+  below_floor: {
+    label: 'Long shot',
+    Icon: Compass,
+    iconClass: 'w-3 h-3 text-slate-400',
+  },
+};
+
+export const BucketBadge: React.FC<{ bucket: Bucket }> = ({ bucket }) => {
+  const config = BUCKET_BADGE_CONFIG[bucket];
+  if (!config) return null;
+  const { label, Icon, iconClass } = config;
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
+      <Icon className={iconClass} aria-hidden={true} />
+      <span>{label}</span>
+    </span>
+  );
+};
 
 interface RestoredRecEntry {
   rec: Recommendation;
@@ -80,6 +132,7 @@ export const RankedFeed: React.FC = () => {
   const ratingContainerRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [seenPromptMovieId, setSeenPromptMovieId] = useState<number | null>(null);
   const [restoredRecs, setRestoredRecs] = useState<RestoredRecEntry[]>([]);
+  const [bucketFilter, setBucketFilter] = useState<BucketFilter>('all');
 
   useEffect(() => {
     profileSigRef.current = profileSig;
@@ -132,6 +185,16 @@ export const RankedFeed: React.FC = () => {
       !hiddenMovieIds.has(rec.movie.id) &&
       (!ratings[rec.movie.id] || Boolean(pendingRemovalIds[rec.movie.id]))
   );
+
+  const hasBucketData = visibleRecommendations.some((rec) => Boolean(rec.bucket));
+  const activeBucketFilter: BucketFilter = hasBucketData ? bucketFilter : 'all';
+
+  const filteredRecommendations = useMemo(() => {
+    if (activeBucketFilter === 'all') {
+      return visibleRecommendations;
+    }
+    return visibleRecommendations.filter((rec) => rec.bucket === activeBucketFilter);
+  }, [visibleRecommendations, activeBucketFilter]);
 
   const handleRateRecommendedMovie = (movie: Movie, val: number) => {
     setSeenPromptMovieId((prev) => (prev === movie.id ? null : prev));
@@ -193,19 +256,19 @@ export const RankedFeed: React.FC = () => {
         : [];
     const capturedTimestamp = cachedRecsTimestamp;
 
-    const currentIndex = visibleRecommendations.findIndex((rec) => rec.movie.id === movieId);
+    const currentIndex = filteredRecommendations.findIndex((rec) => rec.movie.id === movieId);
     if (currentIndex !== -1) {
-      if (visibleRecommendations.length <= 1) {
+      if (filteredRecommendations.length <= 1) {
         pendingFocusRef.current = { type: 'heading' };
-      } else if (currentIndex < visibleRecommendations.length - 1) {
+      } else if (currentIndex < filteredRecommendations.length - 1) {
         pendingFocusRef.current = {
           type: 'card',
-          movieId: visibleRecommendations[currentIndex + 1].movie.id,
+          movieId: filteredRecommendations[currentIndex + 1].movie.id,
         };
       } else {
         pendingFocusRef.current = {
           type: 'card',
-          movieId: visibleRecommendations[currentIndex - 1].movie.id,
+          movieId: filteredRecommendations[currentIndex - 1].movie.id,
         };
       }
     }
@@ -334,64 +397,39 @@ export const RankedFeed: React.FC = () => {
 
   const getSerendipityBadge = (rec: Recommendation) => {
     if (rec.bucket) {
-      switch (rec.bucket) {
-        case 'safe_bet':
-          return (
-            <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
-              <Award className="w-3 h-3 text-[var(--accent-secondary)]" /> Safe pick
-            </span>
-          );
-        case 'stretch':
-          return (
-            <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
-              <Compass className="w-3 h-3 text-[var(--accent-secondary)]" /> A stretch for you
-            </span>
-          );
-        case 'wildcard':
-          return (
-            <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
-              <Flame className="w-3 h-3 text-[var(--accent-primary)]" /> Wildcard
-            </span>
-          );
-        case 'below_floor':
-          return (
-            <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
-              <Compass className="w-3 h-3 text-slate-400" /> Long shot
-            </span>
-          );
-      }
+      return <BucketBadge bucket={rec.bucket} />;
     }
 
     switch (rec.serendipityType) {
       case 'ai_cinephile_discovery':
         return (
-          <span className="inline-flex items-center gap-1.5 text-[11px] px-3 py-1 rounded-md palette-tag-primary font-bold">
-            <Sparkles className="w-3.5 h-3.5 text-inherit" />
-            <span>🧠 AI Cinephile Discovery (Cross-Genre)</span>
+          <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
+            <Sparkles className="w-3 h-3 text-[var(--accent-secondary)]" aria-hidden={true} />
+            <span>Discovery pick</span>
           </span>
         );
       case 'wildcard_discovery':
         return (
           <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
-            <Flame className="w-3 h-3 text-[var(--accent-primary)]" /> Wildcard Discovery
+            <Flame className="w-3 h-3 text-[var(--accent-primary)]" aria-hidden={true} /> Wildcard Discovery
           </span>
         );
       case 'thematic_gem':
         return (
           <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
-            <Compass className="w-3 h-3 text-[var(--accent-secondary)]" /> Thematic Gem
+            <Compass className="w-3 h-3 text-[var(--accent-secondary)]" aria-hidden={true} /> Thematic Gem
           </span>
         );
       case 'director_match':
         return (
           <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
-            <Clapperboard className="w-3 h-3 text-[var(--accent-secondary)]" /> Director Match
+            <Clapperboard className="w-3 h-3 text-[var(--accent-secondary)]" aria-hidden={true} /> Director Match
           </span>
         );
       default:
         return (
           <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-md palette-tag-secondary font-semibold">
-            <Award className="w-3 h-3 text-[var(--accent-secondary)]" /> Safe Bet (High Match)
+            <Award className="w-3 h-3 text-[var(--accent-secondary)]" aria-hidden={true} /> Safe Bet (High Match)
           </span>
         );
     }
@@ -453,22 +491,17 @@ export const RankedFeed: React.FC = () => {
       {/* Discovery & Serendipity Controls */}
       <DiscoveryFilters />
 
-      {/* AI Psychological Taste DNA card if available */}
+      {/* Taste summary card if available */}
       {aiTasteAnalysis && (
         <div className="p-4 sm:p-5 rounded-2xl sm:rounded-3xl glass-panel border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] relative overflow-hidden">
           <div className="flex items-start gap-3">
             <div className="p-2.5 rounded-xl palette-tag-secondary shrink-0">
-              <Sparkles className="w-5 h-5 text-[var(--accent-secondary)]" />
+              <Sparkles className="w-5 h-5 text-[var(--accent-secondary)]" aria-hidden={true} />
             </div>
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <h3 className="text-xs sm:text-sm font-bold text-white tracking-wide uppercase">
-                  AI Psychological Taste Synthesis
-                </h3>
-                <span className="text-[10px] px-2 py-0.5 rounded-full palette-tag-secondary font-semibold">
-                  Cross-Genre DNA
-                </span>
-              </div>
+              <h3 className="text-xs sm:text-sm font-bold text-white tracking-wide">
+                Your taste, in a sentence
+              </h3>
               <p className="text-xs sm:text-sm text-slate-300 leading-relaxed font-serif italic">
                 "{aiTasteAnalysis}"
               </p>
@@ -481,9 +514,9 @@ export const RankedFeed: React.FC = () => {
       {recommendationError && (
         <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-800/60 text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" aria-hidden={true} />
             <div>
-              <span className="font-bold">AI Status:</span> {recommendationError}
+              <span className="font-bold">Note:</span> {recommendationError}
             </div>
           </div>
           <button
@@ -493,6 +526,32 @@ export const RankedFeed: React.FC = () => {
           >
             Retry Generation
           </button>
+        </div>
+      )}
+
+      {/* Bucket Filter Chips */}
+      {!isGeneratingRecs && hasBucketData && (
+        <div
+          role="group"
+          aria-label="Filter recommendations by category"
+          className="flex flex-wrap items-center gap-2"
+        >
+          {BUCKET_FILTER_OPTIONS.map((option) => {
+            const isSelected = activeBucketFilter === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={isSelected}
+                onClick={() => setBucketFilter(option.id)}
+                className={`btn-tactile text-xs px-3.5 py-1.5 rounded-lg focus-ring ${
+                  isSelected ? 'btn-tactile-primary' : 'btn-tactile-secondary'
+                }`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -518,11 +577,25 @@ export const RankedFeed: React.FC = () => {
             {recommendations.length > 0 ? 'Discover Next Batch' : 'Generate AI Rankings'}
           </button>
         </div>
+      ) : filteredRecommendations.length === 0 ? (
+        <div className="text-center py-12 glass-panel rounded-2xl p-6 space-y-3">
+          <p className="text-sm text-slate-300">
+            No {BUCKET_FILTER_OPTIONS.find((o) => o.id === activeBucketFilter)?.emptyNoun} picks in this list.
+          </p>
+          <button
+            type="button"
+            onClick={() => setBucketFilter('all')}
+            className="btn-tactile btn-tactile-secondary px-4 py-2 text-xs font-semibold focus-ring"
+          >
+            Show all picks
+          </button>
+        </div>
       ) : (
         <div className="space-y-4 sm:space-y-6">
-          {visibleRecommendations.map((rec, index) => {
-            const { movie, score, reason, serendipityType, highlightTags } = rec;
-            const displayRank = index + 1;
+          {filteredRecommendations.map((rec, index) => {
+            const { movie, reason, serendipityType, highlightTags } = rec;
+            const originalIndex = visibleRecommendations.findIndex((r) => r.movie.id === movie.id);
+            const displayRank = originalIndex !== -1 ? originalIndex + 1 : index + 1;
             const inWatchlist = watchlist.includes(movie.id);
             const posterUrl = movie.poster_path ? `${IMAGE_BASE_URL}${movie.poster_path}` : null;
             const year = movie.release_date ? movie.release_date.slice(0, 4) : '';
@@ -574,7 +647,7 @@ export const RankedFeed: React.FC = () => {
 
                   <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg-surface)] via-transparent to-transparent opacity-60 md:hidden" />
 
-                  {/* Mobile Match pill, Watchlist & Share buttons */}
+                  {/* Mobile Watchlist & Share buttons */}
                   <div className="absolute top-4 right-4 md:hidden flex items-center gap-1.5">
                     <button
                       onClick={(e) => {
@@ -591,13 +664,10 @@ export const RankedFeed: React.FC = () => {
                       {inWatchlist ? <BookmarkCheck className="w-4 h-4 text-[var(--accent-hover)]" /> : <Bookmark className="w-4 h-4" />}
                     </button>
                     <ShareButton movie={movie} variant="icon" iconSize="w-4 h-4" />
-                    <div className="px-2.5 py-1 rounded-full bg-[var(--bg-surface)] text-xs font-bold text-[var(--accent-primary)] border border-[var(--border-focus)]">
-                      {score}% Match
-                    </div>
                   </div>
                 </div>
 
-                {/* Content & AI Reasoning Body */}
+                {/* Content & Reasoning Body */}
                 <div className="flex flex-col justify-between flex-grow space-y-3">
                   <div className="space-y-2">
                     {/* Header Row */}
@@ -625,15 +695,8 @@ export const RankedFeed: React.FC = () => {
                         </h2>
                       </div>
 
-                      {/* Desktop Match Score & Watchlist & Share */}
+                      {/* Desktop Watchlist & Share */}
                       <div className="hidden md:flex items-center gap-2">
-                        <div className="text-right mr-1">
-                          <div className="text-lg font-extrabold text-[var(--accent-primary)]">{score}%</div>
-                          <div className="text-[10px] text-[var(--accent-secondary)] uppercase tracking-wider font-bold">
-                            Taste Match
-                          </div>
-                        </div>
-
                         <button
                           onClick={() => toggleWatchlist(movie)}
                           className={`p-2.5 rounded-xl border transition-colors cursor-pointer ${
@@ -672,16 +735,17 @@ export const RankedFeed: React.FC = () => {
                       {movie.overview}
                     </p>
 
-                    {/* AI Explanation Box */}
+                    {/* Explanation Box */}
                     <div
                       className="p-3 sm:p-3.5 rounded-xl flex items-start gap-2.5 border border-[var(--border-subtle)] border-l-2 border-l-[var(--accent-primary)] bg-[var(--bg-surface-elevated)]/90"
                     >
                       <Sparkles
                         className="w-4 h-4 shrink-0 mt-0.5 text-[var(--accent-primary)]"
+                        aria-hidden={true}
                       />
                       <div className="text-xs leading-relaxed text-slate-200">
                         <span className="font-semibold text-white">
-                          Why ranked #{displayRank}:{' '}
+                          Why this one:{' '}
                         </span>
                         {reason}
                       </div>
