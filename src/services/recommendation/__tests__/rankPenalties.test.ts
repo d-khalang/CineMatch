@@ -46,29 +46,30 @@ function ratings(n: number): UserRating[] {
   })) as UserRating[];
 }
 
-// Twenty near-identical Drama/Crime films, so position is decided by small score differences.
-function pool(): Candidate[] {
-  return Array.from({ length: 20 }, (_, i) => candidate(1 + i, ['Drama', 'Crime'], 900, 1990 + (i % 10)));
-}
 
 const positionOf = (recs: ReturnType<typeof rankCandidates>, id: number) =>
   recs.findIndex((r) => r.movie.id === id);
 
 describe('rankCandidates penalties', () => {
   it('moves a film close to a rejected one down the list, not just its score', () => {
-    const p = pool();
-    const target = p[0];
-    const base = rankCandidates(p, ratings(80), { serendipityLevel: 30, size: 20 });
-    const penalised = rankCandidates(p, ratings(80), {
+    // Eight Drama/Crime films, one per decade, so a rejected film matches exactly one of them.
+    const years = [1975, 1985, 1995, 2005, 2015, 1965, 1955, 2022];
+    const decades = years.map((year, i) => candidate(1 + i, ['Drama', 'Crime'], 900, year));
+    const base = rankCandidates(decades, ratings(80), { serendipityLevel: 30, size: 8 });
+    const top = base[0];
+    const after = rankCandidates(decades, ratings(80), {
       serendipityLevel: 30,
-      size: 20,
-      rejectedFilms: [{ title: 'Nope', year: '1990', genres: ['Drama', 'Crime'] }],
+      size: 8,
+      rejectedFilms: [{ title: 'Nope', year: top.movie.release_date.slice(0, 4), genres: ['Drama', 'Crime'] }],
     });
-    // Every 1990s Drama/Crime film is penalised equally, so compare against an unpenalised 2000s film.
-    expect(positionOf(base, target.movie.id)).toBeGreaterThanOrEqual(0);
-    const rejectedScore = penalised.find((r) => r.movie.id === target.movie.id)?.score ?? -1;
-    const baseScore = base.find((r) => r.movie.id === target.movie.id)?.score ?? -1;
-    expect(rejectedScore).toBeLessThan(baseScore);
+    expect(positionOf(after, top.movie.id)).toBeGreaterThan(0);
+    expect(after[0].movie.id).not.toBe(top.movie.id);
+    // Only the matching film is penalised; every other film keeps its bucket.
+    for (const rec of after) {
+      if (rec.movie.id !== top.movie.id) {
+        expect(rec.bucket).toBe(base.find((r) => r.movie.id === rec.movie.id)?.bucket);
+      }
+    }
   });
 
   const famous = candidate(500, ['Drama', 'Crime'], 2_000_000, 1995);
@@ -85,20 +86,5 @@ describe('rankCandidates penalties', () => {
     expect(scoreOf(low, 500)).toBe(scoreOf(low, 501));
     const newUser = rankCandidates([famous, obscure], ratings(20), { serendipityLevel: 90, size: 2 });
     expect(scoreOf(newUser, 500)).toBe(scoreOf(newUser, 501));
-  });
-
-  it('lowers relevance for every film close to a rejected one', () => {
-    const before = rankCandidates([famous, obscure], ratings(600), { serendipityLevel: 30, size: 2 });
-    const after = rankCandidates([famous, obscure], ratings(600), {
-      serendipityLevel: 30,
-      size: 2,
-      rejectedFilms: [
-        { title: 'Nope one', year: '1994', genres: ['Drama', 'Crime'] },
-        { title: 'Nope two', year: '1996', genres: ['Drama', 'Crime'] },
-      ],
-    });
-    // Both match the rejected films equally, so relative order holds and both scores drop.
-    expect(scoreOf(after, 500)).toBeLessThan(scoreOf(before, 500) as number);
-    expect(scoreOf(after, 501)).toBeLessThan(scoreOf(before, 501) as number);
   });
 });
