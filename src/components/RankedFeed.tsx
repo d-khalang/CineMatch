@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Trophy,
   Sparkles,
@@ -25,6 +25,9 @@ import { Bucket } from '../services/recommendation/types';
 
 /** CIN-25: the "Tonight" picks only show for a list long enough to scroll past. */
 const TONIGHT_MIN_LIST = 8;
+
+/** CIN-52: grace period before a newly rated card is dismissed from the feed. */
+const RATED_DISMISS_GRACE_MS = 8000;
 
 type BucketFilter = 'all' | 'safe_bet' | 'stretch' | 'wildcard';
 
@@ -114,12 +117,28 @@ export const RankedFeed: React.FC = () => {
 
   const [pendingRemovalIds, setPendingRemovalIds] = useState<Record<number, boolean>>({});
   const pendingTimersRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+  const pendingRemovalRef = useRef<Set<number>>(new Set());
+  const focusedCardsRef = useRef<Set<number>>(new Set());
+  const pointerInsideCardsRef = useRef<Set<number>>(new Set());
+  const isMountedRef = useRef<boolean>(true);
+  const ratingsRef = useRef(ratings);
+
+  useEffect(() => {
+    ratingsRef.current = ratings;
+  }, [ratings]);
 
   // Clean up timers on unmount
   useEffect(() => {
+    isMountedRef.current = true;
     const timers = pendingTimersRef.current;
+    const pendingIds = pendingRemovalRef.current;
     return () => {
-      Object.values(timers).forEach((t) => clearTimeout(t));
+      isMountedRef.current = false;
+      Object.entries(timers).forEach(([id, t]) => {
+        clearTimeout(t);
+        delete timers[Number(id)];
+      });
+      pendingIds.clear();
     };
   }, []);
 
@@ -218,39 +237,102 @@ export const RankedFeed: React.FC = () => {
     [activeBucketFilter, hasBucketData, filteredRecommendations]
   );
 
+  const clearPendingTimer = useCallback((movieId: number) => {
+    if (pendingTimersRef.current[movieId]) {
+      clearTimeout(pendingTimersRef.current[movieId]);
+      delete pendingTimersRef.current[movieId];
+    }
+  }, []);
+
+  const schedulePendingDismiss = useCallback((movieId: number) => {
+    clearPendingTimer(movieId);
+    if (!isMountedRef.current || !pendingRemovalRef.current.has(movieId)) {
+      return;
+    }
+    if (focusedCardsRef.current.has(movieId) || pointerInsideCardsRef.current.has(movieId)) {
+      return;
+    }
+    pendingTimersRef.current[movieId] = setTimeout(() => {
+      delete pendingTimersRef.current[movieId];
+      if (!isMountedRef.current || !pendingRemovalRef.current.has(movieId)) {
+        return;
+      }
+      pendingRemovalRef.current.delete(movieId);
+      focusedCardsRef.current.delete(movieId);
+      pointerInsideCardsRef.current.delete(movieId);
+      if (ratingsRef.current[movieId]) {
+        dismissRecommendation(movieId);
+      }
+      setRestoredRecs((prev) => prev.filter((e) => e.rec.movie.id !== movieId));
+      setPendingRemovalIds((prev) => {
+        if (!prev[movieId]) return prev;
+        const next = { ...prev };
+        delete next[movieId];
+        return next;
+      });
+    }, RATED_DISMISS_GRACE_MS);
+  }, [clearPendingTimer, dismissRecommendation]);
+
+  const handleCardFocus = (movieId: number) => {
+    focusedCardsRef.current.add(movieId);
+    clearPendingTimer(movieId);
+  };
+
+  const handleCardBlur = (movieId: number, e: React.FocusEvent<HTMLDivElement>) => {
+    const nextTarget = e.relatedTarget as Node | null;
+    if (nextTarget && e.currentTarget.contains(nextTarget)) {
+      return;
+    }
+    focusedCardsRef.current.delete(movieId);
+    if (pendingRemovalRef.current.has(movieId)) {
+      schedulePendingDismiss(movieId);
+    }
+  };
+
+  const handleCardPointerEnter = (movieId: number) => {
+    pointerInsideCardsRef.current.add(movieId);
+    clearPendingTimer(movieId);
+  };
+
+  const handleCardPointerLeave = (movieId: number) => {
+    pointerInsideCardsRef.current.delete(movieId);
+    if (pendingRemovalRef.current.has(movieId)) {
+      schedulePendingDismiss(movieId);
+    }
+  };
+
   const handleRateRecommendedMovie = (movie: Movie, val: number) => {
     setSeenPromptMovieId((prev) => (prev === movie.id ? null : prev));
     setRating(movie, val);
     showToast(`Rated "${movie.title}" ${val}/10 — saved to My Ratings!`);
 
-    if (pendingTimersRef.current[movie.id]) {
-      clearTimeout(pendingTimersRef.current[movie.id]);
+    const cardEl = cardRefs.current[movie.id];
+    if (cardEl && document.activeElement && cardEl.contains(document.activeElement)) {
+      focusedCardsRef.current.add(movie.id);
     }
-    setPendingRemovalIds((prev) => ({ ...prev, [movie.id]: true }));
 
-    pendingTimersRef.current[movie.id] = setTimeout(() => {
-      dismissRecommendation(movie.id);
-      setRestoredRecs((prev) => prev.filter((e) => e.rec.movie.id !== movie.id));
-      setPendingRemovalIds((prev) => {
-        const next = { ...prev };
-        delete next[movie.id];
-        return next;
-      });
-      delete pendingTimersRef.current[movie.id];
-    }, 4000);
+    pendingRemovalRef.current.add(movie.id);
+    setPendingRemovalIds((prev) => (prev[movie.id] ? prev : { ...prev, [movie.id]: true }));
+    schedulePendingDismiss(movie.id);
   };
 
   const handleClearRecommendedMovie = (movieId: number) => {
-    if (pendingTimersRef.current[movieId]) {
-      clearTimeout(pendingTimersRef.current[movieId]);
-      delete pendingTimersRef.current[movieId];
-    }
+    clearPendingTimer(movieId);
+    pendingRemovalRef.current.delete(movieId);
     setPendingRemovalIds((prev) => {
+      if (!prev[movieId]) return prev;
       const next = { ...prev };
       delete next[movieId];
       return next;
     });
     removeRating(movieId);
+  };
+
+  const handleUndoRating = (movieId: number) => {
+    handleClearRecommendedMovie(movieId);
+    const container = ratingContainerRefs.current[movieId];
+    const radioBtn = container?.querySelector<HTMLButtonElement>('button[role="radio"]');
+    radioBtn?.focus();
   };
 
   const handleToggleSeenPrompt = (movieId: number) => {
@@ -302,10 +384,10 @@ export const RankedFeed: React.FC = () => {
     });
 
     const title = rawTitle && rawTitle.trim() ? rawTitle.trim() : `#${movieId}`;
-    if (pendingTimersRef.current[movieId]) {
-      clearTimeout(pendingTimersRef.current[movieId]);
-      delete pendingTimersRef.current[movieId];
-    }
+    clearPendingTimer(movieId);
+    pendingRemovalRef.current.delete(movieId);
+    focusedCardsRef.current.delete(movieId);
+    pointerInsideCardsRef.current.delete(movieId);
     setPendingRemovalIds((prev) => {
       if (!prev[movieId]) return prev;
       const next = { ...prev };
@@ -382,7 +464,26 @@ export const RankedFeed: React.FC = () => {
 
   useEffect(() => {
     setSeenPromptMovieId((prev) => (prev !== null ? null : prev));
+    Object.entries(pendingTimersRef.current).forEach(([id, t]) => {
+      clearTimeout(t);
+      delete pendingTimersRef.current[Number(id)];
+    });
+    pendingRemovalRef.current.clear();
+    focusedCardsRef.current.clear();
+    pointerInsideCardsRef.current.clear();
+    setPendingRemovalIds((prev) => (Object.keys(prev).length > 0 ? {} : prev));
   }, [cachedRecsTimestamp]);
+
+  // Cards unmount during regeneration without firing blur/pointerleave; clear stale interaction flags
+  // so pending cards do not remain permanently paused if generation fails and remounts the old list.
+  useEffect(() => {
+    if (!isGeneratingRecs) return;
+    focusedCardsRef.current.clear();
+    pointerInsideCardsRef.current.clear();
+    pendingRemovalRef.current.forEach((movieId) => {
+      schedulePendingDismiss(movieId);
+    });
+  }, [isGeneratingRecs, schedulePendingDismiss]);
 
   useEffect(() => {
     // If we have ratings and no recommendations yet, auto-generate ONLY ONCE per profile signature
@@ -655,6 +756,7 @@ export const RankedFeed: React.FC = () => {
             const posterUrl = movie.poster_path ? `${IMAGE_BASE_URL}${movie.poster_path}` : null;
             const year = movie.release_date ? movie.release_date.slice(0, 4) : '';
             const isPendingRemoval = Boolean(pendingRemovalIds[movie.id]);
+            const ratedScore = ratings[movie.id]?.rating;
             const isSeenPromptOpen = seenPromptMovieId === movie.id;
             const displayTitle = movie.title && movie.title.trim() ? movie.title.trim() : `#${movie.id}`;
 
@@ -670,6 +772,12 @@ export const RankedFeed: React.FC = () => {
                 }}
                 tabIndex={-1}
                 data-movie-id={movie.id}
+                onFocus={() => handleCardFocus(movie.id)}
+                onBlur={(e) => handleCardBlur(movie.id, e)}
+                onPointerEnter={() => handleCardPointerEnter(movie.id)}
+                onPointerLeave={() => handleCardPointerLeave(movie.id)}
+                onMouseEnter={() => handleCardPointerEnter(movie.id)}
+                onMouseLeave={() => handleCardPointerLeave(movie.id)}
                 className={`group relative flex flex-col md:flex-row gap-4 sm:gap-6 rounded-2xl sm:rounded-3xl p-4 sm:p-5 glass-panel glass-panel-hover border transition-colors duration-200 overflow-hidden focus-ring ${
                   isPendingRemoval
                     ? 'bg-[var(--bg-surface-elevated)] border-[var(--border-subtle)]'
@@ -826,35 +934,45 @@ export const RankedFeed: React.FC = () => {
                           delete ratingContainerRefs.current[movie.id];
                         }
                       }}
-                      className={`w-full sm:max-w-md space-y-1.5 ${
+                      className={`w-full sm:max-w-md ${
                         isSeenPromptOpen
                           ? 'p-3 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--border-focus)]'
                           : ''
                       }`}
                     >
                       {isSeenPromptOpen && (
-                        <p className="text-xs font-semibold text-slate-200">
+                        <p className="text-xs font-semibold text-slate-200 mb-1.5">
                           Already seen it? Rate it below to sharpen your picks, or skip.
                         </p>
                       )}
 
-                      {isPendingRemoval && (
-                        <div className="flex items-center justify-between text-[11px] text-white bg-[var(--bg-surface-elevated)] px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)]">
-                          <span className="font-bold flex items-center gap-1.5 text-[var(--accent-secondary)]">
-                            ✓ Grade saved! Hiding soon...
-                          </span>
-                        </div>
-                      )}
+                      <div role="status" aria-live="polite">
+                        {isPendingRemoval && ratedScore !== undefined && (
+                          <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] text-white bg-[var(--bg-surface-elevated)] px-2.5 py-1.5 rounded-lg border border-[var(--border-subtle)]">
+                            <span className="font-bold flex items-center gap-1.5 text-[var(--accent-secondary)]">
+                              Rated {ratedScore}/10, moved to My Ratings
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleUndoRating(movie.id)}
+                              aria-label={`Undo rating for ${displayTitle}`}
+                              className="shrink-0 px-2 py-0.5 rounded-md font-bold text-[var(--accent-primary)] hover:text-[var(--accent-hover)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] transition-colors cursor-pointer focus-ring"
+                            >
+                              Undo
+                            </button>
+                          </div>
+                        )}
+                      </div>
 
                       <RatingControl
-                        currentRating={ratings[movie.id]?.rating}
+                        currentRating={ratedScore}
                         onRate={(val) => handleRateRecommendedMovie(movie, val)}
                         onClear={() => handleClearRecommendedMovie(movie.id)}
                         compact={true}
                       />
 
                       {isSeenPromptOpen && (
-                        <div className="flex justify-end pt-1">
+                        <div className="flex justify-end pt-1 mt-1.5">
                           <button
                             type="button"
                             onClick={() => handleHideFilm(movie.id, 'seen', displayTitle)}
