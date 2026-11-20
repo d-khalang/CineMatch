@@ -8,6 +8,13 @@ import { rankCandidates } from '../services/recommendation/rankCandidates';
 import { toCandidates } from '../services/recommendation/candidateMovies';
 import type { SourceCursor } from '../services/recommendation/types';
 import { selectRejectedFilms } from '../services/recommendation/rejectedFilms';
+import {
+  loadShownHistory,
+  saveShownHistory,
+  recordShown,
+  forgetShown,
+  demoteRecentlyShown,
+} from '../services/recommendation/shownHistory';
 import { recsSettingsFingerprint } from '../services/recommendation/settingsFingerprint';
 import { credentialStore } from '../services/credentialStore';
 import { credentialCoordinator } from '../services/credentialCoordinator';
@@ -33,6 +40,44 @@ import {
 } from '../services/storage';
 import { OPENROUTER_DEFAULT_MODEL, sanitizeOpenRouterModel } from '../services/ai/openRouterProvider';
 import { GROQ_DEFAULT_MODEL, sanitizeGroqModel } from '../services/ai/groqProvider';
+
+/**
+ * A film counts as shown at most once per 6 hours. Every rating regenerates the list, so without
+ * this a few ratings in one sitting would count as several showings and demote the whole list.
+ */
+const SHOWN_RECOUNT_GAP_MS = 6 * 60 * 60 * 1000;
+
+function newlyShownIds(history: ReturnType<typeof loadShownHistory>, movieIds: number[], now: number): number[] {
+  return movieIds.filter((id) => {
+    const entry = history[id];
+    return !entry || now - entry.lastShownAt >= SHOWN_RECOUNT_GAP_MS;
+  });
+}
+
+/** CIN-49: demote films shown repeatedly without any action, then remember this run's list. */
+function applyShownMemory(recs: Recommendation[], now: number): Recommendation[] {
+  const history = loadShownHistory(now);
+  const demoted = demoteRecentlyShown(
+    recs.map((rec) => ({ movieId: rec.movie.id, rec })),
+    history,
+    now
+  ).map((wrapped, index) => ({ ...wrapped.rec, rank: index + 1 }));
+  const fresh = newlyShownIds(history, demoted.map((rec) => rec.movie.id), now);
+  if (fresh.length > 0) saveShownHistory(recordShown(history, fresh, now));
+  return demoted;
+}
+
+function rememberShown(movieIds: number[], now: number): void {
+  const history = loadShownHistory(now);
+  const fresh = newlyShownIds(history, movieIds, now);
+  if (fresh.length > 0) saveShownHistory(recordShown(history, fresh, now));
+}
+
+/** Acting on a film (rating, watchlisting, hiding) clears its ignored-history. */
+function forgetShownFilm(movieId: number): void {
+  const history = loadShownHistory();
+  if (history[movieId]) saveShownHistory(forgetShown(history, movieId));
+}
 
 const DEFAULT_SETTINGS: AISettings = {
   activeProvider: 'gemini',
@@ -515,6 +560,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Set or update rating with race condition guard
   const setRating = useCallback(async (movie: Movie, rating: number) => {
     cancelGeneration();
+    forgetShownFilm(movie.id);
     const currentEpoch = storeEpochRef.current;
     const currentVersion = (ratingVersionsRef.current.get(movie.id) || 0) + 1;
     ratingVersionsRef.current.set(movie.id, currentVersion);
@@ -603,6 +649,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const hideFilm = useCallback(
     (movieId: number, reason: HiddenFilm['reason'], title?: string) => {
       const hiddenAt = Date.now();
+      forgetShownFilm(movieId);
       const rec = recommendationsRef.current.find((r) => r?.movie?.id === movieId);
       let year: string | undefined;
       let genres: string[] | undefined;
@@ -720,6 +767,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       watchlistRef.current = next;
       setWatchlist(next);
     } else {
+      forgetShownFilm(movieId);
       const next = [movieId, ...watchlistRef.current];
       watchlistRef.current = next;
       setWatchlist(next);
@@ -1062,6 +1110,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const fingerprint = recsSettingsFingerprint(aiSettings);
         const currentRatedCount = userRatingsList.length;
 
+        finalRecommendations = applyShownMemory(finalRecommendations, timestamp);
         lastCursorsRef.current = { generationId, cursors: capturedCursors };
         setLoadMoreStatus('idle');
         recommendationsRef.current = finalRecommendations;
@@ -1192,6 +1241,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         recommendationsRef.current = nextRecs;
         setRecommendations(nextRecs);
+        rememberShown(appended.map((rec) => rec.movie.id), Date.now());
 
         const cached = readRecommendationCache();
         if (cached) {

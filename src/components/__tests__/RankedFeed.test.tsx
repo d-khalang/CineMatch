@@ -996,3 +996,81 @@ describe('RankedFeed Bucket Badges (CIN-9)', () => {
     expect(screen.getByText('Safe Bet (High Match)')).toBeInTheDocument();
   });
 });
+
+describe('RankedFeed "Tonight" picks (CIN-25 wiring)', () => {
+  const seededRatings = {
+    101: { movieId: 101, title: 'Rated Film One', rating: 9, ratedAt: 1000, genres: ['Drama'] },
+    202: { movieId: 202, title: 'Rated Film Two', rating: 8, ratedAt: 2000, genres: ['Sci-Fi'] },
+  };
+  const buckets = ['safe_bet', 'safe_bet', 'stretch', 'safe_bet', 'wildcard', 'safe_bet', 'stretch', 'below_floor', 'safe_bet'];
+  const makeRecs = (count: number) =>
+    buckets.slice(0, count).map((bucket, i) => ({
+      movie: {
+        id: 900 + i,
+        title: `Feed Film ${i + 1}`,
+        overview: '',
+        release_date: '2020-01-01',
+        vote_average: 7.5,
+        vote_count: 400,
+        poster_path: null,
+        backdrop_path: null,
+        genres: [{ id: 18, name: 'Drama' }],
+      },
+      score: 90 - i,
+      rank: i + 1,
+      reason: `Reason for film ${i + 1}.`,
+      serendipityType: 'safe_bet',
+      bucket,
+      highlightTags: [],
+    }));
+  const seed = (count: number) => {
+    localStorage.setItem(STORAGE_KEYS.RATINGS, JSON.stringify(seededRatings));
+    localStorage.setItem(
+      STORAGE_KEYS.CACHED_RECOMMENDATIONS,
+      JSON.stringify({
+        recommendations: makeRecs(count),
+        generatedAt: 100000,
+        usedProvider: 'Local Smart Heuristic (Zero Config)',
+        settingsFingerprint: 'fp',
+        ratedCount: 2,
+      })
+    );
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    clearInMemoryStoreForTesting();
+  });
+
+  it('highlights a safe bet, a stretch and a wildcard above the full list when the list is long', () => {
+    seed(9);
+    render(
+      <MovieStoreProvider>
+        <RankedFeed />
+      </MovieStoreProvider>
+    );
+
+    const section = screen.getByRole('region', { name: 'Tonight' });
+    const pickButtons = section.querySelectorAll('button');
+    expect(pickButtons).toHaveLength(3);
+    expect(pickButtons[0]).toHaveTextContent('Feed Film 1');
+    expect(pickButtons[1]).toHaveTextContent('Feed Film 3');
+    expect(pickButtons[2]).toHaveTextContent('Feed Film 5');
+    expect(screen.getByRole('heading', { name: 'Your full ranked list' })).toBeInTheDocument();
+    // The full list keeps every film, including the picks.
+    expect(screen.getAllByText('Feed Film 1').length).toBe(2);
+    expect(screen.getByText('Feed Film 9')).toBeInTheDocument();
+  });
+
+  it('shows no "Tonight" section for a short list', () => {
+    seed(5);
+    render(
+      <MovieStoreProvider>
+        <RankedFeed />
+      </MovieStoreProvider>
+    );
+
+    expect(screen.queryByRole('region', { name: 'Tonight' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Your full ranked list' })).toBeNull();
+  });
+});
