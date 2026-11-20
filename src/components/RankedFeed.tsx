@@ -18,6 +18,10 @@ import { IMAGE_BASE_URL } from '../services/tmdb';
 import { RatingControl } from './RatingControl';
 import { DiscoveryFilters } from './DiscoveryFilters';
 import { ShareButton } from './ShareButton';
+import { TonightPicks } from './TonightPicks';
+import { selectTonightPicks } from '../services/recommendation/tonightPicks';
+
+const TONIGHT_MIN_LIST = 8;
 import { Movie, Recommendation } from '../types';
 import { Bucket } from '../services/recommendation/types';
 
@@ -201,6 +205,17 @@ export const RankedFeed: React.FC = () => {
     }
     return visibleRecommendations.filter((rec) => rec.bucket === activeBucketFilter);
   }, [visibleRecommendations, activeBucketFilter]);
+
+  // CIN-25: three confident picks highlighted above the unfiltered list. The full list stays below,
+  // so every film keeps its rate, hide and watchlist actions and its rank number.
+  const { picks: tonightPicks } = useMemo(
+    () =>
+      // Only worth highlighting when the list is long enough to scroll past.
+      activeBucketFilter === 'all' && hasBucketData && filteredRecommendations.length >= TONIGHT_MIN_LIST
+        ? selectTonightPicks(filteredRecommendations)
+        : { picks: [] as Recommendation[], rest: filteredRecommendations },
+    [activeBucketFilter, hasBucketData, filteredRecommendations]
+  );
 
   const handleRateRecommendedMovie = (movie: Movie, val: number) => {
     setSeenPromptMovieId((prev) => (prev === movie.id ? null : prev));
@@ -478,7 +493,7 @@ export const RankedFeed: React.FC = () => {
         <div className="space-y-2">
           <h2 className="text-2xl sm:text-3xl font-extrabold text-white">Your Rank List Needs Calibration</h2>
           <p className="text-slate-400 text-sm max-w-md mx-auto leading-relaxed">
-            Rate at least 2 or 3 movies you have seen so Cinephile AI can compute your taste vector and rank candidates.
+            Rate 3 films you love to get started. Your list grows sharper with every rating.
           </p>
         </div>
         <button
@@ -625,6 +640,11 @@ export const RankedFeed: React.FC = () => {
           </button>
         </div>
       ) : (
+        <div className="space-y-6 sm:space-y-8">
+          <TonightPicks picks={tonightPicks} onOpen={(rec) => setSelectedMovieForModal(rec.movie)} />
+          {tonightPicks.length > 0 && (
+            <h2 className="text-lg sm:text-xl font-bold text-white">Your full ranked list</h2>
+          )}
         <div className="space-y-4 sm:space-y-6">
           {filteredRecommendations.map((rec, index) => {
             const { movie, reason, serendipityType, highlightTags } = rec;
@@ -888,6 +908,7 @@ export const RankedFeed: React.FC = () => {
               </div>
             );
           })}
+        </div>
         </div>
       )}
 

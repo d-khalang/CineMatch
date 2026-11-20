@@ -80,7 +80,9 @@ describe('TonightPicks', () => {
     const buttons = screen.getAllByRole('button');
     expect(buttons).toHaveLength(3);
 
-    const posterOne = screen.getByAltText('Past Lives');
+    // Decorative poster: the title text names the button, so the image has empty alt text.
+    const posterOne = buttons[0].querySelector('img');
+    expect(posterOne).toHaveAttribute('alt', '');
     expect(posterOne).toHaveAttribute('src', 'https://image.tmdb.org/t/p/w342/past-lives.jpg');
     expect(screen.getByText('Past Lives')).toBeInTheDocument();
     expect(screen.getByText('(2023)')).toBeInTheDocument();
@@ -124,7 +126,7 @@ describe('TonightPicks', () => {
 
     const buttons = screen.getAllByRole('button');
     expect(buttons).toHaveLength(1);
-    expect(screen.getByAltText('Stalker')).toHaveAttribute(
+    expect(buttons[0].querySelector('img')).toHaveAttribute(
       'src',
       'https://image.tmdb.org/t/p/w342/stalker.jpg'
     );
