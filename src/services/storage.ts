@@ -15,6 +15,7 @@ export const STORAGE_KEYS = {
   STORAGE_META: 'cinematch_storage_meta_v2',
   HIDDEN_FILMS: 'cinematch_hidden_films_v3',
   SHOWN_HISTORY: 'cinematch_shown_history_v1',
+  OUTCOME_LOG: 'cinematch_outcome_log_v1',
   // Legacy v1 keys
   LEGACY_RATINGS: 'cinematch_user_ratings_v1',
   LEGACY_SETTINGS: 'cinematch_ai_settings_v1',
