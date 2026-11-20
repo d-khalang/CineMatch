@@ -41,6 +41,19 @@ import {
 import { OPENROUTER_DEFAULT_MODEL, sanitizeOpenRouterModel } from '../services/ai/openRouterProvider';
 import { GROQ_DEFAULT_MODEL, sanitizeGroqModel } from '../services/ai/groqProvider';
 
+/**
+ * A film counts as shown at most once per 6 hours. Every rating regenerates the list, so without
+ * this a few ratings in one sitting would count as several showings and demote the whole list.
+ */
+const SHOWN_RECOUNT_GAP_MS = 6 * 60 * 60 * 1000;
+
+function newlyShownIds(history: ReturnType<typeof loadShownHistory>, movieIds: number[], now: number): number[] {
+  return movieIds.filter((id) => {
+    const entry = history[id];
+    return !entry || now - entry.lastShownAt >= SHOWN_RECOUNT_GAP_MS;
+  });
+}
+
 /** CIN-49: demote films shown repeatedly without any action, then remember this run's list. */
 function applyShownMemory(recs: Recommendation[], now: number): Recommendation[] {
   const history = loadShownHistory(now);
@@ -49,16 +62,18 @@ function applyShownMemory(recs: Recommendation[], now: number): Recommendation[]
     history,
     now
   ).map((wrapped, index) => ({ ...wrapped.rec, rank: index + 1 }));
-  saveShownHistory(recordShown(history, demoted.map((rec) => rec.movie.id), now));
+  const fresh = newlyShownIds(history, demoted.map((rec) => rec.movie.id), now);
+  if (fresh.length > 0) saveShownHistory(recordShown(history, fresh, now));
   return demoted;
 }
 
 function rememberShown(movieIds: number[], now: number): void {
-  if (movieIds.length === 0) return;
-  saveShownHistory(recordShown(loadShownHistory(now), movieIds, now));
+  const history = loadShownHistory(now);
+  const fresh = newlyShownIds(history, movieIds, now);
+  if (fresh.length > 0) saveShownHistory(recordShown(history, fresh, now));
 }
 
-/** Acting on a film (rating, watchlisting) clears its ignored-history. */
+/** Acting on a film (rating, watchlisting, hiding) clears its ignored-history. */
 function forgetShownFilm(movieId: number): void {
   const history = loadShownHistory();
   if (history[movieId]) saveShownHistory(forgetShown(history, movieId));
@@ -634,6 +649,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const hideFilm = useCallback(
     (movieId: number, reason: HiddenFilm['reason'], title?: string) => {
       const hiddenAt = Date.now();
+      forgetShownFilm(movieId);
       const rec = recommendationsRef.current.find((r) => r?.movie?.id === movieId);
       let year: string | undefined;
       let genres: string[] | undefined;

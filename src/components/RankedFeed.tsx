@@ -20,10 +20,11 @@ import { DiscoveryFilters } from './DiscoveryFilters';
 import { ShareButton } from './ShareButton';
 import { TonightPicks } from './TonightPicks';
 import { selectTonightPicks } from '../services/recommendation/tonightPicks';
-
-const TONIGHT_MIN_LIST = 8;
 import { Movie, Recommendation } from '../types';
 import { Bucket } from '../services/recommendation/types';
+
+/** CIN-25: the "Tonight" picks only show for a list long enough to scroll past. */
+const TONIGHT_MIN_LIST = 8;
 
 type BucketFilter = 'all' | 'safe_bet' | 'stretch' | 'wildcard';
 
