@@ -128,6 +128,7 @@ export function buildOpenRouterPrompt(
         preferredEras,
         selectedVibes,
         rejectedFilms: request.rejectedFilms,
+        adaptMix: request.adaptMix,
         size: poolSize ?? 60,
       }).map((rec) => ({
         id: rec.movie.id,

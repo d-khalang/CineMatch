@@ -1064,6 +1064,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           selectedVibes: aiSettings.selectedVibes,
           preferredEras: aiSettings.preferredEras,
           rejectedFilms: selectRejectedFilms(hiddenFilmsRef.current),
+          adaptMix: (base) => adaptiveMix(base, loadOutcomeLog()),
           apiKey,
           model,
         },

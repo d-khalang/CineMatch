@@ -105,6 +105,7 @@ export class GeminiProvider implements IAIProvider {
           preferredEras,
           selectedVibes,
           rejectedFilms: request.rejectedFilms,
+          adaptMix: request.adaptMix,
           size: 60,
         }).map((rec) => ({
           id: rec.movie.id,

@@ -1,3 +1,4 @@
+import type { BucketMix } from '../recommendation/types';
 import { Movie, Recommendation, UserRating } from '../../types';
 import type { Candidate } from '../recommendation/types';
 import type { RejectedFilm } from '../recommendation/rejectedFilms';
@@ -10,6 +11,8 @@ export interface RecommendationRequest {
   selectedVibes?: string[];
   preferredEras?: string[];
   rejectedFilms?: RejectedFilm[];
+  /** CIN-13: adjusts the bucket mix from the user's past outcomes. Never carries credentials. */
+  adaptMix?: (base: BucketMix) => BucketMix;
   apiKey?: string;
   model?: string;
 }
