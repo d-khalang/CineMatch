@@ -11,6 +11,7 @@ import {
   AlertCircle,
   Clapperboard,
   SlidersHorizontal,
+  Loader2,
 } from 'lucide-react';
 import { useMovieStore } from '../store/useMovieStore';
 import { IMAGE_BASE_URL } from '../services/tmdb';
@@ -87,7 +88,10 @@ export const RankedFeed: React.FC = () => {
     watchlist,
     hiddenFilms,
     isGeneratingRecs,
+    isLoadingMore,
+    loadMoreStatus,
     generateRankings,
+    loadMoreRankings,
     lastProviderUsed,
     lastRunRatedCount,
     recommendationError,
@@ -127,6 +131,8 @@ export const RankedFeed: React.FC = () => {
   const profileSigRef = useRef<string>(profileSig);
   const pendingFocusRef = useRef<{ type: 'card'; movieId: number } | { type: 'heading' } | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const cardRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const awaitingLoadMoreRef = useRef<{ prevIds: Set<number>; timestamp: number | null } | null>(null);
   const seenButtonsRef = useRef<Record<number, HTMLButtonElement | null>>({});
   const shouldFocusRatingRef = useRef<number | null>(null);
   const ratingContainerRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -382,6 +388,34 @@ export const RankedFeed: React.FC = () => {
     generateRankings();
   };
 
+  const handleLoadMore = () => {
+    awaitingLoadMoreRef.current = {
+      prevIds: new Set(effectiveRecommendations.map((r) => r.movie.id)),
+      timestamp: cachedRecsTimestamp,
+    };
+    loadMoreRankings();
+  };
+
+  useEffect(() => {
+    if (isGeneratingRecs) {
+      awaitingLoadMoreRef.current = null;
+      return;
+    }
+    if (isLoadingMore || !awaitingLoadMoreRef.current) return;
+
+    const pending = awaitingLoadMoreRef.current;
+    awaitingLoadMoreRef.current = null;
+
+    if (pending.timestamp !== cachedRecsTimestamp || loadMoreStatus === 'error') {
+      return;
+    }
+
+    const firstNewRec = filteredRecommendations.find((rec) => !pending.prevIds.has(rec.movie.id));
+    if (firstNewRec) {
+      cardRefs.current[firstNewRec.movie.id]?.focus();
+    }
+  }, [isGeneratingRecs, isLoadingMore, loadMoreStatus, cachedRecsTimestamp, filteredRecommendations]);
+
   const getRankBadgeStyle = (rank: number) => {
     if (rank === 1) {
       return 'bg-[var(--accent-primary)] text-[var(--accent-text)] font-black border border-[var(--border-focus)]';
@@ -606,7 +640,16 @@ export const RankedFeed: React.FC = () => {
             return (
               <div
                 key={movie.id}
-                className={`group relative flex flex-col md:flex-row gap-4 sm:gap-6 rounded-2xl sm:rounded-3xl p-4 sm:p-5 glass-panel glass-panel-hover border transition-colors duration-200 overflow-hidden ${
+                ref={(el) => {
+                  if (el) {
+                    cardRefs.current[movie.id] = el;
+                  } else {
+                    delete cardRefs.current[movie.id];
+                  }
+                }}
+                tabIndex={-1}
+                data-movie-id={movie.id}
+                className={`group relative flex flex-col md:flex-row gap-4 sm:gap-6 rounded-2xl sm:rounded-3xl p-4 sm:p-5 glass-panel glass-panel-hover border transition-colors duration-200 overflow-hidden focus-ring ${
                   isPendingRemoval
                     ? 'bg-[var(--bg-surface-elevated)] border-[var(--border-subtle)]'
                     : serendipityType === 'ai_cinephile_discovery'
@@ -845,6 +888,37 @@ export const RankedFeed: React.FC = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {!isGeneratingRecs && visibleRecommendations.length > 0 && (
+        <div className="pt-4 flex flex-col items-center gap-3">
+          {loadMoreStatus === 'error' && (
+            <p role="alert" className="text-xs text-amber-200 flex items-center gap-1.5">
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" aria-hidden={true} />
+              <span>Couldn't load more recommendations right now.</span>
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={handleLoadMore}
+            disabled={isLoadingMore || loadMoreStatus === 'loading' || loadMoreStatus === 'exhausted'}
+            aria-busy={isLoadingMore || loadMoreStatus === 'loading'}
+            className="btn-tactile btn-tactile-secondary px-6 py-3 text-sm font-bold focus-ring disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {(isLoadingMore || loadMoreStatus === 'loading') && (
+              <Loader2 className="w-4 h-4 animate-spin" aria-hidden={true} />
+            )}
+            <span>
+              {isLoadingMore || loadMoreStatus === 'loading'
+                ? 'Loading more...'
+                : loadMoreStatus === 'exhausted'
+                ? 'No more right now'
+                : loadMoreStatus === 'error'
+                ? 'Try again'
+                : 'Show more'}
+            </span>
+          </button>
         </div>
       )}
     </div>

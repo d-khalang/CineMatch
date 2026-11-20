@@ -5,13 +5,15 @@ import { credentialStore } from '../../credentialStore';
 import { clearTmdbCache, getCandidateRecommendationPool } from '../../tmdb';
 import {
   generateCandidates,
+  generateCandidatesWithCursors,
+  loadMoreCandidates,
   selectWeightedSeeds,
   getTopUserGenreIds,
   RequestLimiter,
   applyFirst40CapAndFloors,
 } from '../candidateSources';
 import type { UserRating } from '../../../types';
-import type { Candidate, CandidateSource } from '../types';
+import type { Candidate, CandidateSource, SourceCursor } from '../types';
 import { MissingTmdbCredentialError } from '../../tmdbClient';
 
 function createLcg(seed: number): () => number {
@@ -1180,6 +1182,429 @@ describe('candidateSources module', () => {
         } finally {
           credentialStore.setTmdbCredential('read_access_token', 'mock-token');
         }
+      });
+    });
+  });
+
+  describe('CIN-11 cursors and loadMoreCandidates', () => {
+    const makePageResults = (prefix: number, count: number) =>
+      Array.from({ length: count }, (_, idx) => ({
+        id: prefix + idx,
+        title: `Movie ${prefix + idx}`,
+        poster_path: `/p${prefix + idx}.jpg`,
+        backdrop_path: null,
+        release_date: '2020-01-01',
+        vote_average: 7.8,
+        vote_count: 500,
+        genre_ids: [18],
+      }));
+
+    it('records SourceCursors per paged query with nextPage and exhausted flags', async () => {
+      const ratings: UserRating[] = [
+        {
+          movieId: 10,
+          title: 'Seed 10',
+          rating: 10,
+          posterPath: '/s10.jpg',
+          genres: ['Drama'],
+          ratedAt: 1000,
+        },
+      ];
+
+      server.use(
+        // Seed 10 recommendations: 2 pages, each full (20 items), total_pages: 5 -> nextPage 3, not exhausted
+        http.get('https://api.themoviedb.org/3/movie/10/recommendations', ({ request }) => {
+          const page = Number(new URL(request.url).searchParams.get('page') || '1');
+          return HttpResponse.json({
+            page,
+            results: makePageResults(1000 + page * 100, 20),
+            total_pages: 5,
+          });
+        }),
+        // Seed 10 similar: page 1 has only 5 items -> exhausted: true
+        http.get('https://api.themoviedb.org/3/movie/10/similar', ({ request }) => {
+          const page = Number(new URL(request.url).searchParams.get('page') || '1');
+          return HttpResponse.json({
+            page,
+            results: page === 1 ? makePageResults(2000, 5) : [],
+            total_pages: 1,
+          });
+        }),
+        // Discover: hidden_gem has 20 items & total_pages: 2 (exhausted after page 2);
+        // era has 20 items & total_pages: 4 (not exhausted);
+        // vibe has 20 items & total_pages: 1 (exhausted);
+        // baseline has 20 items & total_pages: 3 (not exhausted)
+        http.get('https://api.themoviedb.org/3/discover/movie', ({ request }) => {
+          const url = new URL(request.url);
+          const page = Number(url.searchParams.get('page') || '1');
+          if (url.searchParams.get('vote_count.lte') === '800') {
+            return HttpResponse.json({
+              page,
+              results: makePageResults(3000 + page * 100, 20),
+              total_pages: 2,
+            });
+          }
+          if (url.searchParams.get('primary_release_date.gte')) {
+            return HttpResponse.json({
+              page,
+              results: makePageResults(4000, 20),
+              total_pages: 4,
+            });
+          }
+          if (url.searchParams.get('with_genres') || url.searchParams.get('with_keywords')) {
+            return HttpResponse.json({
+              page,
+              results: makePageResults(5000, 20),
+              total_pages: 1,
+            });
+          }
+          return HttpResponse.json({
+            page,
+            results: makePageResults(6000, 20),
+            total_pages: 3,
+          });
+        }),
+        http.get('https://api.themoviedb.org/3/trending/movie/:timeWindow', () => {
+          return HttpResponse.json({
+            page: 1,
+            results: makePageResults(7000, 10), // < 20 -> exhausted
+            total_pages: 3,
+          });
+        })
+      );
+
+      let callbackCursors: SourceCursor[] = [];
+      const { candidates, cursors } = await generateCandidatesWithCursors(ratings, {
+        seedCount: 1,
+        preferredEras: ['90s'],
+        selectedVibes: ['mind-bending'],
+        onCursors: (c) => {
+          callbackCursors = c;
+        },
+      });
+
+      expect(candidates.length).toBeGreaterThan(0);
+      expect(callbackCursors).toEqual(cursors);
+
+      const recCursor = cursors.find(
+        (c) => c.source === 'seed_graph' && c.key === 'recommendations:10'
+      );
+      expect(recCursor).toEqual({
+        source: 'seed_graph',
+        key: 'recommendations:10',
+        nextPage: 3,
+        exhausted: false,
+      });
+
+      const simCursor = cursors.find(
+        (c) => c.source === 'seed_graph' && c.key === 'similar:10'
+      );
+      expect(simCursor?.exhausted).toBe(true);
+
+      const gemCursor = cursors.find((c) => c.source === 'hidden_gem');
+      expect(gemCursor).toBeDefined();
+      expect(gemCursor?.nextPage).toBe(3);
+      expect(gemCursor?.exhausted).toBe(true);
+
+      const eraCursors = cursors.filter((c) => c.source === 'era');
+      expect(eraCursors.length).toBeGreaterThanOrEqual(2);
+      expect(eraCursors.every((c) => c.nextPage === 2 && c.exhausted === false)).toBe(true);
+
+      const vibeCursors = cursors.filter((c) => c.source === 'vibe');
+      expect(vibeCursors.length).toBeGreaterThanOrEqual(1);
+      expect(vibeCursors.every((c) => c.nextPage === 2 && c.exhausted === true)).toBe(true);
+
+      const trendingCursor = cursors.find(
+        (c) => c.source === 'acclaimed_baseline' && c.key === 'trending:week'
+      );
+      expect(trendingCursor).toEqual({
+        source: 'acclaimed_baseline',
+        key: 'trending:week',
+        nextPage: 2,
+        exhausted: true,
+      });
+
+      const baselineDiscover = cursors.filter(
+        (c) => c.source === 'acclaimed_baseline' && c.key !== 'trending:week'
+      );
+      expect(baselineDiscover).toHaveLength(2);
+      expect(baselineDiscover.every((c) => c.nextPage === 2 && c.exhausted === false)).toBe(true);
+    });
+
+    it('loadMoreCandidates fetches only non-exhausted cursors, filters rated/excluded/duplicates, and marks exhausted', async () => {
+      const requestedUrls: string[] = [];
+
+      server.use(
+        http.get('https://api.themoviedb.org/3/movie/10/recommendations', ({ request }) => {
+          requestedUrls.push(request.url);
+          const page = Number(new URL(request.url).searchParams.get('page'));
+          // Return 20 results with total_pages: 3 -> becomes exhausted after page 3!
+          // Include a rated ID (10), an excluded ID (999), and a poster-less item
+          const results = makePageResults(8000, 20);
+          results[0].id = 10; // rated
+          results[1].id = 999; // excluded
+          results[2].poster_path = null as any; // no poster
+          return HttpResponse.json({ page, results, total_pages: 3 });
+        }),
+        http.get('https://api.themoviedb.org/3/movie/10/similar', ({ request }) => {
+          requestedUrls.push(request.url);
+          return HttpResponse.json({ page: 2, results: [], total_pages: 1 });
+        }),
+        http.get('https://api.themoviedb.org/3/discover/movie', ({ request }) => {
+          requestedUrls.push(request.url);
+          const page = Number(new URL(request.url).searchParams.get('page'));
+          // Only 5 results (< 20) -> exhausted; includes 8005 which overlaps with seed_graph
+          const results = [
+            ...makePageResults(9000, 4),
+            {
+              id: 8005,
+              title: 'Overlap 8005',
+              poster_path: '/p8005.jpg',
+              release_date: '2020-01-01',
+              vote_average: 8.0,
+              vote_count: 500,
+              genre_ids: [18],
+            },
+          ];
+          return HttpResponse.json({ page, results, total_pages: 10 });
+        })
+      );
+
+      const initialCursors: SourceCursor[] = [
+        { source: 'seed_graph', key: 'recommendations:10', nextPage: 3, exhausted: false },
+        { source: 'seed_graph', key: 'similar:10', nextPage: 2, exhausted: true },
+        {
+          source: 'hidden_gem',
+          key: 'discover:sort_by=vote_average.desc&vote_average.gte=7&vote_count.gte=50&vote_count.lte=800&with_genres=18',
+          nextPage: 3,
+          exhausted: false,
+        },
+      ];
+
+      const ratings: UserRating[] = [
+        { movieId: 10, title: 'Rated 10', rating: 9, posterPath: '/r10.jpg', genres: ['Drama'], ratedAt: 100 },
+      ];
+
+      const { candidates, cursors } = await loadMoreCandidates(
+        initialCursors,
+        ratings,
+        new Set([999])
+      );
+
+      // Exhausted cursor (similar:10) must NOT be fetched
+      expect(requestedUrls.some((u) => u.includes('/similar'))).toBe(false);
+      expect(requestedUrls.some((u) => u.includes('/recommendations?language=en-US&page=3'))).toBe(true);
+      expect(requestedUrls.some((u) => u.includes('/discover/movie') && u.includes('page=3'))).toBe(true);
+
+      const ids = candidates.map((c) => c.movie.id);
+      expect(ids).not.toContain(10);
+      expect(ids).not.toContain(999);
+      expect(ids).not.toContain(8002); // poster_path null
+      expect(new Set(ids).size).toBe(candidates.length);
+
+      // Overlapping movie 8005 merged sources and kept seedNeighbour: true
+      const overlap = candidates.find((c) => c.movie.id === 8005);
+      expect(overlap).toBeDefined();
+      expect(overlap?.sources).toContain('seed_graph');
+      expect(overlap?.sources).toContain('hidden_gem');
+      expect(overlap?.seedNeighbour).toBe(true);
+
+      // Both active cursors are now exhausted
+      expect(cursors.find((c) => c.key === 'recommendations:10')).toEqual({
+        source: 'seed_graph',
+        key: 'recommendations:10',
+        nextPage: 4,
+        exhausted: true,
+      });
+      expect(cursors.find((c) => c.source === 'hidden_gem')?.exhausted).toBe(true);
+      expect(cursors.find((c) => c.source === 'hidden_gem')?.nextPage).toBe(4);
+    });
+
+    it('loadMoreCandidates prioritizes seed_graph first and caps at 20 requests and 6 in flight', async () => {
+      let inFlight = 0;
+      let maxInFlight = 0;
+      let totalRequests = 0;
+      const fetchedOrder: string[] = [];
+
+      server.use(
+        http.get('https://api.themoviedb.org/3/discover/movie', async ({ request }) => {
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          totalRequests++;
+          fetchedOrder.push('discover:' + new URL(request.url).searchParams.get('with_genres'));
+          await delay(10);
+          inFlight--;
+          return HttpResponse.json({ page: 2, results: makePageResults(10000, 20), total_pages: 5 });
+        }),
+        http.get('https://api.themoviedb.org/3/movie/:id/recommendations', async ({ params }) => {
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          totalRequests++;
+          fetchedOrder.push('seed:' + params.id);
+          await delay(10);
+          inFlight--;
+          return HttpResponse.json({
+            page: 3,
+            results: makePageResults(Number(params.id) * 100, 20),
+            total_pages: 5,
+          });
+        })
+      );
+
+      // 18 non-seed cursors listed BEFORE 8 seed_graph cursors = 26 active cursors total
+      const nonSeedCursors: SourceCursor[] = Array.from({ length: 18 }, (_, i) => ({
+        source: 'hidden_gem',
+        key: `discover:with_genres=${100 + i}`,
+        nextPage: 2,
+        exhausted: false,
+      }));
+      const seedCursors: SourceCursor[] = Array.from({ length: 8 }, (_, i) => ({
+        source: 'seed_graph',
+        key: `recommendations:${i + 1}`,
+        nextPage: 3,
+        exhausted: false,
+      }));
+
+      const { cursors } = await loadMoreCandidates([...nonSeedCursors, ...seedCursors], []);
+
+      expect(totalRequests).toBe(20);
+      expect(maxInFlight).toBeLessThanOrEqual(6);
+
+      // All 8 seed_graph cursors were prioritized and executed first
+      expect(fetchedOrder.slice(0, 8).every((item) => item.startsWith('seed:'))).toBe(true);
+      for (const sc of seedCursors) {
+        expect(cursors.find((c) => c.key === sc.key)?.nextPage).toBe(4);
+      }
+
+      // First 12 non-seed cursors advanced; remaining 6 untouched
+      const advancedNonSeeds = cursors.filter((c) => c.source === 'hidden_gem' && c.nextPage === 3);
+      const untouchedNonSeeds = cursors.filter((c) => c.source === 'hidden_gem' && c.nextPage === 2);
+      expect(advancedNonSeeds).toHaveLength(12);
+      expect(untouchedNonSeeds).toHaveLength(6);
+    });
+
+    it('loadMoreCandidates aborts cleanly on pre-aborted and mid-flight AbortSignal', async () => {
+      let requestsStarted = 0;
+      server.use(
+        http.get('https://api.themoviedb.org/3/movie/:id/recommendations', async () => {
+          requestsStarted++;
+          await delay(40);
+          return HttpResponse.json({
+            page: 2,
+            results: makePageResults(1000, 20),
+            total_pages: 5,
+          });
+        })
+      );
+
+      const preAborted = new AbortController();
+      preAborted.abort();
+
+      await expect(
+        loadMoreCandidates(
+          [{ source: 'seed_graph', key: 'recommendations:1', nextPage: 2, exhausted: false }],
+          [],
+          undefined,
+          preAborted.signal
+        )
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      expect(requestsStarted).toBe(0);
+
+      // Mid-flight abort with > 6 cursors so queued cursors do not start after abort
+      const midController = new AbortController();
+      const manyCursors: SourceCursor[] = Array.from({ length: 12 }, (_, i) => ({
+        source: 'seed_graph',
+        key: `recommendations:${i + 1}`,
+        nextPage: 2,
+        exhausted: false,
+      }));
+      const promise = loadMoreCandidates(manyCursors, [], undefined, midController.signal);
+      await delay(10);
+      midController.abort();
+      const startedAtAbort = requestsStarted;
+      expect(startedAtAbort).toBeGreaterThan(0);
+
+      await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+      await delay(60);
+      expect(requestsStarted).toBe(startedAtAbort);
+    });
+
+    it('loadMoreCandidates handles empty, all-exhausted, and invalid cursors with 0 requests', async () => {
+      let requestsStarted = 0;
+      server.use(
+        http.get('https://api.themoviedb.org/3/*', () => {
+          requestsStarted++;
+          return HttpResponse.json({ page: 1, results: [] });
+        })
+      );
+
+      expect(await loadMoreCandidates([], [])).toEqual({ candidates: [], cursors: [] });
+
+      const nonQueryable: SourceCursor[] = [
+        { source: 'seed_graph', key: 'recommendations:1', nextPage: 3, exhausted: true },
+        { source: 'seed_graph', key: 'recommendations:2', nextPage: NaN, exhausted: false },
+        { source: 'seed_graph', key: 'recommendations:3', nextPage: 0, exhausted: false },
+        { source: 'seed_graph', key: 'recommendations:bad-id', nextPage: 2, exhausted: false },
+      ];
+      const res = await loadMoreCandidates(nonQueryable, []);
+      expect(res.candidates).toEqual([]);
+      expect(res.cursors).toHaveLength(4);
+      expect(requestsStarted).toBe(0);
+    });
+
+    it('loadMoreCandidates rejects when all executed queries fail, but tolerates partial failures', async () => {
+      server.use(
+        http.get('https://api.themoviedb.org/3/movie/10/recommendations', () => {
+          return new HttpResponse(null, { status: 500, statusText: 'Server Error' });
+        }),
+        http.get('https://api.themoviedb.org/3/movie/11/recommendations', () => {
+          return HttpResponse.json({
+            page: 2,
+            results: makePageResults(4000, 20),
+            total_pages: 4,
+          });
+        })
+      );
+
+      // Total failure rejects so the store transitions to 'error' instead of 'exhausted'
+      await expect(
+        loadMoreCandidates(
+          [{ source: 'seed_graph', key: 'recommendations:10', nextPage: 2, exhausted: false }],
+          []
+        )
+      ).rejects.toThrow(/500/);
+
+      // Partial failure resolves with surviving candidates and preserves failed cursor for retry
+      const partial = await loadMoreCandidates(
+        [
+          { source: 'seed_graph', key: 'recommendations:10', nextPage: 2, exhausted: false },
+          { source: 'seed_graph', key: 'recommendations:11', nextPage: 2, exhausted: false },
+        ],
+        {
+          4000: {
+            movieId: 4000,
+            title: 'Already Rated',
+            rating: 9,
+            posterPath: '/r.jpg',
+            genres: ['Drama'],
+            ratedAt: 100,
+          },
+        }
+      );
+
+      expect(partial.candidates.map((c) => c.movie.id)).not.toContain(4000);
+      expect(partial.candidates).toHaveLength(19);
+      expect(partial.cursors.find((c) => c.key === 'recommendations:10')).toEqual({
+        source: 'seed_graph',
+        key: 'recommendations:10',
+        nextPage: 2,
+        exhausted: false,
+      });
+      expect(partial.cursors.find((c) => c.key === 'recommendations:11')).toEqual({
+        source: 'seed_graph',
+        key: 'recommendations:11',
+        nextPage: 3,
+        exhausted: false,
       });
     });
   });
