@@ -769,7 +769,7 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
       fireEvent.click(rate8Btn);
 
       // Enters grace period: banner is visible
-      expect(screen.getByText(/Grade saved! Hiding soon\.\.\./i)).toBeInTheDocument();
+      expect(screen.getByText(/Rated 8\/10, moved to My Ratings/i)).toBeInTheDocument();
       expect(screen.getByText('Candidate Film A')).toBeInTheDocument();
 
       // Click "Seen it: Candidate Film A" then "Skip"
@@ -779,11 +779,11 @@ describe('RankedFeed "Seen it" & "Not for me" Hidden Films (CIN-42)', () => {
 
       // Card is immediately removed, grace banner is gone
       expect(screen.queryByText('Candidate Film A')).toBeNull();
-      expect(screen.queryByText(/Grade saved! Hiding soon\.\.\./i)).toBeNull();
+      expect(screen.queryByText(/Rated 8\/10, moved to My Ratings/i)).toBeNull();
 
-      // Advance timers by 5000ms: no resurrection
+      // Advance timers past the 8s grace period: no resurrection
       act(() => {
-        vi.advanceTimersByTime(5000);
+        vi.advanceTimersByTime(9000);
       });
       expect(screen.queryByText('Candidate Film A')).toBeNull();
     } finally {

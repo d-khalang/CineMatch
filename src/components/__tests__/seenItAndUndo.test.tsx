@@ -195,7 +195,10 @@ describe('CIN-62: "Seen it" inline rating & Undo on hide toast', () => {
 
       // Prompt closes, rating is saved, grace banner and toast appear
       expect(screen.queryByRole('button', { name: 'Skip' })).toBeNull();
-      expect(screen.getByText(/Grade saved! Hiding soon\.\.\./i)).toBeInTheDocument();
+      expect(screen.getByText(/Rated 9\/10, moved to My Ratings/i)).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Undo rating for Candidate Film A' })
+      ).toBeInTheDocument();
       expect(
         screen.getByText('Rated "Candidate Film A" 9/10 — saved to My Ratings!')
       ).toBeInTheDocument();
@@ -203,9 +206,22 @@ describe('CIN-62: "Seen it" inline rating & Undo on hide toast', () => {
       const storedRatings = JSON.parse(localStorage.getItem(STORAGE_KEYS.RATINGS) || '{}');
       expect(storedRatings[301]?.rating).toBe(9);
 
-      // Dismisses after 4000ms grace period and is NOT placed in hiddenFilms
+      // Move focus out of the card so the 8000ms grace period starts (CIN-52 pauses dismissal while focused)
+      const heading = screen.getByRole('heading', { level: 1, name: /Top Ranked Movies for You/i });
       act(() => {
-        vi.advanceTimersByTime(4000);
+        heading.focus();
+      });
+      expect(document.activeElement).toBe(heading);
+
+      // Still visible just before the 8000ms grace period ends
+      act(() => {
+        vi.advanceTimersByTime(7900);
+      });
+      expect(screen.getByText('Candidate Film A')).toBeInTheDocument();
+
+      // Dismisses after 8000ms grace period and is NOT placed in hiddenFilms
+      act(() => {
+        vi.advanceTimersByTime(100);
       });
       expect(screen.queryByText('Candidate Film A')).toBeNull();
       expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.HIDDEN_FILMS) || '[]')).toEqual([]);
@@ -563,7 +579,7 @@ describe('CIN-62: "Seen it" inline rating & Undo on hide toast', () => {
     );
   });
 
-  it('rating a restored last/only card keeps the 4s grace period without prematurely auto-generating', () => {
+  it('rating a restored last/only card keeps the 8s grace period without prematurely auto-generating', () => {
     vi.useFakeTimers();
     try {
       localStorage.setItem(STORAGE_KEYS.RATINGS, JSON.stringify(seededRatings));
@@ -587,13 +603,20 @@ describe('CIN-62: "Seen it" inline rating & Undo on hide toast', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Seen it: Candidate Film A' }));
       fireEvent.click(screen.getByRole('radio', { name: /Rate 9 out of 10/i }));
 
-      expect(screen.getByText(/Grade saved! Hiding soon\.\.\./i)).toBeInTheDocument();
+      expect(screen.getByText(/Rated 9\/10, moved to My Ratings/i)).toBeInTheDocument();
       expect(aiManager.generateRecommendations).not.toHaveBeenCalled();
 
+      // Move focus out of the card so the 8s grace timer runs, and verify it stays visible before 8000ms
+      const heading = screen.getByRole('heading', { level: 1, name: /Top Ranked Movies for You/i });
       act(() => {
-        vi.advanceTimersByTime(3900);
+        heading.focus();
       });
-      expect(screen.getByText(/Grade saved! Hiding soon\.\.\./i)).toBeInTheDocument();
+      expect(document.activeElement).toBe(heading);
+
+      act(() => {
+        vi.advanceTimersByTime(7900);
+      });
+      expect(screen.getByText(/Rated 9\/10, moved to My Ratings/i)).toBeInTheDocument();
       expect(aiManager.generateRecommendations).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
