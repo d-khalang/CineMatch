@@ -776,8 +776,6 @@ export const RankedFeed: React.FC = () => {
                 onBlur={(e) => handleCardBlur(movie.id, e)}
                 onPointerEnter={() => handleCardPointerEnter(movie.id)}
                 onPointerLeave={() => handleCardPointerLeave(movie.id)}
-                onMouseEnter={() => handleCardPointerEnter(movie.id)}
-                onMouseLeave={() => handleCardPointerLeave(movie.id)}
                 className={`group relative flex flex-col md:flex-row gap-4 sm:gap-6 rounded-2xl sm:rounded-3xl p-4 sm:p-5 glass-panel glass-panel-hover border transition-colors duration-200 overflow-hidden focus-ring ${
                   isPendingRemoval
                     ? 'bg-[var(--bg-surface-elevated)] border-[var(--border-subtle)]'
