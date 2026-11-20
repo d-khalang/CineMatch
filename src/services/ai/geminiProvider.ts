@@ -1,7 +1,8 @@
 import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './types';
-import { Movie } from '../../types';
 import { validateAndSanitizeAIResponse } from './aiResponseValidator';
 import { formatRejectedFilmsBlock } from '../recommendation/rejectedFilms';
+import { rankCandidates } from '../recommendation/rankCandidates';
+import { BUCKET_PROMPT_INSTRUCTION, buildCandidateMap } from './openRouterProvider';
 
 export const GEMINI_AVAILABLE_MODELS = [
   { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Latest & Recommended)', speed: 'Fastest', tier: 'Free Quota' },
@@ -74,6 +75,7 @@ export class GeminiProvider implements IAIProvider {
     const {
       userRatings,
       candidatePool,
+      candidates,
       serendipityLevel = 30,
       selectedVibes = [],
       preferredEras = [],
@@ -85,8 +87,7 @@ export class GeminiProvider implements IAIProvider {
       throw new Error('Gemini API key is required to use the Gemini provider.');
     }
 
-    const candidateMap = new Map<number, Movie>();
-    candidatePool.forEach((m) => candidateMap.set(m.id, m));
+    const candidateMap = buildCandidateMap(request);
 
     // Format ratings profile
     const ratingsSummary = userRatings.map((r) => ({
@@ -97,15 +98,31 @@ export class GeminiProvider implements IAIProvider {
       year: r.year,
     }));
 
-    // Format candidate pool (up to 40 candidates)
-    const poolSummary = candidatePool.slice(0, 40).map((m) => ({
-      id: m.id,
-      title: m.title,
-      year: m.release_date?.slice(0, 4),
-      genres: (m.genres || []).map((g) => g.name),
-      tmdb_rating: m.vote_average,
-      overview: m.overview ? m.overview.slice(0, 200) + '...' : '',
-    }));
+    const hasCandidates = Array.isArray(candidates) && candidates.length > 0;
+    const poolSummary = hasCandidates
+      ? rankCandidates(candidates, userRatings, {
+          serendipityLevel,
+          preferredEras,
+          selectedVibes,
+          rejectedFilms: request.rejectedFilms,
+          size: 60,
+        }).map((rec) => ({
+          id: rec.movie.id,
+          title: rec.movie.title,
+          year: rec.movie.release_date?.slice(0, 4),
+          genres: (rec.movie.genres || []).map((g) => g.name),
+          tmdb_rating: rec.movie.vote_average,
+          overview: rec.movie.overview ? rec.movie.overview.slice(0, 200) + '...' : '',
+          bucket: rec.bucket,
+        }))
+      : candidatePool.slice(0, 40).map((m) => ({
+          id: m.id,
+          title: m.title,
+          year: m.release_date?.slice(0, 4),
+          genres: (m.genres || []).map((g) => g.name),
+          tmdb_rating: m.vote_average,
+          overview: m.overview ? m.overview.slice(0, 200) + '...' : '',
+        }));
 
     const rejectedBlock = formatRejectedFilmsBlock(request.rejectedFilms || []);
     const rejectedSection = rejectedBlock ? `\n\n${rejectedBlock}` : '';
@@ -124,10 +141,13 @@ Candidate Pool:
 ${JSON.stringify(poolSummary, null, 2)}
 
 Instructions:
-1. Select and rank the best 10-20 films from Candidate Pool in order of personalized match.
+1. Select and rank the best ${hasCandidates ? '12–30' : '10-20'} films from Candidate Pool in order of personalized match.
 2. Provide a 1-sentence personalized rationale for each choice citing user affinities.
-3. Also suggest up to 3 unconstrained discoveries outside the candidate pool if they represent exceptional matches.
-4. Output strictly valid JSON matching this schema:
+3. Also suggest up to 3 unconstrained discoveries outside the candidate pool if they represent exceptional matches.${
+      hasCandidates
+        ? `\n4. ${BUCKET_PROMPT_INSTRUCTION}\n5. Output strictly valid JSON matching this schema:`
+        : '\n4. Output strictly valid JSON matching this schema:'
+    }
 {
   "taste_analysis": "Concise 2-sentence summary of user's cinematic taste DNA.",
   "pool_rankings": [

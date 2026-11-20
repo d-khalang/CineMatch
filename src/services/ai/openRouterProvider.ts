@@ -1,6 +1,7 @@
 import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './types';
 import { Movie } from '../../types';
 import { formatRejectedFilmsBlock } from '../recommendation/rejectedFilms';
+import { rankCandidates } from '../recommendation/rankCandidates';
 import {
   validateAndSanitizeAIResponse,
   parseAIJsonResponse,
@@ -8,6 +9,22 @@ import {
 } from './aiResponseValidator';
 
 export { composeSignals };
+
+export const BUCKET_PROMPT_INSTRUCTION =
+  'Each candidate\'s "bucket" hints its pipeline role ("safe_bet" = close taste match, "stretch" = adjacent discovery, "wildcard" = unexpected departure, "below_floor" = fallback); for "stretch" and "wildcard" picks, your reason must name the bridge to the user\'s taste.';
+
+export function buildCandidateMap(request: RecommendationRequest): Map<number, Movie> {
+  const candidateMap = new Map<number, Movie>();
+  for (const m of request.candidatePool || []) {
+    candidateMap.set(m.id, m);
+  }
+  for (const c of request.candidates || []) {
+    if (c?.movie && !candidateMap.has(c.movie.id)) {
+      candidateMap.set(c.movie.id, c.movie);
+    }
+  }
+  return candidateMap;
+}
 
 export const OPENROUTER_DEFAULT_MODEL = 'openrouter/free';
 
@@ -48,11 +65,12 @@ const COMPACT_BOTTOM_RATINGS_COUNT = 12;
 
 export function buildOpenRouterPrompt(
   request: RecommendationRequest,
-  { compact = false }: { compact?: boolean } = {}
+  { compact = false, poolSize }: { compact?: boolean; poolSize?: number } = {}
 ): string {
   const {
     userRatings = [],
     candidatePool = [],
+    candidates,
     serendipityLevel = 30,
     selectedVibes = [],
     preferredEras = [],
@@ -97,19 +115,38 @@ export function buildOpenRouterPrompt(
     genreSummaryLine = `\nGenre Summary (all ${userRatings.length} ratings, ${userRatings.length - maxRatings} omitted above): ${summaryText || 'None'}`;
   }
 
-  const poolSummary = candidatePool.slice(0, 40).map((m) => ({
-    id: m.id,
-    title: m.title,
-    year: m.release_date?.slice(0, 4),
-    genres: (m.genres || []).map((g) => g.name),
-    tmdb_rating: m.vote_average,
-  }));
-
   const normalizedSerendipity = Number.isFinite(serendipityLevel)
     ? Math.min(100, Math.max(0, serendipityLevel))
     : 30;
   const activeBand =
     normalizedSerendipity <= 30 ? 'low' : normalizedSerendipity <= 70 ? 'mid' : 'high';
+
+  const hasCandidates = Array.isArray(candidates) && candidates.length > 0;
+  const poolSummary = hasCandidates
+    ? rankCandidates(candidates, userRatings, {
+        serendipityLevel: normalizedSerendipity,
+        preferredEras,
+        selectedVibes,
+        rejectedFilms: request.rejectedFilms,
+        size: poolSize ?? 60,
+      }).map((rec) => ({
+        id: rec.movie.id,
+        title: rec.movie.title,
+        year: rec.movie.release_date?.slice(0, 4),
+        genres: (rec.movie.genres || []).map((g) => g.name),
+        tmdb_rating: rec.movie.vote_average,
+        bucket: rec.bucket,
+      }))
+    : candidatePool.slice(0, 40).map((m) => ({
+        id: m.id,
+        title: m.title,
+        year: m.release_date?.slice(0, 4),
+        genres: (m.genres || []).map((g) => g.name),
+        tmdb_rating: m.vote_average,
+      }));
+
+  const targetRange = hasCandidates ? '12–30' : '12–20';
+  const bucketInstructionLine = hasCandidates ? `\n5. ${BUCKET_PROMPT_INSTRUCTION}` : '';
 
   const rejectedBlock = formatRejectedFilmsBlock(request.rejectedFilms || []);
   const rejectedSection = rejectedBlock ? `\n\n${rejectedBlock}` : '';
@@ -132,10 +169,10 @@ Candidate Pool:
 ${JSON.stringify(poolSummary, null, compact ? undefined : 2)}
 
 Instructions:
-1. Return 12–20 films in "pool_rankings" from the Candidate Pool and up to 3 films in "unconstrained_discoveries" outside the pool.
+1. Return ${targetRange} films in "pool_rankings" from the Candidate Pool and up to 3 films in "unconstrained_discoveries" outside the pool.
 2. Follow the [ACTIVE] Serendipity Rubric band. At high serendipity, avoid obvious acclaimed films the user would pick themselves.
 3. For each pick that isn't a safe bet ("safe_bet"), provide a reason that names the bridge to the user's taste and explains why the risk is worth it.
-4. Use "serendipityType" values only from the allowed set: "safe_bet", "thematic_gem", "director_match", "wildcard_discovery", "ai_cinephile_discovery".
+4. Use "serendipityType" values only from the allowed set: "safe_bet", "thematic_gem", "director_match", "wildcard_discovery", "ai_cinephile_discovery".${bucketInstructionLine}
 
 Output strictly valid JSON with this format:
 {
@@ -207,7 +244,6 @@ export class OpenRouterProvider implements IAIProvider {
 
   async generateRecommendations(request: RecommendationRequest, signal?: AbortSignal): Promise<AIRecommendationResult> {
     const {
-      candidatePool,
       apiKey,
       model = OPENROUTER_DEFAULT_MODEL,
     } = request;
@@ -218,8 +254,7 @@ export class OpenRouterProvider implements IAIProvider {
 
     const targetModel = model?.trim() || OPENROUTER_DEFAULT_MODEL;
 
-    const candidateMap = new Map<number, Movie>();
-    candidatePool.forEach((m) => candidateMap.set(m.id, m));
+    const candidateMap = buildCandidateMap(request);
 
     const systemPrompt = buildOpenRouterPrompt(request);
 

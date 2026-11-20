@@ -84,36 +84,54 @@ describe('recommendationCache module', () => {
         JSON.stringify({ recommendations: 'not-an-array', generatedAt: 1234, usedProvider: 'gemini' })
       );
       expect(readRecommendationCache()).toBeNull();
+    });
 
+    it('defaults or omits invalid metadata and filters invalid items leniently', () => {
       // Missing generatedAt
       localStorage.setItem(
         STORAGE_KEYS.CACHED_RECOMMENDATIONS,
         JSON.stringify({ recommendations: [], usedProvider: 'gemini' })
       );
-      expect(readRecommendationCache()).toBeNull();
+      expect(readRecommendationCache()).toEqual({
+        recommendations: [],
+        generatedAt: 0,
+        usedProvider: 'gemini',
+      });
 
       // Non-number generatedAt
       localStorage.setItem(
         STORAGE_KEYS.CACHED_RECOMMENDATIONS,
         JSON.stringify({ recommendations: [], generatedAt: 'not-a-number', usedProvider: 'gemini' })
       );
-      expect(readRecommendationCache()).toBeNull();
+      expect(readRecommendationCache()).toEqual({
+        recommendations: [],
+        generatedAt: 0,
+        usedProvider: 'gemini',
+      });
 
       // Missing usedProvider
       localStorage.setItem(
         STORAGE_KEYS.CACHED_RECOMMENDATIONS,
         JSON.stringify({ recommendations: [], generatedAt: 1234 })
       );
-      expect(readRecommendationCache()).toBeNull();
+      expect(readRecommendationCache()).toEqual({
+        recommendations: [],
+        generatedAt: 1234,
+        usedProvider: '',
+      });
 
       // Non-string usedProvider
       localStorage.setItem(
         STORAGE_KEYS.CACHED_RECOMMENDATIONS,
         JSON.stringify({ recommendations: [], generatedAt: 1234, usedProvider: 999 })
       );
-      expect(readRecommendationCache()).toBeNull();
+      expect(readRecommendationCache()).toEqual({
+        recommendations: [],
+        generatedAt: 1234,
+        usedProvider: '',
+      });
 
-      // Invalid recommendation items
+      // Invalid recommendation items are filtered out
       localStorage.setItem(
         STORAGE_KEYS.CACHED_RECOMMENDATIONS,
         JSON.stringify({
@@ -122,7 +140,11 @@ describe('recommendationCache module', () => {
           usedProvider: 'gemini',
         })
       );
-      expect(readRecommendationCache()).toBeNull();
+      expect(readRecommendationCache()).toEqual({
+        recommendations: [],
+        generatedAt: 1234,
+        usedProvider: 'gemini',
+      });
 
       localStorage.setItem(
         STORAGE_KEYS.CACHED_RECOMMENDATIONS,
@@ -132,7 +154,11 @@ describe('recommendationCache module', () => {
           usedProvider: 'gemini',
         })
       );
-      expect(readRecommendationCache()).toBeNull();
+      expect(readRecommendationCache()).toEqual({
+        recommendations: [],
+        generatedAt: 1234,
+        usedProvider: 'gemini',
+      });
 
       localStorage.setItem(
         STORAGE_KEYS.CACHED_RECOMMENDATIONS,
@@ -142,9 +168,13 @@ describe('recommendationCache module', () => {
           usedProvider: 'gemini',
         })
       );
-      expect(readRecommendationCache()).toBeNull();
+      expect(readRecommendationCache()).toEqual({
+        recommendations: [],
+        generatedAt: 1234,
+        usedProvider: 'gemini',
+      });
 
-      // Wrong optional types
+      // Wrong optional types are omitted
       localStorage.setItem(
         STORAGE_KEYS.CACHED_RECOMMENDATIONS,
         JSON.stringify({
@@ -154,7 +184,11 @@ describe('recommendationCache module', () => {
           tasteAnalysis: 12345,
         })
       );
-      expect(readRecommendationCache()).toBeNull();
+      expect(readRecommendationCache()).toEqual({
+        recommendations: [],
+        generatedAt: 1234,
+        usedProvider: 'gemini',
+      });
 
       localStorage.setItem(
         STORAGE_KEYS.CACHED_RECOMMENDATIONS,
@@ -165,7 +199,11 @@ describe('recommendationCache module', () => {
           settingsFingerprint: 12345,
         })
       );
-      expect(readRecommendationCache()).toBeNull();
+      expect(readRecommendationCache()).toEqual({
+        recommendations: [],
+        generatedAt: 1234,
+        usedProvider: 'gemini',
+      });
 
       localStorage.setItem(
         STORAGE_KEYS.CACHED_RECOMMENDATIONS,
@@ -176,7 +214,11 @@ describe('recommendationCache module', () => {
           ratedCount: 'not-a-number',
         })
       );
-      expect(readRecommendationCache()).toBeNull();
+      expect(readRecommendationCache()).toEqual({
+        recommendations: [],
+        generatedAt: 1234,
+        usedProvider: 'gemini',
+      });
     });
 
     it('returns parsed CachedRecommendationsData for a valid cache', () => {

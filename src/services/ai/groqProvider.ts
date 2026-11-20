@@ -1,11 +1,16 @@
 import { IAIProvider, RecommendationRequest, AIRecommendationResult } from './types';
-import { Movie } from '../../types';
 import {
   validateAndSanitizeAIResponse,
   parseAIJsonResponse,
   composeSignals,
 } from './aiResponseValidator';
-import { buildOpenRouterPrompt } from './openRouterProvider';
+import { buildOpenRouterPrompt, buildCandidateMap } from './openRouterProvider';
+import {
+  candidateCountForBudget,
+  estimateTokens,
+  getGroqTokenLimit,
+  recordGroqTokenLimit,
+} from './promptBudget';
 
 // The only model on the free tier that handled a worst-case prompt (checked 2026-11-03, CIN-66).
 export const GROQ_DEFAULT_MODEL = 'openai/gpt-oss-120b';
@@ -47,6 +52,14 @@ function rethrowRedacted(err: unknown, secret: string): never {
   throw new Error(redactSecret(text, secret));
 }
 
+function recordGroqLimitFromResponse(apiKey: string, response: Response): void {
+  const headerValue =
+    response.headers && typeof response.headers.get === 'function'
+      ? response.headers.get('x-ratelimit-limit-tokens')
+      : null;
+  recordGroqTokenLimit(apiKey, headerValue);
+}
+
 export async function fetchGroqModels(
   apiKey: string,
   signal?: AbortSignal
@@ -71,6 +84,7 @@ export async function fetchGroqModels(
       },
       signal: combinedSignal,
     });
+    recordGroqLimitFromResponse(trimmedKey, response);
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -154,6 +168,7 @@ export class GroqProvider implements IAIProvider {
         }),
         signal: timeoutController.signal,
       });
+      recordGroqLimitFromResponse(trimmedKey, response);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -177,7 +192,7 @@ export class GroqProvider implements IAIProvider {
     request: RecommendationRequest,
     signal?: AbortSignal
   ): Promise<AIRecommendationResult> {
-    const { candidatePool, apiKey, model } = request;
+    const { apiKey, model } = request;
 
     if (typeof apiKey !== 'string' || !apiKey.trim()) {
       throw new Error('Groq API key is required.');
@@ -186,10 +201,22 @@ export class GroqProvider implements IAIProvider {
     const trimmedKey = apiKey.trim();
     const targetModel = sanitizeGroqModel(model);
 
-    const candidateMap = new Map<number, Movie>();
-    candidatePool.forEach((m) => candidateMap.set(m.id, m));
+    const candidateMap = buildCandidateMap(request);
 
-    const systemPrompt = buildOpenRouterPrompt(request, { compact: true });
+    const emptyPoolPrompt = buildOpenRouterPrompt(
+      { ...request, candidatePool: [] },
+      { compact: true, poolSize: 0 }
+    );
+    const baseTokens = estimateTokens(emptyPoolPrompt);
+    const poolSize = candidateCountForBudget({
+      tokenLimit: getGroqTokenLimit(trimmedKey),
+      baseTokens,
+      replyTokens: GROQ_MAX_REPLY_TOKENS,
+      perCandidateTokens: 40,
+      min: 10,
+      max: 80,
+    });
+    const systemPrompt = buildOpenRouterPrompt(request, { compact: true, poolSize });
 
     const timeoutController = new AbortController();
     const timeout = setTimeout(
@@ -222,6 +249,7 @@ export class GroqProvider implements IAIProvider {
         }),
         signal: combinedSignal,
       });
+      recordGroqLimitFromResponse(trimmedKey, response);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -242,6 +270,8 @@ export class GroqProvider implements IAIProvider {
 
       const parsed = parseAIJsonResponse(content, 'Groq');
       return validateAndSanitizeAIResponse(parsed, candidateMap);
+    } catch (err: unknown) {
+      rethrowRedacted(err, trimmedKey);
     } finally {
       clearTimeout(timeout);
     }

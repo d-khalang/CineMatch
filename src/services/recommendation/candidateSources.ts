@@ -1,6 +1,7 @@
 import type { Movie, UserRating } from '../../types';
 import type { Candidate, CandidateSource, SourceCursor } from './types';
 import { annotateCandidateMovies } from './candidateMovies';
+import { enrichCandidates } from './enrichCandidates';
 import {
   BoundedLRUMap,
   fetchFromTMDB,
@@ -1543,5 +1544,5 @@ export async function getCandidateRecommendationPool(
     options,
     signal
   );
-  return annotateCandidateMovies(candidates);
+  return annotateCandidateMovies(await enrichCandidates(candidates, {}, signal));
 }
