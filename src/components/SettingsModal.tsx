@@ -90,7 +90,15 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const modalRef = useModalA11y(isOpen, onClose);
-  const { aiSettings, updateAISettings, showToast, hiddenFilms = [], restoreFilm } = useMovieStore();
+  const {
+    aiSettings,
+    updateAISettings,
+    showToast,
+    hiddenFilms = [],
+    restoreFilm,
+    explorationSummary,
+    resetExploration,
+  } = useMovieStore();
 
   const sortedHiddenFilms = useMemo(() => {
     return [...hiddenFilms].sort(
@@ -1097,6 +1105,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <span>{aiTesting.message}</span>
                   </div>
                 )}
+              </div>
+            )}
+
+            {(explorationSummary?.total ?? 0) >= 1 && (
+              <div className="flex items-center justify-between gap-3 pt-2 border-t border-white/5 text-xs text-slate-300">
+                <span>
+                  {explorationSummary.hits / explorationSummary.total < 0.5
+                    ? `Exploration: ${explorationSummary.hits} of ${explorationSummary.total} surprises rated 8+ so far`
+                    : `Exploration is working: ${explorationSummary.hits} of ${explorationSummary.total} surprises rated 8+`}
+                </span>
+                <button
+                  type="button"
+                  onClick={resetExploration}
+                  aria-label="Reset exploration history"
+                  className="shrink-0 px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-medium border border-white/10 transition-colors cursor-pointer focus-ring"
+                >
+                  Reset
+                </button>
               </div>
             )}
           </div>

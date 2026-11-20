@@ -35,6 +35,7 @@ export class LocalProvider implements IAIProvider {
           preferredEras,
           selectedVibes,
           rejectedFilms,
+          adaptMix: request.adaptMix,
         }),
       };
     }

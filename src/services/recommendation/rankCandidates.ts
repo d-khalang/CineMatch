@@ -1,5 +1,5 @@
 import type { Movie, Recommendation, UserRating } from '../../types';
-import type { Bucket, Candidate, CandidateSource } from './types';
+import type { Bucket, BucketMix, Candidate, CandidateSource } from './types';
 import { getSeriesKey } from '../../constants/franchises';
 import { rejectionPenalty, type RejectedFilm } from './rejectedFilms';
 import { famePenalty } from './fame';
@@ -21,6 +21,7 @@ export interface RankCandidatesOptions {
   rejectedFilms?: RejectedFilm[];
   excludeIds?: Set<number>;
   size?: number;
+  adaptMix?: (base: BucketMix) => BucketMix;
 }
 
 function mapBucketToSerendipityType(
@@ -258,6 +259,7 @@ export function rankCandidates(
     rejectedFilms = [],
     excludeIds,
     size = 30,
+    adaptMix,
   } = options;
 
   const targetSize = typeof size === 'number' && Number.isFinite(size) ? Math.floor(size) : 30;
@@ -323,9 +325,11 @@ export function rankCandidates(
       bucket: belowFloor ? ('below_floor' as const) : item.bucket,
     };
   });
+  const baseMix = mixForSerendipityLevel(serendipityLevel);
+  const mix = adaptMix ? adaptMix(baseMix) : baseMix;
   const ranked = buildRankedList(
     penalised,
-    mixForSerendipityLevel(serendipityLevel),
+    mix,
     targetSize
   );
 

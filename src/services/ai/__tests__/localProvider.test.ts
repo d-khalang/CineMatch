@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { LocalProvider } from '../localProvider';
 import { toCandidates } from '../../recommendation/candidateMovies';
 import { Movie, UserRating } from '../../../types';
@@ -163,6 +163,21 @@ describe('LocalProvider Heuristic Engine', () => {
         controller.signal
       )
     ).rejects.toThrow();
+  });
+
+  it('applies the request adaptMix to the ranking mix when candidates are provided (CIN-13)', async () => {
+    const adaptMix = vi.fn((base) => base);
+    await provider.generateRecommendations({
+      userRatings: [
+        { movieId: 99, title: 'Rated Drama', rating: 9, ratedAt: 1, genres: ['Drama'] } as UserRating,
+      ],
+      candidatePool: mockCandidatePool,
+      candidates: toCandidates(mockCandidatePool),
+      serendipityLevel: 30,
+      adaptMix,
+    });
+
+    expect(adaptMix).toHaveBeenCalledTimes(1);
   });
 
   it('uses starter baseline when candidates are passed but userRatings is empty', async () => {
