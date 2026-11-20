@@ -1,5 +1,6 @@
 import { Movie, UserRating } from '../types';
-import { type TmdbCredentialType } from './credentialStore';
+import { credentialStore, type TmdbCredentialType } from './credentialStore';
+import { redactErrorMessage, redactTmdbUrl } from './redaction';
 import { getSeriesKey, FRANCHISE_ALIASES } from '../constants/franchises';
 import {
   BASE_URL,
@@ -54,17 +55,7 @@ export const CALIBRATION_CATEGORIES = [
 const hydrationCache = new BoundedLRUMap<string, Movie | null>(250);
 export const failedMovieIds = new Set<number>();
 
-export function redactTmdbUrl(urlStr: string): string {
-  try {
-    const url = new URL(urlStr);
-    if (url.searchParams.has('api_key')) {
-      url.searchParams.set('api_key', '[REDACTED]');
-    }
-    return url.toString();
-  } catch {
-    return urlStr.replace(/api_key=[^&]+/gi, 'api_key=[REDACTED]');
-  }
-}
+export { redactTmdbUrl };
 
 export async function testTmdbConnection(
   type: TmdbCredentialType,
@@ -98,7 +89,7 @@ export async function testTmdbConnection(
     }
     return { success: false, message: `TMDB returned status HTTP ${response.status}` };
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = redactErrorMessage(err, value);
     return { success: false, message: `Connection error: ${msg}` };
   }
 }
@@ -542,7 +533,8 @@ export async function hydrateMovieByTitleAndYear(
     return fullMovie;
   } catch (err) {
     if ((err as any)?.name === 'AbortError') throw err;
-    console.warn(`Hydration failed for "${title}" (${year}):`, err);
+    const msg = redactErrorMessage(err, credentialStore.getCredentials().tmdbValue);
+    console.warn(`Hydration failed for "${title}" (${year}): ${msg}`);
     hydrationCache.set(cacheKey, null);
     return null;
   }
