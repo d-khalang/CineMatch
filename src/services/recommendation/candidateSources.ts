@@ -11,8 +11,19 @@ import {
   VIBE_KEYWORD_MAP,
   MissingTmdbCredentialError,
 } from '../tmdbClient';
+import {
+  MAX_CONCURRENCY,
+  MAX_REQUESTS,
+  RequestLimiter,
+} from './requestLimiter';
 
-const MAX_REQUESTS_PER_GENERATION = 45;
+export { MAX_CONCURRENCY, MAX_REQUESTS, RequestLimiter };
+export const MAX_REQUESTS_PER_GENERATION = MAX_REQUESTS;
+export const FIRST_POOL_WINDOW = 40;
+export const ERA_CAP = 20;
+export const VIBE_CAP = 12;
+export const VIBE_CAP_WITH_ERAS = 4;
+
 const MAX_REQUESTS_PER_LOAD_MORE = 20;
 const TMDB_PAGE_SIZE = 20;
 const CREATOR_CACHE_MAX_ENTRIES = 200;
@@ -55,130 +66,6 @@ export interface CandidateOptions {
 export interface GenerateCandidatesResult {
   candidates: Candidate[];
   cursors: SourceCursor[];
-}
-
-/**
- * Concurrency and budget limiter for TMDB API calls.
- * Enforces at most 6 requests in-flight simultaneously,
- * and at most 45 requests total per generation by default.
- */
-export class RequestLimiter {
-  private running = 0;
-  private totalRequests = 0;
-  private waiters: Array<{
-    resolve: () => void;
-    reject: (err: any) => void;
-  }> = [];
-  private onAbortListener?: () => void;
-
-  constructor(
-    private signal?: AbortSignal,
-    private readonly maxConcurrency = 6,
-    private readonly maxRequests = MAX_REQUESTS_PER_GENERATION
-  ) {
-    if (this.signal) {
-      if (this.signal.aborted) {
-        this.abortWaiters();
-      } else {
-        this.onAbortListener = () => this.abortWaiters();
-        this.signal.addEventListener('abort', this.onAbortListener, { once: true });
-      }
-    }
-  }
-
-  dispose() {
-    if (this.signal && this.onAbortListener) {
-      this.signal.removeEventListener('abort', this.onAbortListener);
-      this.onAbortListener = undefined;
-    }
-    this.abortWaiters();
-  }
-
-  private abortWaiters() {
-    const err = this.signal?.reason || new DOMException('The operation was aborted', 'AbortError');
-    const pending = this.waiters;
-    this.waiters = [];
-    for (const w of pending) {
-      w.reject(err);
-    }
-  }
-
-  async schedule<T>(task: () => Promise<T>): Promise<T | null> {
-    if (this.signal?.aborted) {
-      throw this.signal.reason || new DOMException('The operation was aborted', 'AbortError');
-    }
-
-    if (this.totalRequests >= this.maxRequests) {
-      return null;
-    }
-
-    if (this.running >= this.maxConcurrency || this.waiters.length > 0) {
-      await new Promise<void>((resolve, reject) => {
-        this.waiters.push({ resolve, reject });
-      });
-    } else {
-      this.running++;
-    }
-
-    if (this.signal?.aborted) {
-      this.running--;
-      this.release();
-      throw this.signal.reason || new DOMException('The operation was aborted', 'AbortError');
-    }
-
-    if (this.totalRequests >= this.maxRequests) {
-      this.running--;
-      this.release();
-      return null;
-    }
-
-    this.totalRequests++;
-
-    let onAbort: (() => void) | undefined;
-    const abortPromise = new Promise<never>((_, reject) => {
-      if (this.signal?.aborted) {
-        reject(this.signal.reason || new DOMException('The operation was aborted', 'AbortError'));
-      } else if (this.signal) {
-        onAbort = () => {
-          reject(this.signal!.reason || new DOMException('The operation was aborted', 'AbortError'));
-        };
-        this.signal.addEventListener('abort', onAbort, { once: true });
-      }
-    });
-
-    const taskPromise = task();
-    taskPromise.catch(() => {});
-
-    try {
-      return await (this.signal ? Promise.race([taskPromise, abortPromise]) : taskPromise);
-    } finally {
-      if (this.signal && onAbort) {
-        this.signal.removeEventListener('abort', onAbort);
-      }
-      this.running--;
-      this.release();
-    }
-  }
-
-  private release() {
-    if (this.waiters.length > 0 && this.running < this.maxConcurrency) {
-      if (this.signal?.aborted) {
-        this.abortWaiters();
-        return;
-      }
-      this.running++;
-      const next = this.waiters.shift()!;
-      next.resolve();
-    }
-  }
-
-  get inFlight(): number {
-    return this.running;
-  }
-
-  get totalExecuted(): number {
-    return this.totalRequests;
-  }
 }
 
 /**
@@ -342,8 +229,8 @@ export function applyFirst40CapAndFloors(
   const hasEras = preferredEras.length > 0;
   const hasVibes = selectedVibes.length > 0;
 
-  const maxEra = hasEras ? 20 : 0;
-  const maxVibe = hasEras ? 4 : 12;
+  const maxEra = hasEras ? ERA_CAP : 0;
+  const maxVibe = hasEras ? VIBE_CAP_WITH_ERAS : VIBE_CAP;
 
   const totalEra = candidates.filter((c) => c.sources.includes('era')).length;
   const totalVibe = candidates.filter((c) => c.sources.includes('vibe')).length;
@@ -386,7 +273,7 @@ export function applyFirst40CapAndFloors(
     }
 
     // 1b. Floor: up to 20 if available
-    const targetEra = Math.min(20, totalEra);
+    const targetEra = Math.min(ERA_CAP, totalEra);
     for (const c of candidates) {
       if (eraCount >= targetEra) break;
       if (!mustIncludeSet.has(c.movie.id) && c.sources.includes('era')) {
@@ -470,7 +357,7 @@ export function applyFirst40CapAndFloors(
 
   // 6. Fill remaining slots up to 40
   const selected = [...mustInclude];
-  const targetTotal = Math.min(40, candidates.length);
+  const targetTotal = Math.min(FIRST_POOL_WINDOW, candidates.length);
 
   for (const c of candidates) {
     if (selected.length >= targetTotal) break;
@@ -999,7 +886,7 @@ export async function generateCandidatesWithCursors(
     callerSignal.addEventListener('abort', onCallerAbort, { once: true });
   }
 
-  const limiter = new RequestLimiter(internalSignal, 6, MAX_REQUESTS_PER_GENERATION);
+  const limiter = new RequestLimiter(internalSignal, MAX_CONCURRENCY, MAX_REQUESTS_PER_GENERATION);
 
   try {
     const ratingsList = normalizeRatingsList(userRatings);
@@ -1462,7 +1349,7 @@ export async function loadMoreCandidates(
     callerSignal.addEventListener('abort', onCallerAbort, { once: true });
   }
 
-  const limiter = new RequestLimiter(internalSignal, 6, MAX_REQUESTS_PER_LOAD_MORE);
+  const limiter = new RequestLimiter(internalSignal, MAX_CONCURRENCY, MAX_REQUESTS_PER_LOAD_MORE);
 
   try {
     const ratingsList = normalizeRatingsList(userRatings);

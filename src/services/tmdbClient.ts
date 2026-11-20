@@ -1,4 +1,5 @@
 import { credentialStore } from './credentialStore';
+import { redactSecret, redactTmdbUrl, rethrowRedacted } from './redaction';
 
 export class MissingTmdbCredentialError extends Error {
   constructor() {
@@ -150,12 +151,15 @@ export async function fetchFromTMDB<T>(
       if (response.status === 429) {
         throw new Error('TMDB rate limit reached. Please wait a moment before retrying.');
       }
-      throw new Error(`TMDB API Error: ${response.status} ${response.statusText}`);
+      const safeStatusText = redactSecret(redactTmdbUrl(response.statusText), creds.tmdbValue);
+      throw new Error(`TMDB API Error: ${response.status} ${safeStatusText}`);
     }
 
     const data = await response.json();
     cache.set(cleanCacheKey, data);
     return data;
+  } catch (err: unknown) {
+    rethrowRedacted(err, creds.tmdbValue);
   } finally {
     clearTimeout(timeoutId);
   }

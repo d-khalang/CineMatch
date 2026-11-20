@@ -4,6 +4,7 @@ import { GeminiProvider } from './geminiProvider';
 import { OpenRouterProvider } from './openRouterProvider';
 import { GroqProvider } from './groqProvider';
 import { AIProviderId, Recommendation } from '../../types';
+import { redactErrorMessage } from '../redaction';
 
 export const MIN_RECOMMENDATIONS = 8;
 
@@ -185,7 +186,8 @@ class AIServiceManager {
             throw backfillErr;
           }
 
-          console.warn(`Local backfill failed for provider ${provider.name}:`, backfillErr);
+          const safeBackfillMsg = redactErrorMessage(backfillErr, request.apiKey);
+          console.warn(`Local backfill failed for provider ${provider.name}: ${safeBackfillMsg}`);
           // Keep existing AI recommendations as-is: usedProvider remains AI provider, error is undefined
         }
       }
@@ -215,9 +217,9 @@ class AIServiceManager {
         throw err;
       }
 
-      console.warn(`Provider ${provider.name} failed:`, err);
-      const rawErrMsg = err instanceof Error ? err.message : String(err);
-      const errMsg = provider.id === 'groq' ? stripGroqOrgId(rawErrMsg) : rawErrMsg;
+      const redactedErrMsg = redactErrorMessage(err, request.apiKey);
+      const errMsg = provider.id === 'groq' ? stripGroqOrgId(redactedErrMsg) : redactedErrMsg;
+      console.warn(`Provider ${provider.name} failed: ${errMsg}`);
 
       // Graceful fallback to local heuristic engine on network/provider error
       const local = this.getProvider('local');
@@ -225,7 +227,7 @@ class AIServiceManager {
       return {
         recommendations: fallbackRes.recommendations,
         usedProvider: `Local Engine (Fallback: ${errMsg || 'AI request failed'})`,
-        error: errMsg || (rawErrMsg ? 'AI request failed' : ''),
+        error: errMsg || (redactedErrMsg ? 'AI request failed' : ''),
       };
     }
   }

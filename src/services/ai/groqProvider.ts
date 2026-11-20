@@ -11,6 +11,7 @@ import {
   getGroqTokenLimit,
   recordGroqTokenLimit,
 } from './promptBudget';
+import { redactSecret, rethrowRedacted } from '../redaction';
 
 // The only model on the free tier that handled a worst-case prompt (checked 2026-11-03, CIN-66).
 export const GROQ_DEFAULT_MODEL = 'openai/gpt-oss-120b';
@@ -29,27 +30,6 @@ export function sanitizeGroqModel(model?: string): string {
   if (!model || typeof model !== 'string') return GROQ_DEFAULT_MODEL;
   const trimmed = model.trim();
   return trimmed || GROQ_DEFAULT_MODEL;
-}
-
-function redactSecret(text: string, secret: string): string {
-  if (!secret) return text;
-  return text.split(secret).join('[REDACTED]');
-}
-
-function rethrowRedacted(err: unknown, secret: string): never {
-  if (err instanceof Error) {
-    if (!secret || !err.message.includes(secret)) {
-      throw err;
-    }
-    const sanitized = new Error(redactSecret(err.message, secret));
-    sanitized.name = err.name;
-    throw sanitized;
-  }
-  const text = String(err);
-  if (!secret || !text.includes(secret)) {
-    throw err;
-  }
-  throw new Error(redactSecret(text, secret));
 }
 
 function recordGroqLimitFromResponse(apiKey: string, response: Response): void {
