@@ -17,8 +17,11 @@ export function redactSecret(text: string, secret?: string): string {
 export function redactTmdbUrl(urlStr: string): string {
   try {
     const url = new URL(urlStr);
-    if (url.searchParams.has('api_key')) {
-      url.searchParams.set('api_key', '[REDACTED]');
+    // Parameter names are case-sensitive in URLSearchParams; redact any casing of api_key.
+    for (const name of Array.from(url.searchParams.keys())) {
+      if (name.toLowerCase() === 'api_key') {
+        url.searchParams.set(name, '[REDACTED]');
+      }
     }
     return url.toString();
   } catch {

@@ -394,3 +394,12 @@ describe('Credential redaction guard (CIN-53)', () => {
     });
   });
 });
+
+describe('redactTmdbUrl parameter casing (CIN-53 review)', () => {
+  it('redacts api_key in any casing', async () => {
+    const { redactTmdbUrl } = await import('../redaction');
+    const out = redactTmdbUrl('https://api.themoviedb.org/3/movie/1?API_Key=supersecret123&page=2');
+    expect(out).not.toContain('supersecret123');
+    expect(out).toContain('page=2');
+  });
+});
