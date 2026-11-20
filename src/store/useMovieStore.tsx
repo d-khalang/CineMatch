@@ -1210,7 +1210,8 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
       }
 
-      setLoadMoreStatus(uniqueBatch.length === 0 || !hasRemainingCursors ? 'exhausted' : 'idle');
+      // Only exhausted when no source has pages left; an empty batch (all duplicates or rated) can still be followed by new pages.
+      setLoadMoreStatus(hasRemainingCursors ? 'idle' : 'exhausted');
     } catch (err: unknown) {
       if (
         controller.signal.aborted ||

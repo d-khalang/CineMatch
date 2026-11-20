@@ -1521,7 +1521,8 @@ export async function loadMoreCandidates(
     }
 
     const candidates = buildCandidatesFromStreams(streams, excludeSet);
-    return { candidates, cursors: clonedCursors };
+    // Same credits/keywords enrichment as the first page (CIN-22), on its own bounded budget.
+    return { candidates: await enrichCandidates(candidates, {}, signal), cursors: clonedCursors };
   } finally {
     if (callerSignal) {
       callerSignal.removeEventListener('abort', onCallerAbort);

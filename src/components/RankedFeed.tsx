@@ -919,6 +919,13 @@ export const RankedFeed: React.FC = () => {
                 : 'Show more'}
             </span>
           </button>
+          <p className="sr-only" role="status" aria-live="polite">
+            {isLoadingMore || loadMoreStatus === 'loading'
+              ? 'Loading more recommendations'
+              : loadMoreStatus === 'exhausted'
+              ? 'There are no more recommendations right now'
+              : ''}
+          </p>
         </div>
       )}
     </div>
