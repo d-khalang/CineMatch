@@ -3,8 +3,10 @@ import { Movie, UserRating, HiddenFilm, Recommendation, AISettings, AIProviderId
 import { aiManager } from '../services/ai/aiManager';
 import { getMovieDetails, hydrateBatchWithDiscoveries } from '../services/tmdb';
 import { matchesPreferredEras, sortAndRankRecommendations, coerceScore } from './recommendationUtils';
-import { getCandidateRecommendationPool } from '../services/recommendation/candidateSources';
+import { getCandidateRecommendationPool, loadMoreCandidates } from '../services/recommendation/candidateSources';
+import { rankCandidates } from '../services/recommendation/rankCandidates';
 import { toCandidates } from '../services/recommendation/candidateMovies';
+import type { SourceCursor } from '../services/recommendation/types';
 import { selectRejectedFilms } from '../services/recommendation/rejectedFilms';
 import { recsSettingsFingerprint } from '../services/recommendation/settingsFingerprint';
 import { credentialStore } from '../services/credentialStore';
@@ -50,6 +52,8 @@ export interface ToastAction {
   onAction: () => void;
 }
 
+export type LoadMoreStatus = 'idle' | 'loading' | 'exhausted' | 'error';
+
 interface MovieStoreContextType {
   ratings: Record<number, UserRating>;
   watchlist: number[];
@@ -65,6 +69,8 @@ interface MovieStoreContextType {
   lastRunFingerprint: string | null;
   lastRunRatedCount: number | null;
   isGeneratingRecs: boolean;
+  isLoadingMore: boolean;
+  loadMoreStatus: LoadMoreStatus;
   lastProviderUsed: string;
   recommendationError: string | null;
   aiTasteAnalysis: string | null;
@@ -80,6 +86,7 @@ interface MovieStoreContextType {
   clearWatchlist: () => void;
   updateAISettings: (settings: Partial<AISettings>) => void;
   generateRankings: () => Promise<void>;
+  loadMoreRankings: () => Promise<void>;
   cancelGeneration: () => void;
   importRatingsList: (newRatings: UserRating[]) => void;
   replaceRatingsList: (newRatings: UserRating[]) => void;
@@ -308,6 +315,8 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   });
 
   const [isGeneratingRecs, setIsGeneratingRecs] = useState<boolean>(false);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  const [loadMoreStatus, setLoadMoreStatus] = useState<LoadMoreStatus>('idle');
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     id: number;
@@ -321,13 +330,27 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // References for request racing and cancellation
   const activeGenerationIdRef = useRef<number>(0);
+  const invalidationCounterRef = useRef<number>(0);
   const activeAbortControllerRef = useRef<AbortController | null>(null);
+  const loadMoreAbortControllerRef = useRef<AbortController | null>(null);
+  const isLoadingMoreRef = useRef<boolean>(false);
+  const lastCursorsRef = useRef<{ generationId: number; cursors: SourceCursor[] } | null>(null);
   const ratingVersionsRef = useRef<Map<number, number>>(new Map());
   const failedWatchlistIdsRef = useRef<Set<number>>(new Set());
   const storeEpochRef = useRef<number>(0);
+  const ratingsRef = useRef<Record<number, UserRating>>(ratings);
+  const aiSettingsRef = useRef<AISettings>(aiSettings);
   const hiddenFilmsRef = useRef<HiddenFilm[]>(hiddenFilms);
   const recommendationsRef = useRef<Recommendation[]>(recommendations);
   const watchlistRef = useRef<number[]>(watchlist);
+
+  useEffect(() => {
+    ratingsRef.current = ratings;
+  }, [ratings]);
+
+  useEffect(() => {
+    aiSettingsRef.current = aiSettings;
+  }, [aiSettings]);
 
   useEffect(() => {
     recommendationsRef.current = recommendations;
@@ -351,11 +374,22 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, []);
 
   const cancelGeneration = useCallback(() => {
+    invalidationCounterRef.current += 1;
+    const wasLoadingMore = Boolean(loadMoreAbortControllerRef.current) || isLoadingMoreRef.current;
     if (activeAbortControllerRef.current) {
       activeAbortControllerRef.current.abort();
       activeAbortControllerRef.current = null;
     }
+    if (loadMoreAbortControllerRef.current) {
+      loadMoreAbortControllerRef.current.abort();
+      loadMoreAbortControllerRef.current = null;
+    }
+    isLoadingMoreRef.current = false;
     setIsGeneratingRecs(false);
+    setIsLoadingMore(false);
+    setLoadMoreStatus((prev) =>
+      wasLoadingMore || prev === 'loading' || prev === 'error' ? 'idle' : prev
+    );
   }, []);
 
   // Listen to storage status updates to detect quota limits
@@ -773,6 +807,8 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     hiddenFilmsRef.current = [];
     setRecommendations([]);
     recommendationsRef.current = [];
+    lastCursorsRef.current = null;
+    setLoadMoreStatus('idle');
     setAiTasteAnalysis(null);
     setCachedRecsTimestamp(null);
     setLastRunFingerprint(null);
@@ -891,6 +927,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     activeAbortControllerRef.current = controller;
 
     setIsGeneratingRecs(true);
+    setLoadMoreStatus('idle');
     setRecommendationError(null);
 
     try {
@@ -908,6 +945,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const unhiddenRatings = userRatingsList.filter((r) => !hiddenIds.has(r.movieId));
 
       // 1. Fetch candidates from TMDB
+      let capturedCursors: SourceCursor[] = [];
       const candidatePool = await getCandidateRecommendationPool(
         {
           seedMovieIds: topSeeds,
@@ -915,6 +953,9 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           preferredEras: aiSettings.preferredEras,
           selectedVibes: aiSettings.selectedVibes,
           userRatings: unhiddenRatings,
+          onCursors: (cursors) => {
+            capturedCursors = cursors;
+          },
         },
         controller.signal
       );
@@ -1021,6 +1062,8 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const fingerprint = recsSettingsFingerprint(aiSettings);
         const currentRatedCount = userRatingsList.length;
 
+        lastCursorsRef.current = { generationId, cursors: capturedCursors };
+        setLoadMoreStatus('idle');
         recommendationsRef.current = finalRecommendations;
         setRecommendations(finalRecommendations);
         setCachedRecsTimestamp(timestamp);
@@ -1059,6 +1102,141 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
     }
   }, [ratings, hiddenFilms, aiSettings, cancelGeneration, showToast]);
+
+  // Append next page of candidates using saved generation cursors (local ranking pipeline, size: 15)
+  const loadMoreRankings = useCallback(async () => {
+    if (isGeneratingRecs || activeAbortControllerRef.current || isLoadingMoreRef.current) {
+      return;
+    }
+
+    if (!credentialStore.hasTmdb()) {
+      setLoadMoreStatus('error');
+      return;
+    }
+
+    const generationId = activeGenerationIdRef.current;
+    const startInvalidation = invalidationCounterRef.current;
+    const cursorSnapshot = lastCursorsRef.current;
+
+    if (
+      !cursorSnapshot ||
+      cursorSnapshot.generationId !== generationId ||
+      cursorSnapshot.cursors.length === 0 ||
+      !cursorSnapshot.cursors.some((c) => !c.exhausted)
+    ) {
+      setLoadMoreStatus('exhausted');
+      return;
+    }
+
+    const controller = new AbortController();
+    loadMoreAbortControllerRef.current = controller;
+    isLoadingMoreRef.current = true;
+    setIsLoadingMore(true);
+    setLoadMoreStatus('loading');
+
+    try {
+      const userRatingsList = Object.values(ratingsRef.current);
+      const shownIds = recommendationsRef.current.map((r) => r.movie.id);
+      const ratedIds = userRatingsList.map((r) => r.movieId);
+      const hiddenIds = hiddenFilmsRef.current.map((h) => h.movieId);
+      const excludeIds = new Set<number>([...shownIds, ...ratedIds, ...hiddenIds]);
+
+      const { candidates: newCandidates, cursors: updatedCursors } = await loadMoreCandidates(
+        cursorSnapshot.cursors,
+        userRatingsList,
+        excludeIds,
+        controller.signal
+      );
+
+      if (
+        controller.signal.aborted ||
+        activeGenerationIdRef.current !== generationId ||
+        invalidationCounterRef.current !== startInvalidation
+      ) {
+        return;
+      }
+
+      const latestRatingsList = Object.values(ratingsRef.current);
+      const latestExcludeIds = new Set<number>([
+        ...recommendationsRef.current.map((r) => r.movie.id),
+        ...latestRatingsList.map((r) => r.movieId),
+        ...hiddenFilmsRef.current.map((h) => h.movieId),
+      ]);
+
+      const currentSettings = aiSettingsRef.current;
+      const rankedBatch = rankCandidates(newCandidates, latestRatingsList, {
+        serendipityLevel: currentSettings.serendipityLevel,
+        preferredEras: currentSettings.preferredEras,
+        selectedVibes: currentSettings.selectedVibes,
+        rejectedFilms: selectRejectedFilms(hiddenFilmsRef.current),
+        excludeIds: latestExcludeIds,
+        size: 15,
+      });
+
+      const existingIds = new Set(recommendationsRef.current.map((r) => r.movie.id));
+      const uniqueBatch = rankedBatch.filter(
+        (r) => !existingIds.has(r.movie.id) && !latestExcludeIds.has(r.movie.id)
+      );
+
+      lastCursorsRef.current = { generationId, cursors: updatedCursors };
+      const hasRemainingCursors = updatedCursors.some((c) => !c.exhausted);
+
+      if (uniqueBatch.length > 0) {
+        const currentRecs = recommendationsRef.current;
+        const startRank = currentRecs.length + 1;
+        const appended = uniqueBatch.map((rec, idx) => ({
+          ...rec,
+          rank: startRank + idx,
+        }));
+        const nextRecs = [...currentRecs, ...appended];
+
+        recommendationsRef.current = nextRecs;
+        setRecommendations(nextRecs);
+
+        const cached = readRecommendationCache();
+        if (cached) {
+          patchRecommendationCache({
+            recommendations: nextRecs,
+            ...getFingerprintAndRatedCountFallbacks(cached, lastRunFingerprint, lastRunRatedCount),
+          });
+        } else {
+          writeRecommendationCache({
+            recommendations: nextRecs,
+            generatedAt: cachedRecsTimestamp ?? Date.now(),
+            usedProvider: lastProviderUsed,
+            tasteAnalysis: aiTasteAnalysis,
+            ...getFingerprintAndRatedCountFallbacks({}, lastRunFingerprint, lastRunRatedCount),
+          });
+        }
+      }
+
+      // Only exhausted when no source has pages left; an empty batch (all duplicates or rated) can still be followed by new pages.
+      setLoadMoreStatus(hasRemainingCursors ? 'idle' : 'exhausted');
+    } catch (err: unknown) {
+      if (
+        controller.signal.aborted ||
+        (err instanceof Error && err.name === 'AbortError') ||
+        activeGenerationIdRef.current !== generationId ||
+        invalidationCounterRef.current !== startInvalidation
+      ) {
+        return;
+      }
+      setLoadMoreStatus('error');
+    } finally {
+      if (loadMoreAbortControllerRef.current === controller) {
+        loadMoreAbortControllerRef.current = null;
+        isLoadingMoreRef.current = false;
+        setIsLoadingMore(false);
+      }
+    }
+  }, [
+    isGeneratingRecs,
+    cachedRecsTimestamp,
+    lastProviderUsed,
+    aiTasteAnalysis,
+    lastRunFingerprint,
+    lastRunRatedCount,
+  ]);
 
   const hideFilms = useCallback(
     (entries: HiddenFilm[]) => {
@@ -1134,6 +1312,8 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         lastRunFingerprint,
         lastRunRatedCount,
         isGeneratingRecs,
+        isLoadingMore,
+        loadMoreStatus,
         lastProviderUsed,
         recommendationError,
         aiTasteAnalysis,
@@ -1147,6 +1327,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         clearWatchlist,
         updateAISettings,
         generateRankings,
+        loadMoreRankings,
         cancelGeneration,
         importRatingsList,
         replaceRatingsList,

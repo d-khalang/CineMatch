@@ -1,5 +1,5 @@
 import type { Movie, UserRating } from '../../types';
-import type { Candidate, CandidateSource } from './types';
+import type { Candidate, CandidateSource, SourceCursor } from './types';
 import { annotateCandidateMovies } from './candidateMovies';
 import { enrichCandidates } from './enrichCandidates';
 import {
@@ -13,6 +13,8 @@ import {
 } from '../tmdbClient';
 
 const MAX_REQUESTS_PER_GENERATION = 45;
+const MAX_REQUESTS_PER_LOAD_MORE = 20;
+const TMDB_PAGE_SIZE = 20;
 const CREATOR_CACHE_MAX_ENTRIES = 200;
 const CREATOR_MIN_RATING = 8;
 const CREATOR_MIN_HIGH_RATINGS = 3;
@@ -47,6 +49,12 @@ export interface CandidateOptions {
   randomFn?: () => number;
   seedCount?: number;
   deadlineMs?: number;
+  onCursors?: (cursors: SourceCursor[]) => void;
+}
+
+export interface GenerateCandidatesResult {
+  candidates: Candidate[];
+  cursors: SourceCursor[];
 }
 
 /**
@@ -678,8 +686,273 @@ async function fetchCreatorGraphResults(
   return combined;
 }
 
+interface PagedFetchOutcome {
+  results: any[];
+  executed: boolean;
+  succeeded: boolean;
+  exhausted: boolean;
+  error?: unknown;
+}
+
+const EMPTY_PAGED_OUTCOME: PagedFetchOutcome = {
+  results: [],
+  executed: false,
+  succeeded: false,
+  exhausted: false,
+};
+
+interface CandidateStream {
+  items: any[];
+  source: CandidateSource;
+  isSeed: boolean;
+}
+
+interface PagedTaskSpec {
+  source: CandidateSource;
+  key: string;
+  page: number;
+  endpoint: string;
+  params: Record<string, string | number>;
+}
+
+interface ExecutedPagedTask {
+  spec: PagedTaskSpec;
+  outcome: PagedFetchOutcome;
+}
+
+function normalizeRatingsList(
+  userRatings: UserRating[] | Record<number, UserRating> = []
+): UserRating[] {
+  const rawRatingsList: UserRating[] = Array.isArray(userRatings)
+    ? userRatings
+    : Object.values(userRatings || {});
+  return rawRatingsList.filter(
+    (r): r is UserRating => !!r && typeof r === 'object' && typeof r.rating === 'number'
+  );
+}
+
+function encodeDiscoverKey(params: Record<string, string | number>): string {
+  const entries = Object.entries(params)
+    .filter(([k]) => k !== 'page')
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => [k, String(v)] as [string, string]);
+  return `discover:${new URLSearchParams(entries).toString()}`;
+}
+
+function parseCursorQuery(
+  cursor: SourceCursor
+): { endpoint: string; params: Record<string, string | number> } | null {
+  if (!cursor || typeof cursor.key !== 'string' || !Number.isFinite(cursor.nextPage) || cursor.nextPage < 1) {
+    return null;
+  }
+  const page = Math.floor(cursor.nextPage);
+  if (cursor.key.startsWith('recommendations:')) {
+    const id = cursor.key.slice('recommendations:'.length).trim();
+    return /^\d+$/.test(id) ? { endpoint: `/movie/${id}/recommendations`, params: { page } } : null;
+  }
+  if (cursor.key.startsWith('similar:')) {
+    const id = cursor.key.slice('similar:'.length).trim();
+    return /^\d+$/.test(id) ? { endpoint: `/movie/${id}/similar`, params: { page } } : null;
+  }
+  if (cursor.key.startsWith('discover:')) {
+    const qs = cursor.key.slice('discover:'.length);
+    const search = new URLSearchParams(qs);
+    const params: Record<string, string | number> = {};
+    search.forEach((value, key) => {
+      params[key] = value;
+    });
+    params.page = page;
+    return { endpoint: '/discover/movie', params };
+  }
+  if (cursor.key === 'trending:week') {
+    return { endpoint: '/trending/movie/week', params: { page } };
+  }
+  if (cursor.source === 'seed_graph' && /^\d+$/.test(cursor.key)) {
+    return { endpoint: `/movie/${cursor.key}/recommendations`, params: { page } };
+  }
+  return null;
+}
+
+function mergeCursorOutcome(
+  existing: SourceCursor | undefined,
+  source: CandidateSource,
+  key: string,
+  page: number,
+  outcome: PagedFetchOutcome
+): SourceCursor | undefined {
+  if (!outcome.executed) {
+    return existing;
+  }
+  if (!outcome.succeeded) {
+    return existing ?? { source, key, nextPage: page, exhausted: false };
+  }
+  const nextPage = existing ? Math.max(existing.nextPage, page + 1) : page + 1;
+  const exhausted = (existing?.exhausted ?? false) || outcome.exhausted;
+  return {
+    source,
+    key,
+    nextPage,
+    exhausted,
+  };
+}
+
+async function runLimitedQuery<T>(
+  limiter: RequestLimiter,
+  internalSignal: AbortSignal,
+  callerSignal: AbortSignal | undefined,
+  task: () => Promise<T>,
+  fallback: T,
+  rethrowMissingCredential: boolean
+): Promise<T> {
+  if (internalSignal.aborted) {
+    if (callerSignal?.aborted) {
+      throw callerSignal.reason || new DOMException('The operation was aborted', 'AbortError');
+    }
+    return fallback;
+  }
+
+  try {
+    const res = await limiter.schedule(async () => {
+      try {
+        return await task();
+      } catch (err: any) {
+        if (callerSignal?.aborted) {
+          throw err;
+        }
+        if (rethrowMissingCredential && err instanceof MissingTmdbCredentialError) {
+          throw err;
+        }
+        return fallback;
+      }
+    });
+    return res ?? fallback;
+  } catch (err: any) {
+    if (callerSignal?.aborted) {
+      throw err;
+    }
+    if (rethrowMissingCredential && err instanceof MissingTmdbCredentialError) {
+      throw err;
+    }
+    return fallback;
+  }
+}
+
+function createSafeFetchPaged(
+  limiter: RequestLimiter,
+  internalSignal: AbortSignal,
+  callerSignal: AbortSignal | undefined
+) {
+  return (
+    endpoint: string,
+    params: Record<string, string | number> = {},
+    page = 1
+  ): Promise<PagedFetchOutcome> =>
+    runLimitedQuery(
+      limiter,
+      internalSignal,
+      callerSignal,
+      async (): Promise<PagedFetchOutcome> => {
+        try {
+          const data = await fetchFromTMDB<{ results?: any[]; total_pages?: number }>(
+            endpoint,
+            params,
+            internalSignal
+          );
+          const results = Array.isArray(data?.results) ? data.results : [];
+          const totalPages =
+            typeof data?.total_pages === 'number' && Number.isFinite(data.total_pages)
+              ? data.total_pages
+              : undefined;
+          const exhausted =
+            results.length < TMDB_PAGE_SIZE || (totalPages !== undefined && page >= totalPages);
+          return {
+            results,
+            executed: true,
+            succeeded: true,
+            exhausted,
+          };
+        } catch (err: any) {
+          if (
+            callerSignal?.aborted ||
+            err?.name === 'AbortError' ||
+            err instanceof MissingTmdbCredentialError
+          ) {
+            throw err;
+          }
+          return {
+            results: [],
+            executed: true,
+            succeeded: false,
+            exhausted: false,
+            error: err,
+          };
+        }
+      },
+      EMPTY_PAGED_OUTCOME,
+      true
+    );
+}
+
+function buildCandidatesFromStreams(
+  streams: CandidateStream[],
+  excludeSet: Set<number>,
+  minVoteAverage?: number
+): Candidate[] {
+  const candidateMap = new Map<number, Candidate>();
+
+  const addRawItem = (m: any, source: CandidateSource, isSeedNeighbour: boolean) => {
+    if (!m || typeof m.id !== 'number' || !Number.isFinite(m.id) || !m.poster_path) return;
+    if (excludeSet.has(m.id)) return;
+    if (minVoteAverage && (m.vote_average || 0) < minVoteAverage) return;
+
+    const existing = candidateMap.get(m.id);
+    if (existing) {
+      if (!existing.sources.includes(source)) {
+        existing.sources.push(source);
+      }
+      if (isSeedNeighbour) {
+        existing.seedNeighbour = true;
+      }
+    } else {
+      const movie: Movie = {
+        id: m.id,
+        title: m.title || '',
+        original_title: m.original_title,
+        overview: m.overview || '',
+        poster_path: m.poster_path,
+        backdrop_path: m.backdrop_path || null,
+        release_date: m.release_date || '',
+        vote_average: m.vote_average || 0,
+        vote_count: m.vote_count || 0,
+        genre_ids: m.genre_ids || [],
+        genres: (m.genre_ids || []).map((gid: number) => ({
+          id: gid,
+          name: GENRE_MAP[gid] || 'Other',
+        })),
+      };
+      candidateMap.set(m.id, {
+        movie,
+        sources: [source],
+        seedNeighbour: isSeedNeighbour,
+      });
+    }
+  };
+
+  const maxLen = Math.max(0, ...streams.map((s) => s.items.length));
+
+  for (let i = 0; i < maxLen; i++) {
+    for (const stream of streams) {
+      if (i < stream.items.length) {
+        addRawItem(stream.items[i], stream.source, stream.isSeed);
+      }
+    }
+  }
+
+  return Array.from(candidateMap.values());
+}
+
 /**
- * Generates recommendation candidates across multi-source queries:
+ * Generates recommendation candidates and records pagination cursors per paged query:
  * 1. Seed graph: /recommendations and /similar (pages 1-2) for weighted loved seeds
  * 2. Hidden gems: /discover/movie in top 3 genres with vote_count 50-800, vote_avg >= 7 (pages 1-2)
  * 3. Acclaimed baseline: top rated, popular, trending, eras, and vibes (page 1)
@@ -687,11 +960,11 @@ async function fetchCreatorGraphResults(
  *
  * Deduplicates by movie ID, merging source tags, excluding rated and poster-less films.
  */
-export async function generateCandidates(
+export async function generateCandidatesWithCursors(
   userRatings: UserRating[] | Record<number, UserRating> = [],
   options: CandidateOptions = {},
   signal?: AbortSignal
-): Promise<Candidate[]> {
+): Promise<GenerateCandidatesResult> {
   if (signal?.aborted) {
     throw signal.reason || new DOMException('The operation was aborted', 'AbortError');
   }
@@ -729,67 +1002,14 @@ export async function generateCandidates(
   const limiter = new RequestLimiter(internalSignal, 6, MAX_REQUESTS_PER_GENERATION);
 
   try {
-    const rawRatingsList: UserRating[] = Array.isArray(userRatings)
-      ? userRatings
-      : Object.values(userRatings || {});
-    const ratingsList = rawRatingsList.filter(
-      (r): r is UserRating => !!r && typeof r === 'object' && typeof r.rating === 'number'
-    );
-
-    const runLimitedQuery = async <T>(
-      task: () => Promise<T>,
-      fallback: T,
-      rethrowMissingCredential: boolean
-    ): Promise<T> => {
-      if (internalSignal.aborted) {
-        if (callerSignal?.aborted) {
-          throw callerSignal.reason || new DOMException('The operation was aborted', 'AbortError');
-        }
-        return fallback;
-      }
-
-      try {
-        const res = await limiter.schedule(async () => {
-          try {
-            return await task();
-          } catch (err: any) {
-            if (callerSignal?.aborted) {
-              throw err;
-            }
-            if (rethrowMissingCredential && err instanceof MissingTmdbCredentialError) {
-              throw err;
-            }
-            // Failing individual query must not fail the whole candidate pool
-            return fallback;
-          }
-        });
-        return res ?? fallback;
-      } catch (err: any) {
-        if (callerSignal?.aborted) {
-          throw err;
-        }
-        if (rethrowMissingCredential && err instanceof MissingTmdbCredentialError) {
-          throw err;
-        }
-        return fallback;
-      }
-    };
-
-    const safeFetch = (
-      endpoint: string,
-      params: Record<string, string | number> = {}
-    ): Promise<any[]> =>
-      runLimitedQuery(
-        async () => {
-          const data = await fetchFromTMDB<{ results: any[] }>(endpoint, params, internalSignal);
-          return data.results || [];
-        },
-        [],
-        true
-      );
+    const ratingsList = normalizeRatingsList(userRatings);
+    const safeFetchPaged = createSafeFetchPaged(limiter, internalSignal, callerSignal);
 
     const safeFetchObject = <T>(endpoint: string): Promise<T | null> =>
       runLimitedQuery(
+        limiter,
+        internalSignal,
+        callerSignal,
         () => fetchFromTMDB<T>(endpoint, {}, internalSignal),
         null,
         false
@@ -814,127 +1034,177 @@ export async function generateCandidates(
       new Set(selectedVibes.flatMap((v) => VIBE_KEYWORD_MAP[v.trim().toLowerCase()] || []))
     );
 
-    const eraQueryTasks: Array<() => Promise<any[]>> = [];
+    const eraSpecs: PagedTaskSpec[] = [];
     if (preferredEras.length > 0) {
       preferredEras.slice(0, 4).forEach((era) => {
         const range = getEraDateRange(era);
         if (range) {
-          eraQueryTasks.push(() =>
-            safeFetch('/discover/movie', {
-              'primary_release_date.gte': range.gte,
-              'primary_release_date.lte': range.lte,
-              sort_by: 'vote_average.desc',
-              'vote_count.gte': 300,
-              page: 1,
-            })
-          );
-          eraQueryTasks.push(() =>
-            safeFetch('/discover/movie', {
-              'primary_release_date.gte': range.gte,
-              'primary_release_date.lte': range.lte,
-              sort_by: 'popularity.desc',
-              'vote_count.gte': 400,
-              page: 1,
-            })
-          );
+          const p1: Record<string, string | number> = {
+            'primary_release_date.gte': range.gte,
+            'primary_release_date.lte': range.lte,
+            sort_by: 'vote_average.desc',
+            'vote_count.gte': 300,
+            page: 1,
+          };
+          eraSpecs.push({
+            source: 'era',
+            key: encodeDiscoverKey(p1),
+            page: 1,
+            endpoint: '/discover/movie',
+            params: p1,
+          });
+          const p2: Record<string, string | number> = {
+            'primary_release_date.gte': range.gte,
+            'primary_release_date.lte': range.lte,
+            sort_by: 'popularity.desc',
+            'vote_count.gte': 400,
+            page: 1,
+          };
+          eraSpecs.push({
+            source: 'era',
+            key: encodeDiscoverKey(p2),
+            page: 1,
+            endpoint: '/discover/movie',
+            params: p2,
+          });
           if (withGenresParam) {
-            eraQueryTasks.push(() =>
-              safeFetch('/discover/movie', {
-                'primary_release_date.gte': range.gte,
-                'primary_release_date.lte': range.lte,
-                with_genres: withGenresParam,
-                sort_by: 'vote_average.desc',
-                'vote_count.gte': 150,
-                page: 1,
-              })
-            );
+            const p3: Record<string, string | number> = {
+              'primary_release_date.gte': range.gte,
+              'primary_release_date.lte': range.lte,
+              with_genres: withGenresParam,
+              sort_by: 'vote_average.desc',
+              'vote_count.gte': 150,
+              page: 1,
+            };
+            eraSpecs.push({
+              source: 'era',
+              key: encodeDiscoverKey(p3),
+              page: 1,
+              endpoint: '/discover/movie',
+              params: p3,
+            });
           }
         }
       });
     }
 
     // 2. Vibe-targeted queries (guaranteed budget first)
-    const vibeQueryTasks: Array<() => Promise<any[]>> = [];
+    const vibeSpecs: PagedTaskSpec[] = [];
     if (withGenresParam) {
-      vibeQueryTasks.push(() =>
-        safeFetch('/discover/movie', {
-          with_genres: withGenresParam,
-          sort_by: 'vote_average.desc',
-          'vote_count.gte': 600,
-          page: 1,
-        })
-      );
-      vibeQueryTasks.push(() =>
-        safeFetch('/discover/movie', {
-          with_genres: withGenresParam,
-          sort_by: 'popularity.desc',
-          'vote_count.gte': 1000,
-          page: 1,
-        })
-      );
+      const v1: Record<string, string | number> = {
+        with_genres: withGenresParam,
+        sort_by: 'vote_average.desc',
+        'vote_count.gte': 600,
+        page: 1,
+      };
+      vibeSpecs.push({
+        source: 'vibe',
+        key: encodeDiscoverKey(v1),
+        page: 1,
+        endpoint: '/discover/movie',
+        params: v1,
+      });
+      const v2: Record<string, string | number> = {
+        with_genres: withGenresParam,
+        sort_by: 'popularity.desc',
+        'vote_count.gte': 1000,
+        page: 1,
+      };
+      vibeSpecs.push({
+        source: 'vibe',
+        key: encodeDiscoverKey(v2),
+        page: 1,
+        endpoint: '/discover/movie',
+        params: v2,
+      });
     }
 
     if (keywordIds.length > 0) {
-      vibeQueryTasks.push(() =>
-        safeFetch('/discover/movie', {
-          with_keywords: keywordIds.join('|'),
-          sort_by: 'vote_average.desc',
-          'vote_count.gte': 250,
-          page: 1,
-        })
-      );
+      const v3: Record<string, string | number> = {
+        with_keywords: keywordIds.join('|'),
+        sort_by: 'vote_average.desc',
+        'vote_count.gte': 250,
+        page: 1,
+      };
+      vibeSpecs.push({
+        source: 'vibe',
+        key: encodeDiscoverKey(v3),
+        page: 1,
+        endpoint: '/discover/movie',
+        params: v3,
+      });
     }
 
     // 3. Hidden Gems: /discover/movie in top 3 user genres (guaranteed budget first)
     const topGenreIds = getTopUserGenreIds(ratingsList, options.genres);
-    const hiddenGemQueryTasks: Array<() => Promise<any[]>> = [];
+    const hiddenGemSpecs: PagedTaskSpec[] = [];
     for (const gid of topGenreIds) {
-      hiddenGemQueryTasks.push(() =>
-        safeFetch('/discover/movie', {
-          with_genres: String(gid),
-          'vote_average.gte': 7,
-          'vote_count.gte': 50,
-          'vote_count.lte': 800,
-          sort_by: 'vote_average.desc',
-          page: 1,
-        })
-      );
-      hiddenGemQueryTasks.push(() =>
-        safeFetch('/discover/movie', {
-          with_genres: String(gid),
-          'vote_average.gte': 7,
-          'vote_count.gte': 50,
-          'vote_count.lte': 800,
-          sort_by: 'vote_average.desc',
-          page: 2,
-        })
-      );
+      const baseGemParams = {
+        with_genres: String(gid),
+        'vote_average.gte': 7,
+        'vote_count.gte': 50,
+        'vote_count.lte': 800,
+        sort_by: 'vote_average.desc',
+      };
+      const gemKey = encodeDiscoverKey(baseGemParams);
+      hiddenGemSpecs.push({
+        source: 'hidden_gem',
+        key: gemKey,
+        page: 1,
+        endpoint: '/discover/movie',
+        params: { ...baseGemParams, page: 1 },
+      });
+      hiddenGemSpecs.push({
+        source: 'hidden_gem',
+        key: gemKey,
+        page: 2,
+        endpoint: '/discover/movie',
+        params: { ...baseGemParams, page: 2 },
+      });
     }
 
     // 4. Acclaimed Baseline base queries
-    const baseQueryTasks: Array<() => Promise<any[]>> = [
-      () =>
-        safeFetch('/discover/movie', {
-          sort_by: 'vote_average.desc',
-          'vote_count.gte': 800,
-          page: 1,
-        }),
-      () =>
-        safeFetch('/discover/movie', {
-          sort_by: 'popularity.desc',
-          'vote_count.gte': 1500,
-          page: 1,
-        }),
-      () => safeFetch('/trending/movie/week', {}),
+    const base1Params: Record<string, string | number> = {
+      sort_by: 'vote_average.desc',
+      'vote_count.gte': 800,
+      page: 1,
+    };
+    const base2Params: Record<string, string | number> = {
+      sort_by: 'popularity.desc',
+      'vote_count.gte': 1500,
+      page: 1,
+    };
+    const baseSpecs: PagedTaskSpec[] = [
+      {
+        source: 'acclaimed_baseline',
+        key: encodeDiscoverKey(base1Params),
+        page: 1,
+        endpoint: '/discover/movie',
+        params: base1Params,
+      },
+      {
+        source: 'acclaimed_baseline',
+        key: encodeDiscoverKey(base2Params),
+        page: 1,
+        endpoint: '/discover/movie',
+        params: base2Params,
+      },
+      {
+        source: 'acclaimed_baseline',
+        key: 'trending:week',
+        page: 1,
+        endpoint: '/trending/movie/week',
+        params: {},
+      },
     ];
 
     // Budget reservation per source:
     // Era, vibe, and hidden gems are guaranteed budget first, followed by the 3 base queries.
     const reserved =
-      eraQueryTasks.length +
-      vibeQueryTasks.length +
-      hiddenGemQueryTasks.length +
-      baseQueryTasks.length;
+      eraSpecs.length +
+      vibeSpecs.length +
+      hiddenGemSpecs.length +
+      baseSpecs.length;
 
     // 5. Seed Graph: remainder of the 45-request budget, truncated to whole pairs for page 1 and page 2
     const eligibleRatings = ratingsList.filter((r) => r.rating >= 7);
@@ -974,28 +1244,57 @@ export async function generateCandidates(
     );
 
     // Dropping page 2 before dropping seeds, ensuring complete pairs
-    const seedPage1Tasks: Array<() => Promise<any[]>> = [];
+    const seedPage1Specs: PagedTaskSpec[] = [];
     for (let i = 0; i < page1PairsCount; i++) {
       const id = chosenSeedIds[i];
-      seedPage1Tasks.push(() => safeFetch(`/movie/${id}/recommendations`, { page: 1 }));
-      seedPage1Tasks.push(() => safeFetch(`/movie/${id}/similar`, { page: 1 }));
+      seedPage1Specs.push({
+        source: 'seed_graph',
+        key: `recommendations:${id}`,
+        page: 1,
+        endpoint: `/movie/${id}/recommendations`,
+        params: { page: 1 },
+      });
+      seedPage1Specs.push({
+        source: 'seed_graph',
+        key: `similar:${id}`,
+        page: 1,
+        endpoint: `/movie/${id}/similar`,
+        params: { page: 1 },
+      });
     }
 
-    const seedPage2Tasks: Array<() => Promise<any[]>> = [];
+    const seedPage2Specs: PagedTaskSpec[] = [];
     for (let i = 0; i < page2PairsCount; i++) {
       const id = chosenSeedIds[i];
-      seedPage2Tasks.push(() => safeFetch(`/movie/${id}/recommendations`, { page: 2 }));
-      seedPage2Tasks.push(() => safeFetch(`/movie/${id}/similar`, { page: 2 }));
+      seedPage2Specs.push({
+        source: 'seed_graph',
+        key: `recommendations:${id}`,
+        page: 2,
+        endpoint: `/movie/${id}/recommendations`,
+        params: { page: 2 },
+      });
+      seedPage2Specs.push({
+        source: 'seed_graph',
+        key: `similar:${id}`,
+        page: 2,
+        endpoint: `/movie/${id}/similar`,
+        params: { page: 2 },
+      });
     }
 
-    const seedQueryTasks = [...seedPage1Tasks, ...seedPage2Tasks];
+    const seedSpecs = [...seedPage1Specs, ...seedPage2Specs];
+
+    const runSpec = async (spec: PagedTaskSpec): Promise<ExecutedPagedTask> => ({
+      spec,
+      outcome: await safeFetchPaged(spec.endpoint, spec.params, spec.page),
+    });
 
     // Guaranteed budget promises first: era, vibe, hidden-gem, base, then seed queries
-    const eraPromises = eraQueryTasks.map((t) => t());
-    const vibePromises = vibeQueryTasks.map((t) => t());
-    const hiddenGemPromises = hiddenGemQueryTasks.map((t) => t());
-    const basePromises = baseQueryTasks.map((t) => t());
-    const seedGraphPromises = seedQueryTasks.map((t) => t());
+    const eraPromises = eraSpecs.map(runSpec);
+    const vibePromises = vibeSpecs.map(runSpec);
+    const hiddenGemPromises = hiddenGemSpecs.map(runSpec);
+    const basePromises = baseSpecs.map(runSpec);
+    const seedGraphPromises = seedSpecs.map(runSpec);
 
     const allTaskPromises = [
       ...eraPromises,
@@ -1009,7 +1308,7 @@ export async function generateCandidates(
     }
 
     // Execute all scheduled tasks with concurrency and ceiling limits
-    const [seedGraphArrays, hiddenGemArrays, eraArrays, vibeArrays, baseArrays] = await Promise.all([
+    const [seedGraphExecs, hiddenGemExecs, eraExecs, vibeExecs, baseExecs] = await Promise.all([
       Promise.all(seedGraphPromises),
       Promise.all(hiddenGemPromises),
       Promise.all(eraPromises),
@@ -1032,65 +1331,49 @@ export async function generateCandidates(
       throw callerSignal.reason || new DOMException('The operation was aborted', 'AbortError');
     }
 
-    const seedResults = seedGraphArrays.flat();
-    const hiddenGemResults = hiddenGemArrays.flat();
-    const baseResults = baseArrays.flat();
+    const cursorMap = new Map<string, SourceCursor>();
+    const recordCursors = (execs: ExecutedPagedTask[]) => {
+      for (const { spec, outcome } of execs) {
+        const mapKey = `${spec.source}::${spec.key}`;
+        const merged = mergeCursorOutcome(
+          cursorMap.get(mapKey),
+          spec.source,
+          spec.key,
+          spec.page,
+          outcome
+        );
+        if (merged) {
+          cursorMap.set(mapKey, merged);
+        }
+      }
+    };
 
-    // Deduplication & source tagging
+    recordCursors(seedGraphExecs);
+    recordCursors(hiddenGemExecs);
+    recordCursors(eraExecs);
+    recordCursors(vibeExecs);
+    recordCursors(baseExecs);
+
+    const cursors = Array.from(cursorMap.values());
+
+    const seedResults = seedGraphExecs.flatMap((e) => e.outcome.results);
+    const hiddenGemResults = hiddenGemExecs.flatMap((e) => e.outcome.results);
+    const baseResults = baseExecs.flatMap((e) => e.outcome.results);
+
     const excludeSet = new Set<number>(options.excludeIds);
     for (const r of ratingsList) {
       excludeSet.add(r.movieId);
     }
 
-    const candidateMap = new Map<number, Candidate>();
-
-    const addRawItem = (m: any, source: CandidateSource, isSeedNeighbour: boolean) => {
-      if (!m || !m.id || !m.poster_path) return;
-      if (excludeSet.has(m.id)) return;
-      if (options.minVoteAverage && (m.vote_average || 0) < options.minVoteAverage) return;
-
-      const existing = candidateMap.get(m.id);
-      if (existing) {
-        if (!existing.sources.includes(source)) {
-          existing.sources.push(source);
-        }
-        if (isSeedNeighbour) {
-          existing.seedNeighbour = true;
-        }
-      } else {
-        const movie: Movie = {
-          id: m.id,
-          title: m.title || '',
-          original_title: m.original_title,
-          overview: m.overview || '',
-          poster_path: m.poster_path,
-          backdrop_path: m.backdrop_path || null,
-          release_date: m.release_date || '',
-          vote_average: m.vote_average || 0,
-          vote_count: m.vote_count || 0,
-          genre_ids: m.genre_ids || [],
-          genres: (m.genre_ids || []).map((gid: number) => ({
-            id: gid,
-            name: GENRE_MAP[gid] || 'Other',
-          })),
-        };
-        candidateMap.set(m.id, {
-          movie,
-          sources: [source],
-          seedNeighbour: isSeedNeighbour,
-        });
-      }
-    };
-
     // Interleave streams to ensure a rich balance of eras, vibes, baseline, seeds, hidden gems, and creator graph
-    const streams = [
-      ...eraArrays.map((items) => ({
-        items,
+    const streams: CandidateStream[] = [
+      ...eraExecs.map((e) => ({
+        items: e.outcome.results,
         source: 'era' as CandidateSource,
         isSeed: false,
       })),
-      ...vibeArrays.map((items) => ({
-        items,
+      ...vibeExecs.map((e) => ({
+        items: e.outcome.results,
         source: 'vibe' as CandidateSource,
         isSeed: false,
       })),
@@ -1099,22 +1382,148 @@ export async function generateCandidates(
       { items: hiddenGemResults, source: 'hidden_gem' as CandidateSource, isSeed: false },
       { items: creatorGraphResults, source: 'creator_graph' as CandidateSource, isSeed: false },
     ];
-    const maxLen = Math.max(0, ...streams.map((s) => s.items.length));
 
-    for (let i = 0; i < maxLen; i++) {
-      for (const stream of streams) {
-        if (i < stream.items.length) {
-          addRawItem(stream.items[i], stream.source, stream.isSeed);
-        }
-      }
-    }
-
-    const rawCandidates = Array.from(candidateMap.values());
-    return applyFirst40CapAndFloors(rawCandidates, options);
+    const rawCandidates = buildCandidatesFromStreams(streams, excludeSet, options.minVoteAverage);
+    const candidates = applyFirst40CapAndFloors(rawCandidates, options);
+    options.onCursors?.(cursors);
+    return { candidates, cursors };
   } finally {
     if (timeoutId !== undefined) {
       clearTimeout(timeoutId);
     }
+    if (callerSignal) {
+      callerSignal.removeEventListener('abort', onCallerAbort);
+    }
+    internalController.abort();
+    limiter.dispose();
+  }
+}
+
+export async function generateCandidates(
+  userRatings: UserRating[] | Record<number, UserRating> = [],
+  options: CandidateOptions = {},
+  signal?: AbortSignal
+): Promise<Candidate[]> {
+  const { candidates } = await generateCandidatesWithCursors(userRatings, options, signal);
+  return candidates;
+}
+
+/**
+ * Pulls the next page from non-exhausted cursors (seed_graph first),
+ * bounded by at most 20 requests and 6 in-flight, deduplicated and
+ * excluding rated and caller-excluded movie IDs.
+ */
+export async function loadMoreCandidates(
+  cursors: SourceCursor[],
+  userRatings: UserRating[] | Record<number, UserRating> = [],
+  excludeIds?: Set<number> | Iterable<number>,
+  signal?: AbortSignal
+): Promise<GenerateCandidatesResult> {
+  if (signal?.aborted) {
+    throw signal.reason || new DOMException('The operation was aborted', 'AbortError');
+  }
+
+  const clonedCursors = (Array.isArray(cursors) ? cursors : []).map((c) => ({ ...c }));
+  if (clonedCursors.length === 0) {
+    return { candidates: [], cursors: [] };
+  }
+
+  const indexedActive = clonedCursors
+    .map((cursor, index) => ({
+      cursor,
+      index,
+      query: !cursor.exhausted ? parseCursorQuery(cursor) : null,
+    }))
+    .filter(
+      (entry): entry is { cursor: SourceCursor; index: number; query: NonNullable<ReturnType<typeof parseCursorQuery>> } =>
+        !entry.cursor.exhausted && entry.query !== null
+    );
+
+  if (indexedActive.length === 0) {
+    return { candidates: [], cursors: clonedCursors };
+  }
+
+  // Prioritize seed_graph cursors first, preserving relative order within each group
+  const prioritized = [
+    ...indexedActive.filter((e) => e.cursor.source === 'seed_graph'),
+    ...indexedActive.filter((e) => e.cursor.source !== 'seed_graph'),
+  ].slice(0, MAX_REQUESTS_PER_LOAD_MORE);
+
+  const callerSignal = signal;
+  const internalController = new AbortController();
+  const internalSignal = internalController.signal;
+
+  const onCallerAbort = () => {
+    internalController.abort(
+      callerSignal?.reason || new DOMException('The operation was aborted', 'AbortError')
+    );
+  };
+  if (callerSignal) {
+    callerSignal.addEventListener('abort', onCallerAbort, { once: true });
+  }
+
+  const limiter = new RequestLimiter(internalSignal, 6, MAX_REQUESTS_PER_LOAD_MORE);
+
+  try {
+    const ratingsList = normalizeRatingsList(userRatings);
+    const safeFetchPaged = createSafeFetchPaged(limiter, internalSignal, callerSignal);
+
+    const taskPromises = prioritized.map(async (entry) => ({
+      entry,
+      outcome: await safeFetchPaged(
+        entry.query.endpoint,
+        entry.query.params,
+        Math.floor(entry.cursor.nextPage)
+      ),
+    }));
+    for (const p of taskPromises) {
+      p.catch(() => {});
+    }
+
+    const completed = await Promise.all(taskPromises);
+
+    if (callerSignal?.aborted) {
+      throw callerSignal.reason || new DOMException('The operation was aborted', 'AbortError');
+    }
+
+    const executedOutcomes = completed.filter((c) => c.outcome.executed);
+    if (executedOutcomes.length > 0 && !executedOutcomes.some((c) => c.outcome.succeeded)) {
+      const firstError = executedOutcomes.find((c) => c.outcome.error !== undefined)?.outcome.error;
+      throw firstError instanceof Error
+        ? firstError
+        : new Error('Failed to load more recommendations');
+    }
+
+    const streams: CandidateStream[] = [];
+    for (const { entry, outcome } of completed) {
+      const updated = mergeCursorOutcome(
+        entry.cursor,
+        entry.cursor.source,
+        entry.cursor.key,
+        Math.floor(entry.cursor.nextPage),
+        outcome
+      );
+      if (updated) {
+        clonedCursors[entry.index] = updated;
+      }
+      if (outcome.results.length > 0) {
+        streams.push({
+          items: outcome.results,
+          source: entry.cursor.source,
+          isSeed: entry.cursor.source === 'seed_graph',
+        });
+      }
+    }
+
+    const excludeSet = new Set<number>(excludeIds ?? []);
+    for (const r of ratingsList) {
+      excludeSet.add(r.movieId);
+    }
+
+    const candidates = buildCandidatesFromStreams(streams, excludeSet);
+    // Same credits/keywords enrichment as the first page (CIN-22), on its own bounded budget.
+    return { candidates: await enrichCandidates(candidates, {}, signal), cursors: clonedCursors };
+  } finally {
     if (callerSignal) {
       callerSignal.removeEventListener('abort', onCallerAbort);
     }
