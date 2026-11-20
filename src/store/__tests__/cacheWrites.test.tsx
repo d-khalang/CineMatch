@@ -297,9 +297,16 @@ describe('Store cache writes and StrictMode resilience (CIN-50)', () => {
     safeRemoveItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS);
     expect(readRecommendationCache()).toBeNull();
 
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+
     act(() => {
       result.current.dismissRecommendation(1);
     });
+
+    const cacheWrites = setItemSpy.mock.calls.filter(
+      ([key]) => key === STORAGE_KEYS.CACHED_RECOMMENDATIONS
+    );
+    expect(cacheWrites).toHaveLength(1);
 
     expect(result.current.recommendations).toHaveLength(1);
     expect(result.current.recommendations[0].movie.id).toBe(2);
@@ -340,9 +347,16 @@ describe('Store cache writes and StrictMode resilience (CIN-50)', () => {
     safeSetItem(STORAGE_KEYS.CACHED_RECOMMENDATIONS, 'not-valid-json{{{');
     expect(readRecommendationCache()).toBeNull();
 
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+
     act(() => {
       result.current.dismissRecommendation(1);
     });
+
+    const cacheWrites = setItemSpy.mock.calls.filter(
+      ([key]) => key === STORAGE_KEYS.CACHED_RECOMMENDATIONS
+    );
+    expect(cacheWrites).toHaveLength(1);
 
     expect(result.current.recommendations).toHaveLength(1);
     expect(result.current.recommendations[0].movie.id).toBe(2);
@@ -603,7 +617,7 @@ describe('Store cache writes and StrictMode resilience (CIN-50)', () => {
     expect(remountResult.current.recommendations).toHaveLength(0);
   });
 
-  it('invalid cache with non-finite or NaN numeric fields is rejected and replaced on dismiss', () => {
+  it('cache with non-finite or malformed auxiliary fields still hydrates valid recommendations and filters invalid items', () => {
     safeSetItem(
       STORAGE_KEYS.CACHED_RECOMMENDATIONS,
       JSON.stringify({
@@ -614,13 +628,18 @@ describe('Store cache writes and StrictMode resilience (CIN-50)', () => {
       })
     );
 
-    // Non-numeric generatedAt drops the cache entirely
-    expect(readRecommendationCache()).toBeNull();
+    // Non-numeric generatedAt/ratedCount do not drop valid recommendations
+    const hydrated = readRecommendationCache();
+    expect(hydrated).not.toBeNull();
+    expect(hydrated?.recommendations).toHaveLength(2);
+    expect(hydrated?.generatedAt).toBe(0);
+    expect(hydrated?.usedProvider).toBe('gemini');
+    expect(hydrated?.ratedCount).toBeUndefined();
 
     const { result, unmount } = renderHook(() => useMovieStore(), { wrapper: strictWrapper });
-    expect(result.current.recommendations).toHaveLength(0);
+    expect(result.current.recommendations).toHaveLength(2);
 
-    // Movie with non-numeric id is rejected by cache validation
+    // Movie with non-numeric id is filtered out while preserving the cache container
     safeSetItem(
       STORAGE_KEYS.CACHED_RECOMMENDATIONS,
       JSON.stringify({
@@ -629,12 +648,17 @@ describe('Store cache writes and StrictMode resilience (CIN-50)', () => {
         usedProvider: 'gemini',
       })
     );
-    expect(readRecommendationCache()).toBeNull();
+    const filtered = readRecommendationCache();
+    expect(filtered).toEqual({
+      recommendations: [],
+      generatedAt: 1000,
+      usedProvider: 'gemini',
+    });
     unmount();
   });
 
-  it('cache with missing required fields (usedProvider or recommendations) is dropped entirely', () => {
-    // Missing usedProvider
+  it('cache defaults missing usedProvider to empty string and drops only when recommendations is missing or not an array', () => {
+    // Missing usedProvider defaults to ''
     safeSetItem(
       STORAGE_KEYS.CACHED_RECOMMENDATIONS,
       JSON.stringify({
@@ -642,7 +666,10 @@ describe('Store cache writes and StrictMode resilience (CIN-50)', () => {
         generatedAt: 1000,
       })
     );
-    expect(readRecommendationCache()).toBeNull();
+    const withoutProvider = readRecommendationCache();
+    expect(withoutProvider).not.toBeNull();
+    expect(withoutProvider?.usedProvider).toBe('');
+    expect(withoutProvider?.recommendations).toHaveLength(2);
 
     // Missing recommendations
     safeSetItem(
