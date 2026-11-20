@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { rankCandidates } from '../rankCandidates';
+import { mixForSerendipityLevel } from '../scoring';
 import { annotateCandidateMovies, toCandidates } from '../candidateMovies';
-import type { Candidate } from '../types';
+import type { BucketMix, Candidate } from '../types';
 import type { Movie, UserRating } from '../../../types';
 
 function makeCandidate(
@@ -317,5 +318,54 @@ describe('rankCandidates (unit)', () => {
     ]);
     expect(reconstructed.sources).toEqual([]);
     expect(reconstructed.seedNeighbour).toBe(false);
+  });
+
+  it('supports optional adaptMix: increases wildcard count when mix shifts upward and leaves output identical without it', () => {
+    const pool: Candidate[] = Array.from({ length: 30 }, (_, idx) => {
+      const id = idx + 1;
+      const isExplorer = idx >= 20;
+      return makeCandidate(
+        id,
+        {
+          genres: isExplorer
+            ? [{ id: 18, name: 'Drama' }, { id: 37, name: 'Western' }]
+            : [{ id: 18, name: 'Drama' }, { id: 80, name: 'Crime' }],
+          director: isExplorer ? `Explorer Director ${id}` : 'Jane Director',
+          release_date: isExplorer ? '1970-01-01' : '2015-06-01',
+          vote_average: 8.2,
+          vote_count: isExplorer ? 200 + idx : 20000 - idx * 100,
+        },
+        isExplorer ? ['hidden_gem'] : ['seed_graph'],
+        !isExplorer
+      );
+    });
+
+    const baseline = rankCandidates(pool, ratings, { serendipityLevel: 30, size: 20 });
+    const explicitUndefined = rankCandidates(pool, ratings, {
+      serendipityLevel: 30,
+      size: 20,
+      adaptMix: undefined,
+    });
+    expect(explicitUndefined).toEqual(baseline);
+
+    const adaptSpy = vi.fn((base: BucketMix): BucketMix => ({
+      safe_bet: base.safe_bet - 0.1,
+      stretch: base.stretch,
+      wildcard: base.wildcard + 0.1,
+    }));
+
+    const adapted = rankCandidates(pool, ratings, {
+      serendipityLevel: 30,
+      size: 20,
+      adaptMix: adaptSpy,
+    });
+
+    expect(adaptSpy).toHaveBeenCalledTimes(1);
+    expect(adaptSpy).toHaveBeenCalledWith(mixForSerendipityLevel(30));
+
+    const baselineWildcards = baseline.filter((r) => r.bucket === 'wildcard').length;
+    const adaptedWildcards = adapted.filter((r) => r.bucket === 'wildcard').length;
+    expect(adaptedWildcards).toBeGreaterThanOrEqual(baselineWildcards);
+    expect(adaptedWildcards).toBeGreaterThan(baselineWildcards);
   });
 });

@@ -15,6 +15,16 @@ import {
   forgetShown,
   demoteRecentlyShown,
 } from '../services/recommendation/shownHistory';
+import {
+  loadOutcomeLog,
+  saveOutcomeLog,
+  logShown,
+  recordOutcome,
+  resetOutcomeLog,
+  explorationSummary as computeExplorationSummary,
+  adaptiveMix,
+  type ExplorationSummary,
+} from '../services/recommendation/outcomeLog';
 import { recsSettingsFingerprint } from '../services/recommendation/settingsFingerprint';
 import { credentialStore } from '../services/credentialStore';
 import { credentialCoordinator } from '../services/credentialCoordinator';
@@ -143,6 +153,8 @@ interface MovieStoreContextType {
   showToast: (msg: string, action?: ToastAction) => void;
   clearToast: () => void;
   storageWarning: string | null;
+  explorationSummary: ExplorationSummary;
+  resetExploration: () => void;
 }
 
 const MovieStoreContext = createContext<MovieStoreContextType | null>(null);
@@ -372,6 +384,9 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const toastMessage = toast?.message ?? null;
   const toastAction = toast?.action ?? null;
   const [storageStatus, setStorageStatus] = useState(() => getStorageStatus());
+  const [explorationSummary, setExplorationSummary] = useState<ExplorationSummary>(() =>
+    computeExplorationSummary(loadOutcomeLog())
+  );
 
   // References for request racing and cancellation
   const activeGenerationIdRef = useRef<number>(0);
@@ -594,6 +609,10 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       [movie.id]: initialRating,
     }));
 
+    const nextOutcomeLog = recordOutcome(loadOutcomeLog(), movie.id, rating, Date.now());
+    saveOutcomeLog(nextOutcomeLog);
+    setExplorationSummary(computeExplorationSummary(nextOutcomeLog));
+
     // Asynchronously enrich director/keywords if missing and TMDB is configured
     if (!movie.director && movie.id && credentialStore.hasTmdb()) {
       try {
@@ -803,6 +822,11 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     cancelGeneration();
     setAiSettings((prev) => ({ ...prev, ...newPartial }));
   }, [cancelGeneration]);
+
+  const resetExploration = useCallback(() => {
+    resetOutcomeLog();
+    setExplorationSummary({ hits: 0, total: 0 });
+  }, []);
 
   const importRatingsList = useCallback((newRatings: UserRating[]) => {
     cancelGeneration();
@@ -1111,6 +1135,13 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const currentRatedCount = userRatingsList.length;
 
         finalRecommendations = applyShownMemory(finalRecommendations, timestamp);
+        const nextOutcomeLog = logShown(
+          loadOutcomeLog(),
+          finalRecommendations.map((r) => ({ movieId: r.movie.id, bucket: r.bucket })),
+          timestamp
+        );
+        saveOutcomeLog(nextOutcomeLog);
+        setExplorationSummary(computeExplorationSummary(nextOutcomeLog));
         lastCursorsRef.current = { generationId, cursors: capturedCursors };
         setLoadMoreStatus('idle');
         recommendationsRef.current = finalRecommendations;
@@ -1220,6 +1251,7 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         rejectedFilms: selectRejectedFilms(hiddenFilmsRef.current),
         excludeIds: latestExcludeIds,
         size: 15,
+        adaptMix: (base) => adaptiveMix(base, loadOutcomeLog()),
       });
 
       const existingIds = new Set(recommendationsRef.current.map((r) => r.movie.id));
@@ -1238,10 +1270,18 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           rank: startRank + idx,
         }));
         const nextRecs = [...currentRecs, ...appended];
+        const timestamp = Date.now();
 
         recommendationsRef.current = nextRecs;
         setRecommendations(nextRecs);
-        rememberShown(appended.map((rec) => rec.movie.id), Date.now());
+        rememberShown(appended.map((rec) => rec.movie.id), timestamp);
+        const nextOutcomeLog = logShown(
+          loadOutcomeLog(),
+          appended.map((r) => ({ movieId: r.movie.id, bucket: r.bucket })),
+          timestamp
+        );
+        saveOutcomeLog(nextOutcomeLog);
+        setExplorationSummary(computeExplorationSummary(nextOutcomeLog));
 
         const cached = readRecommendationCache();
         if (cached) {
@@ -1389,6 +1429,8 @@ export const MovieStoreProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         showToast,
         clearToast,
         storageWarning,
+        explorationSummary,
+        resetExploration,
       }}
     >
       {children}
